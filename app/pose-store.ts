@@ -1,31 +1,25 @@
-export const POSE_LANDMARK_COUNT = 33;
-export const POSE_SAMPLE_RATE = 5;
-export const POSE_FRAME_STRIDE = 3 + POSE_LANDMARK_COUNT * 4;
+export const BODY_LANDMARK_COUNT = 22;
+export const HAND_LANDMARK_COUNT = 21;
+export const MOTION_SAMPLE_RATE = 5;
 
-export const POSE_LANDMARK_NAMES = [
-  "nose",
-  "left_eye_inner",
-  "left_eye",
-  "left_eye_outer",
-  "right_eye_inner",
-  "right_eye",
-  "right_eye_outer",
-  "left_ear",
-  "right_ear",
-  "mouth_left",
-  "mouth_right",
+// time, body/full-body flags, head yaw/pitch/roll,
+// left/right hand flags and confidence, 22 body points × 4, 42 hand points × 3.
+export const MOTION_FRAME_STRIDE =
+  10 + BODY_LANDMARK_COUNT * 4 + HAND_LANDMARK_COUNT * 2 * 3;
+
+export const BODY_LANDMARK_NAMES = [
   "left_shoulder",
   "right_shoulder",
   "left_elbow",
   "right_elbow",
   "left_wrist",
   "right_wrist",
-  "left_pinky",
-  "right_pinky",
-  "left_index",
-  "right_index",
-  "left_thumb",
-  "right_thumb",
+  "left_pinky_anchor",
+  "right_pinky_anchor",
+  "left_index_anchor",
+  "right_index_anchor",
+  "left_thumb_anchor",
+  "right_thumb_anchor",
   "left_hip",
   "right_hip",
   "left_knee",
@@ -38,22 +32,49 @@ export const POSE_LANDMARK_NAMES = [
   "right_foot_index",
 ] as const;
 
-export type PoseSessionRecord = {
+export const HAND_LANDMARK_NAMES = [
+  "wrist",
+  "thumb_cmc",
+  "thumb_mcp",
+  "thumb_ip",
+  "thumb_tip",
+  "index_mcp",
+  "index_pip",
+  "index_dip",
+  "index_tip",
+  "middle_mcp",
+  "middle_pip",
+  "middle_dip",
+  "middle_tip",
+  "ring_mcp",
+  "ring_pip",
+  "ring_dip",
+  "ring_tip",
+  "pinky_mcp",
+  "pinky_pip",
+  "pinky_dip",
+  "pinky_tip",
+] as const;
+
+export type MotionSessionRecord = {
   id: string;
   startedAt: number;
   endedAt: number | null;
   frameCount: number;
   detectedFrameCount: number;
   fullBodyFrameCount: number;
+  handDetectedFrameCount: number;
   storageBytes: number;
   sampleRate: number;
-  landmarkCount: number;
+  bodyLandmarkCount: number;
+  handLandmarkCount: number;
   coordinateSpace: "normalized_image";
   mirroredPreview: boolean;
   source: "local_camera";
+  faceLandmarksStored: false;
 };
 
-export type PoseChunkRecord = {
+export type MotionChunkRecord = {
   id: string;
   sessionId: string;
   startFrame: number;
@@ -62,10 +83,10 @@ export type PoseChunkRecord = {
   data: ArrayBuffer;
 };
 
-const DB_NAME = "memory-guard-pose-v1";
+const DB_NAME = "memory-guard-motion-v2";
 const DB_VERSION = 1;
-const SESSION_STORE = "pose_sessions";
-const CHUNK_STORE = "pose_chunks";
+const SESSION_STORE = "motion_sessions";
+const CHUNK_STORE = "motion_chunks";
 
 function requestResult<T>(request: IDBRequest<T>) {
   return new Promise<T>((resolve, reject) => {
@@ -82,7 +103,7 @@ function transactionDone(transaction: IDBTransaction) {
   });
 }
 
-export function openPoseDatabase() {
+export function openMotionDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
@@ -102,22 +123,25 @@ export function openPoseDatabase() {
   });
 }
 
-export async function createPoseSession(id: string, startedAt: number) {
-  const database = await openPoseDatabase();
+export async function createMotionSession(id: string, startedAt: number) {
+  const database = await openMotionDatabase();
   const transaction = database.transaction(SESSION_STORE, "readwrite");
-  const record: PoseSessionRecord = {
+  const record: MotionSessionRecord = {
     id,
     startedAt,
     endedAt: null,
     frameCount: 0,
     detectedFrameCount: 0,
     fullBodyFrameCount: 0,
+    handDetectedFrameCount: 0,
     storageBytes: 0,
-    sampleRate: POSE_SAMPLE_RATE,
-    landmarkCount: POSE_LANDMARK_COUNT,
+    sampleRate: MOTION_SAMPLE_RATE,
+    bodyLandmarkCount: BODY_LANDMARK_COUNT,
+    handLandmarkCount: HAND_LANDMARK_COUNT,
     coordinateSpace: "normalized_image",
     mirroredPreview: true,
     source: "local_camera",
+    faceLandmarksStored: false,
   };
   transaction.objectStore(SESSION_STORE).put(record);
   await transactionDone(transaction);
@@ -125,21 +149,22 @@ export async function createPoseSession(id: string, startedAt: number) {
   return record;
 }
 
-export async function appendPoseChunk(
-  session: PoseSessionRecord,
+export async function appendMotionChunk(
+  session: MotionSessionRecord,
   startFrame: number,
   data: Float32Array,
   detectedFrames: number,
   fullBodyFrames: number,
+  handDetectedFrames: number,
 ) {
-  const database = await openPoseDatabase();
+  const database = await openMotionDatabase();
   const transaction = database.transaction(
     [SESSION_STORE, CHUNK_STORE],
     "readwrite",
   );
-  const frameCount = data.length / POSE_FRAME_STRIDE;
+  const frameCount = data.length / MOTION_FRAME_STRIDE;
   const storedBuffer = data.buffer.slice(0);
-  const chunk: PoseChunkRecord = {
+  const chunk: MotionChunkRecord = {
     id: `${session.id}:${startFrame}`,
     sessionId: session.id,
     startFrame,
@@ -147,11 +172,13 @@ export async function appendPoseChunk(
     createdAt: Date.now(),
     data: storedBuffer,
   };
-  const updatedSession: PoseSessionRecord = {
+  const updatedSession: MotionSessionRecord = {
     ...session,
     frameCount: session.frameCount + frameCount,
     detectedFrameCount: session.detectedFrameCount + detectedFrames,
     fullBodyFrameCount: session.fullBodyFrameCount + fullBodyFrames,
+    handDetectedFrameCount:
+      session.handDetectedFrameCount + handDetectedFrames,
     storageBytes: session.storageBytes + storedBuffer.byteLength,
   };
   transaction.objectStore(CHUNK_STORE).put(chunk);
@@ -161,11 +188,11 @@ export async function appendPoseChunk(
   return updatedSession;
 }
 
-export async function finishPoseSession(
-  session: PoseSessionRecord,
+export async function finishMotionSession(
+  session: MotionSessionRecord,
   endedAt: number,
 ) {
-  const database = await openPoseDatabase();
+  const database = await openMotionDatabase();
   const transaction = database.transaction(SESSION_STORE, "readwrite");
   const completed = { ...session, endedAt };
   transaction.objectStore(SESSION_STORE).put(completed);
@@ -174,10 +201,10 @@ export async function finishPoseSession(
   return completed;
 }
 
-export async function listPoseSessions() {
-  const database = await openPoseDatabase();
+export async function listMotionSessions() {
+  const database = await openMotionDatabase();
   const transaction = database.transaction(SESSION_STORE, "readonly");
-  const sessions = await requestResult<PoseSessionRecord[]>(
+  const sessions = await requestResult<MotionSessionRecord[]>(
     transaction.objectStore(SESSION_STORE).getAll(),
   );
   await transactionDone(transaction);
@@ -185,10 +212,10 @@ export async function listPoseSessions() {
   return sessions.sort((a, b) => b.startedAt - a.startedAt);
 }
 
-async function getPoseChunks(sessionId: string) {
-  const database = await openPoseDatabase();
+async function getMotionChunks(sessionId: string) {
+  const database = await openMotionDatabase();
   const transaction = database.transaction(CHUNK_STORE, "readonly");
-  const chunks = await requestResult<PoseChunkRecord[]>(
+  const chunks = await requestResult<MotionChunkRecord[]>(
     transaction.objectStore(CHUNK_STORE).index("sessionId").getAll(sessionId),
   );
   await transactionDone(transaction);
@@ -196,30 +223,49 @@ async function getPoseChunks(sessionId: string) {
   return chunks.sort((a, b) => a.startFrame - b.startFrame);
 }
 
-export async function downloadPoseSession(session: PoseSessionRecord) {
-  const chunks = await getPoseChunks(session.id);
+export async function downloadMotionSession(session: MotionSessionRecord) {
+  const chunks = await getMotionChunks(session.id);
   const frames: number[][] = [];
   for (const chunk of chunks) {
     const values = new Float32Array(chunk.data);
-    for (let offset = 0; offset < values.length; offset += POSE_FRAME_STRIDE) {
-      frames.push(Array.from(values.subarray(offset, offset + POSE_FRAME_STRIDE)));
+    for (let offset = 0; offset < values.length; offset += MOTION_FRAME_STRIDE) {
+      frames.push(
+        Array.from(values.subarray(offset, offset + MOTION_FRAME_STRIDE)),
+      );
     }
   }
 
   const dataset = {
-    format: "memory-guard-pose-v1",
-    description: "Local-camera pose coordinates only; no video or audio.",
+    format: "memory-guard-motion-v2",
+    description:
+      "Body, head-direction and detailed hand coordinates only; no facial landmarks, video or audio.",
     schema: {
-      sample_rate_hz: POSE_SAMPLE_RATE,
+      sample_rate_hz: MOTION_SAMPLE_RATE,
       coordinate_space: "normalized_image",
       mirrored_preview: true,
       frame_layout: [
         "relative_time_ms",
-        "pose_detected_0_or_1",
+        "body_detected_0_or_1",
         "full_body_visible_0_or_1",
-        "33_landmarks_repeated_as_x_y_z_visibility",
+        "head_yaw_normalized",
+        "head_pitch_normalized",
+        "head_roll_radians",
+        "left_hand_detected_0_or_1",
+        "right_hand_detected_0_or_1",
+        "left_hand_confidence",
+        "right_hand_confidence",
+        "22_body_landmarks_repeated_as_x_y_z_visibility",
+        "21_left_hand_landmarks_repeated_as_x_y_z",
+        "21_right_hand_landmarks_repeated_as_x_y_z",
       ],
-      landmark_names: POSE_LANDMARK_NAMES,
+      privacy: {
+        facial_landmarks_stored: false,
+        head_output: "direction_only",
+        video_stored: false,
+        audio_stored: false,
+      },
+      body_landmark_names: BODY_LANDMARK_NAMES,
+      hand_landmark_names: HAND_LANDMARK_NAMES,
     },
     session,
     frames,
@@ -230,7 +276,7 @@ export async function downloadPoseSession(session: PoseSessionRecord) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `memory-guard-pose-${new Date(session.startedAt).toISOString()}.json`;
+  link.download = `memory-guard-motion-${new Date(session.startedAt).toISOString()}.json`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

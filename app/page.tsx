@@ -1,17 +1,22 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { NormalizedLandmark, PoseLandmarker } from "@mediapipe/tasks-vision";
+import type {
+  HandLandmarker,
+  NormalizedLandmark,
+  PoseLandmarker,
+} from "@mediapipe/tasks-vision";
 import {
-  POSE_FRAME_STRIDE,
-  POSE_LANDMARK_COUNT,
-  POSE_SAMPLE_RATE,
-  appendPoseChunk,
-  createPoseSession,
-  downloadPoseSession,
-  finishPoseSession,
-  listPoseSessions,
-  type PoseSessionRecord,
+  BODY_LANDMARK_COUNT,
+  HAND_LANDMARK_COUNT,
+  MOTION_FRAME_STRIDE,
+  MOTION_SAMPLE_RATE,
+  appendMotionChunk,
+  createMotionSession,
+  downloadMotionSession,
+  finishMotionSession,
+  listMotionSessions,
+  type MotionSessionRecord,
 } from "./pose-store";
 
 type View = "today" | "timeline" | "closing" | "care";
@@ -27,28 +32,58 @@ type TimelineEvent = {
   detail: string;
   kind: EventKind;
   poseSessionId?: string;
-  poseSnapshot?: number[];
+  motionSnapshot?: MotionSnapshot;
 };
 
 type PoseStats = {
   frames: number;
   detectedFrames: number;
   fullBodyFrames: number;
+  handDetectedFrames: number;
   storageBytes: number;
   startedAt: number | null;
 };
 
-const POSE_CONNECTIONS: Array<[number, number]> = [
-  [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8],
-  [9, 10], [11, 12], [11, 13], [13, 15], [15, 17], [15, 19],
+type HeadDirection = {
+  yaw: number;
+  pitch: number;
+  roll: number;
+  centerX: number;
+  centerY: number;
+};
+
+type HandState = {
+  left: NormalizedLandmark[] | null;
+  right: NormalizedLandmark[] | null;
+  leftScore: number;
+  rightScore: number;
+};
+
+type MotionSnapshot = {
+  body: number[];
+  leftHand: number[] | null;
+  rightHand: number[] | null;
+  head: HeadDirection;
+};
+
+const BODY_CONNECTIONS: Array<[number, number]> = [
+  [11, 12], [11, 13], [13, 15], [15, 17], [15, 19],
   [15, 21], [17, 19], [12, 14], [14, 16], [16, 18], [16, 20],
   [16, 22], [18, 20], [11, 23], [12, 24], [23, 24], [23, 25],
   [24, 26], [25, 27], [26, 28], [27, 29], [28, 30], [29, 31],
   [30, 32], [27, 31], [28, 32],
 ];
 
-const FULL_BODY_LANDMARKS = [0, 11, 12, 23, 24, 25, 26, 27, 28];
-const CHUNK_FRAME_COUNT = POSE_SAMPLE_RATE * 30;
+const HAND_CONNECTIONS: Array<[number, number]> = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16],
+  [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
+];
+
+const FULL_BODY_LANDMARKS = [7, 8, 11, 12, 23, 24, 25, 26, 27, 28];
+const CHUNK_FRAME_COUNT = MOTION_SAMPLE_RATE * 30;
 
 const initialEvents: TimelineEvent[] = [
   {
@@ -149,26 +184,30 @@ function formatDuration(totalSeconds: number) {
   return `${minutes}:${seconds}`;
 }
 
-function drawSkeleton(
+function drawMotionSkeleton(
   canvas: HTMLCanvasElement,
-  landmarks: NormalizedLandmark[] | number[],
+  body: NormalizedLandmark[] | number[],
+  leftHand: NormalizedLandmark[] | number[] | null,
+  rightHand: NormalizedLandmark[] | number[] | null,
+  head: HeadDirection | null,
   fullBody: boolean,
 ) {
   const context = canvas.getContext("2d");
   if (!context) return;
   context.clearRect(0, 0, canvas.width, canvas.height);
 
-  const point = (index: number) => {
-    if (typeof landmarks[0] === "number") {
-      const flat = landmarks as number[];
+  const bodyPoint = (index: number) => {
+    if (typeof body[0] === "number") {
+      const flat = body as number[];
+      const storedIndex = index - 11;
       return {
-        x: flat[index * 4],
-        y: flat[index * 4 + 1],
-        z: flat[index * 4 + 2],
-        visibility: flat[index * 4 + 3],
+        x: flat[storedIndex * 4],
+        y: flat[storedIndex * 4 + 1],
+        z: flat[storedIndex * 4 + 2],
+        visibility: flat[storedIndex * 4 + 3],
       };
     }
-    return (landmarks as NormalizedLandmark[])[index];
+    return (body as NormalizedLandmark[])[index];
   };
 
   context.lineWidth = Math.max(3, canvas.width / 180);
@@ -178,9 +217,9 @@ function drawSkeleton(
   context.shadowColor = "rgba(8, 38, 32, 0.75)";
   context.shadowBlur = 8;
 
-  for (const [from, to] of POSE_CONNECTIONS) {
-    const start = point(from);
-    const end = point(to);
+  for (const [from, to] of BODY_CONNECTIONS) {
+    const start = bodyPoint(from);
+    const end = bodyPoint(to);
     if (!start || !end || start.visibility < 0.35 || end.visibility < 0.35) continue;
     context.beginPath();
     context.moveTo(start.x * canvas.width, start.y * canvas.height);
@@ -189,8 +228,8 @@ function drawSkeleton(
   }
 
   context.shadowBlur = 5;
-  for (let index = 0; index < POSE_LANDMARK_COUNT; index += 1) {
-    const landmark = point(index);
+  for (let index = 11; index < 33; index += 1) {
+    const landmark = bodyPoint(index);
     if (!landmark || landmark.visibility < 0.35) continue;
     context.beginPath();
     context.arc(
@@ -200,18 +239,94 @@ function drawSkeleton(
       0,
       Math.PI * 2,
     );
-    context.fillStyle = index === 0 ? "#ffffff" : fullBody ? "#b9ffdc" : "#ffe0aa";
+    context.fillStyle = fullBody ? "#b9ffdc" : "#ffe0aa";
     context.fill();
   }
+
+  if (head) {
+    const leftShoulder = bodyPoint(11);
+    const rightShoulder = bodyPoint(12);
+    const shoulderWidth = leftShoulder && rightShoulder
+      ? Math.abs(leftShoulder.x - rightShoulder.x) * canvas.width
+      : canvas.width * 0.12;
+    const radius = Math.max(14, shoulderWidth * 0.28);
+    const centerX = head.centerX * canvas.width;
+    const centerY = head.centerY * canvas.height;
+    context.shadowBlur = 8;
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = Math.max(3, canvas.width / 190);
+    context.beginPath();
+    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(centerX, centerY);
+    context.lineTo(
+      centerX + head.yaw * radius * 1.25,
+      centerY + head.pitch * radius * 1.25,
+    );
+    context.stroke();
+  }
+
+  const drawHand = (
+    hand: NormalizedLandmark[] | number[] | null,
+    color: string,
+  ) => {
+    if (!hand) return;
+    const handPoint = (index: number) => {
+      if (typeof hand[0] === "number") {
+        const flat = hand as number[];
+        return {
+          x: flat[index * 3],
+          y: flat[index * 3 + 1],
+          z: flat[index * 3 + 2],
+        };
+      }
+      return (hand as NormalizedLandmark[])[index];
+    };
+    context.strokeStyle = color;
+    context.fillStyle = color;
+    context.lineWidth = Math.max(2, canvas.width / 260);
+    context.shadowBlur = 6;
+    for (const [from, to] of HAND_CONNECTIONS) {
+      const start = handPoint(from);
+      const end = handPoint(to);
+      context.beginPath();
+      context.moveTo(start.x * canvas.width, start.y * canvas.height);
+      context.lineTo(end.x * canvas.width, end.y * canvas.height);
+      context.stroke();
+    }
+    for (let index = 0; index < HAND_LANDMARK_COUNT; index += 1) {
+      const landmark = handPoint(index);
+      context.beginPath();
+      context.arc(
+        landmark.x * canvas.width,
+        landmark.y * canvas.height,
+        Math.max(2, canvas.width / 230),
+        0,
+        Math.PI * 2,
+      );
+      context.fill();
+    }
+  };
+
+  drawHand(leftHand, "#74d9ff");
+  drawHand(rightHand, "#d9a0ff");
 }
 
-function PoseSnapshot({ points }: { points: number[] }) {
+function PoseSnapshot({ snapshot }: { snapshot: MotionSnapshot }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    drawSkeleton(canvasRef.current, points, true);
-  }, [points]);
+    drawMotionSkeleton(
+      canvasRef.current,
+      snapshot.body,
+      snapshot.leftHand,
+      snapshot.rightHand,
+      snapshot.head,
+      true,
+    );
+  }, [snapshot]);
 
   return <canvas ref={canvasRef} width={640} height={360} aria-label="기록된 스켈레톤 좌표" />;
 }
@@ -270,12 +385,15 @@ export default function Home() {
     frames: 0,
     detectedFrames: 0,
     fullBodyFrames: 0,
+    handDetectedFrames: 0,
     storageBytes: 0,
     startedAt: null,
   });
+  const [detectedHands, setDetectedHands] = useState(0);
+  const [headDirectionLabel, setHeadDirectionLabel] = useState("대기");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionCount, setSessionCount] = useState(0);
-  const [latestSession, setLatestSession] = useState<PoseSessionRecord | null>(null);
+  const [latestSession, setLatestSession] = useState<MotionSessionRecord | null>(null);
   const [events, setEvents] = useState<TimelineEvent[]>(initialEvents);
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
   const [toast, setToast] = useState("");
@@ -292,15 +410,25 @@ export default function Home() {
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const poseAnimationRef = useRef<number | null>(null);
   const trackingActiveRef = useRef(false);
   const lastDetectionTimeRef = useRef(0);
+  const lastHandDetectionTimeRef = useRef(0);
   const lastSampleTimeRef = useRef(0);
   const lastPoseRef = useRef<NormalizedLandmark[] | null>(null);
+  const lastHandsRef = useRef<HandState>({
+    left: null,
+    right: null,
+    leftScore: 0,
+    rightScore: 0,
+  });
+  const lastHeadDirectionRef = useRef<HeadDirection | null>(null);
   const poseBufferRef = useRef<number[]>([]);
   const chunkDetectedFramesRef = useRef(0);
   const chunkFullBodyFramesRef = useRef(0);
-  const poseSessionRef = useRef<PoseSessionRecord | null>(null);
+  const chunkHandFramesRef = useRef(0);
+  const poseSessionRef = useRef<MotionSessionRecord | null>(null);
   const poseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sessionPerformanceStartRef = useRef(0);
   const lastStatsUpdateRef = useRef(0);
@@ -310,6 +438,7 @@ export default function Home() {
     frames: 0,
     detectedFrames: 0,
     fullBodyFrames: 0,
+    handDetectedFrames: 0,
     storageBytes: 0,
     startedAt: null,
   });
@@ -330,7 +459,7 @@ export default function Home() {
   }, [cameraStatus, view]);
 
   useEffect(() => {
-    listPoseSessions()
+    listMotionSessions()
       .then((sessions) => {
         setSessionCount(sessions.length);
         setLatestSession(sessions[0] ?? null);
@@ -363,6 +492,7 @@ export default function Home() {
       }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       poseLandmarkerRef.current?.close();
+      handLandmarkerRef.current?.close();
     };
   }, []);
 
@@ -408,7 +538,7 @@ export default function Home() {
         await processingVideoRef.current.play();
       }
       setCameraStatus("connected");
-      setCameraMessage("전신 스켈레톤 모델을 준비하고 있어요…");
+      setCameraMessage("몸·머리 방향·손가락 추적 모델을 준비하고 있어요…");
       await startPoseTracking();
     } catch {
       setCameraStatus("error");
@@ -424,45 +554,79 @@ export default function Home() {
     setPoseStatus(nextStatus);
   }
 
-  async function ensurePoseLandmarker() {
-    if (poseLandmarkerRef.current) return poseLandmarkerRef.current;
+  async function ensureMotionLandmarkers() {
+    if (poseLandmarkerRef.current && handLandmarkerRef.current) return;
     updatePoseStatus("loading");
-    const { FilesetResolver, PoseLandmarker: PoseLandmarkerClass } = await import(
-      "@mediapipe/tasks-vision"
-    );
+    const {
+      FilesetResolver,
+      HandLandmarker: HandLandmarkerClass,
+      PoseLandmarker: PoseLandmarkerClass,
+    } = await import("@mediapipe/tasks-vision");
     const vision = await FilesetResolver.forVisionTasks("/mediapipe-wasm");
-    const baseOptions = {
+    const poseBaseOptions = {
       modelAssetPath: "/models/pose_landmarker_lite.task",
     };
+    const handBaseOptions = {
+      modelAssetPath: "/models/hand_landmarker.task",
+    };
 
-    try {
-      poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
-        vision,
-        {
-          baseOptions: { ...baseOptions, delegate: "GPU" },
-          runningMode: "VIDEO",
-          numPoses: 1,
-          minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-          outputSegmentationMasks: false,
-        },
-      );
-    } catch {
-      poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
-        vision,
-        {
-          baseOptions,
-          runningMode: "VIDEO",
-          numPoses: 1,
-          minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-          outputSegmentationMasks: false,
-        },
-      );
+    if (!poseLandmarkerRef.current) {
+      try {
+        poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
+          vision,
+          {
+            baseOptions: { ...poseBaseOptions, delegate: "GPU" },
+            runningMode: "VIDEO",
+            numPoses: 1,
+            minPoseDetectionConfidence: 0.5,
+            minPosePresenceConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+            outputSegmentationMasks: false,
+          },
+        );
+      } catch {
+        poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
+          vision,
+          {
+            baseOptions: poseBaseOptions,
+            runningMode: "VIDEO",
+            numPoses: 1,
+            minPoseDetectionConfidence: 0.5,
+            minPosePresenceConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+            outputSegmentationMasks: false,
+          },
+        );
+      }
     }
-    return poseLandmarkerRef.current;
+
+    if (!handLandmarkerRef.current) {
+      try {
+        handLandmarkerRef.current = await HandLandmarkerClass.createFromOptions(
+          vision,
+          {
+            baseOptions: { ...handBaseOptions, delegate: "GPU" },
+            runningMode: "VIDEO",
+            numHands: 2,
+            minHandDetectionConfidence: 0.45,
+            minHandPresenceConfidence: 0.45,
+            minTrackingConfidence: 0.45,
+          },
+        );
+      } catch {
+        handLandmarkerRef.current = await HandLandmarkerClass.createFromOptions(
+          vision,
+          {
+            baseOptions: handBaseOptions,
+            runningMode: "VIDEO",
+            numHands: 2,
+            minHandDetectionConfidence: 0.45,
+            minHandPresenceConfidence: 0.45,
+            minTrackingConfidence: 0.45,
+          },
+        );
+      }
+    }
   }
 
   function isFullBodyVisible(landmarks: NormalizedLandmark[]) {
@@ -479,7 +643,53 @@ export default function Home() {
     });
     if (!allRequiredVisible) return false;
     const ankleY = (landmarks[27].y + landmarks[28].y) / 2;
-    return ankleY - landmarks[0].y >= 0.5;
+    const headY = (landmarks[7].y + landmarks[8].y) / 2;
+    return ankleY - headY >= 0.5;
+  }
+
+  function getHeadDirection(
+    landmarks: NormalizedLandmark[],
+  ): HeadDirection | null {
+    const nose = landmarks[0];
+    const leftEar = landmarks[7];
+    const rightEar = landmarks[8];
+    const leftShoulder = landmarks[11];
+    const rightShoulder = landmarks[12];
+    if (
+      !nose ||
+      !leftEar ||
+      !rightEar ||
+      leftEar.visibility < 0.35 ||
+      rightEar.visibility < 0.35
+    ) {
+      return null;
+    }
+    const centerX = (leftEar.x + rightEar.x) / 2;
+    const centerY = (leftEar.y + rightEar.y) / 2;
+    const shoulderWidth = Math.max(
+      0.08,
+      Math.abs(leftShoulder.x - rightShoulder.x),
+    );
+    const clamp = (value: number) => Math.max(-1, Math.min(1, value));
+    return {
+      yaw: clamp((nose.x - centerX) / (shoulderWidth * 0.32)),
+      pitch: clamp((nose.y - centerY) / (shoulderWidth * 0.32)),
+      roll: Math.atan2(
+        rightEar.y - leftEar.y,
+        rightEar.x - leftEar.x,
+      ),
+      centerX,
+      centerY,
+    };
+  }
+
+  function describeHeadDirection(head: HeadDirection | null) {
+    if (!head) return "머리 방향 미확인";
+    if (head.pitch < -0.32) return "위를 보는 중";
+    if (head.pitch > 0.32) return "아래를 보는 중";
+    if (head.yaw < -0.3) return "왼쪽을 보는 중";
+    if (head.yaw > 0.3) return "오른쪽을 보는 중";
+    return "정면을 보는 중";
   }
 
   function flushPoseFrames() {
@@ -489,20 +699,23 @@ export default function Home() {
     const values = new Float32Array(poseBufferRef.current);
     const detectedFrames = chunkDetectedFramesRef.current;
     const fullBodyFrames = chunkFullBodyFramesRef.current;
+    const handDetectedFrames = chunkHandFramesRef.current;
     const sessionId = poseSessionRef.current.id;
     poseBufferRef.current = [];
     chunkDetectedFramesRef.current = 0;
     chunkFullBodyFramesRef.current = 0;
+    chunkHandFramesRef.current = 0;
 
     poseWriteQueueRef.current = poseWriteQueueRef.current.then(async () => {
       const session = poseSessionRef.current;
       if (!session || session.id !== sessionId) return;
-      const updated = await appendPoseChunk(
+      const updated = await appendMotionChunk(
         session,
         session.frameCount,
         values,
         detectedFrames,
         fullBodyFrames,
+        handDetectedFrames,
       );
       poseSessionRef.current = updated;
       setLatestSession(updated);
@@ -514,24 +727,50 @@ export default function Home() {
     timestamp: number,
     landmarks: NormalizedLandmark[] | null,
     fullBody: boolean,
+    head: HeadDirection | null,
+    hands: HandState,
   ) {
     const buffer = poseBufferRef.current;
     buffer.push(timestamp - sessionPerformanceStartRef.current);
     buffer.push(landmarks ? 1 : 0);
     buffer.push(fullBody ? 1 : 0);
+    buffer.push(head?.yaw ?? Number.NaN);
+    buffer.push(head?.pitch ?? Number.NaN);
+    buffer.push(head?.roll ?? Number.NaN);
+    buffer.push(hands.left ? 1 : 0);
+    buffer.push(hands.right ? 1 : 0);
+    buffer.push(hands.leftScore);
+    buffer.push(hands.rightScore);
 
     if (landmarks) {
-      for (let index = 0; index < POSE_LANDMARK_COUNT; index += 1) {
+      for (let index = 11; index < 33; index += 1) {
         const point = landmarks[index];
         buffer.push(point.x, point.y, point.z, point.visibility);
       }
       chunkDetectedFramesRef.current += 1;
     } else {
-      for (let index = 0; index < POSE_LANDMARK_COUNT * 4; index += 1) {
+      for (let index = 0; index < BODY_LANDMARK_COUNT * 4; index += 1) {
         buffer.push(Number.NaN);
       }
     }
+
+    const pushHand = (hand: NormalizedLandmark[] | null) => {
+      if (hand) {
+        for (let index = 0; index < HAND_LANDMARK_COUNT; index += 1) {
+          const point = hand[index];
+          buffer.push(point.x, point.y, point.z);
+        }
+      } else {
+        for (let index = 0; index < HAND_LANDMARK_COUNT * 3; index += 1) {
+          buffer.push(Number.NaN);
+        }
+      }
+    };
+    pushHand(hands.left);
+    pushHand(hands.right);
+
     if (fullBody) chunkFullBodyFramesRef.current += 1;
+    if (hands.left || hands.right) chunkHandFramesRef.current += 1;
 
     const previous = poseStatsRef.current;
     const next: PoseStats = {
@@ -539,7 +778,9 @@ export default function Home() {
       frames: previous.frames + 1,
       detectedFrames: previous.detectedFrames + (landmarks ? 1 : 0),
       fullBodyFrames: previous.fullBodyFrames + (fullBody ? 1 : 0),
-      storageBytes: (previous.frames + 1) * POSE_FRAME_STRIDE * 4,
+      handDetectedFrames:
+        previous.handDetectedFrames + (hands.left || hands.right ? 1 : 0),
+      storageBytes: (previous.frames + 1) * MOTION_FRAME_STRIDE * 4,
     };
     poseStatsRef.current = next;
     if (timestamp - lastStatsUpdateRef.current >= 500) {
@@ -547,7 +788,7 @@ export default function Home() {
       setPoseStats(next);
     }
 
-    if (buffer.length / POSE_FRAME_STRIDE >= CHUNK_FRAME_COUNT) {
+    if (buffer.length / MOTION_FRAME_STRIDE >= CHUNK_FRAME_COUNT) {
       void flushPoseFrames();
     }
   }
@@ -556,11 +797,13 @@ export default function Home() {
     if (!trackingActiveRef.current) return;
     const video = processingVideoRef.current;
     const landmarker = poseLandmarkerRef.current;
+    const handLandmarker = handLandmarkerRef.current;
     const timestamp = currentMonotonicTime();
 
     if (
       video &&
       landmarker &&
+      handLandmarker &&
       video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
       video.currentTime !== lastVideoTimeRef.current &&
       timestamp - lastDetectionTimeRef.current >= 66
@@ -572,6 +815,36 @@ export default function Home() {
         const landmarks = result.landmarks[0] ?? null;
         lastPoseRef.current = landmarks;
         const fullBody = landmarks ? isFullBodyVisible(landmarks) : false;
+        const head = landmarks ? getHeadDirection(landmarks) : null;
+        lastHeadDirectionRef.current = head;
+        const nextHeadLabel = describeHeadDirection(head);
+        setHeadDirectionLabel((current) =>
+          current === nextHeadLabel ? current : nextHeadLabel,
+        );
+
+        if (timestamp - lastHandDetectionTimeRef.current >= 100) {
+          lastHandDetectionTimeRef.current = timestamp;
+          const handResult = handLandmarker.detectForVideo(video, timestamp);
+          const hands: HandState = {
+            left: null,
+            right: null,
+            leftScore: 0,
+            rightScore: 0,
+          };
+          handResult.landmarks.forEach((hand, index) => {
+            const category = handResult.handedness[index]?.[0];
+            if (category?.categoryName === "Left") {
+              hands.left = hand;
+              hands.leftScore = category.score;
+            } else if (category?.categoryName === "Right") {
+              hands.right = hand;
+              hands.rightScore = category.score;
+            }
+          });
+          lastHandsRef.current = hands;
+          const handCount = Number(Boolean(hands.left)) + Number(Boolean(hands.right));
+          setDetectedHands((current) => (current === handCount ? current : handCount));
+        }
         updatePoseStatus(landmarks ? (fullBody ? "full" : "partial") : "searching");
 
         const canvas = overlayCanvasRef.current;
@@ -582,12 +855,27 @@ export default function Home() {
           }
           const context = canvas.getContext("2d");
           context?.clearRect(0, 0, canvas.width, canvas.height);
-          if (landmarks) drawSkeleton(canvas, landmarks, fullBody);
+          if (landmarks) {
+            drawMotionSkeleton(
+              canvas,
+              landmarks,
+              lastHandsRef.current.left,
+              lastHandsRef.current.right,
+              head,
+              fullBody,
+            );
+          }
         }
 
-        if (timestamp - lastSampleTimeRef.current >= 1000 / POSE_SAMPLE_RATE) {
+        if (timestamp - lastSampleTimeRef.current >= 1000 / MOTION_SAMPLE_RATE) {
           lastSampleTimeRef.current = timestamp;
-          recordPoseFrame(timestamp, landmarks, fullBody);
+          recordPoseFrame(
+            timestamp,
+            landmarks,
+            fullBody,
+            head,
+            lastHandsRef.current,
+          );
         }
       } catch {
         updatePoseStatus("error");
@@ -598,41 +886,53 @@ export default function Home() {
 
   async function startPoseTracking() {
     try {
-      await ensurePoseLandmarker();
+      await ensureMotionLandmarkers();
       const startedAt = currentEpochTime();
-      const session = await createPoseSession(
-        `pose-${crypto.randomUUID()}`,
+      const session = await createMotionSession(
+        `motion-${crypto.randomUUID()}`,
         startedAt,
       );
       poseSessionRef.current = session;
       sessionPerformanceStartRef.current = currentMonotonicTime();
       lastDetectionTimeRef.current = 0;
+      lastHandDetectionTimeRef.current = 0;
       lastSampleTimeRef.current = 0;
       lastVideoTimeRef.current = -1;
       lastPoseRef.current = null;
+      lastHandsRef.current = {
+        left: null,
+        right: null,
+        leftScore: 0,
+        rightScore: 0,
+      };
+      lastHeadDirectionRef.current = null;
       poseBufferRef.current = [];
       chunkDetectedFramesRef.current = 0;
       chunkFullBodyFramesRef.current = 0;
+      chunkHandFramesRef.current = 0;
       const emptyStats: PoseStats = {
         frames: 0,
         detectedFrames: 0,
         fullBodyFrames: 0,
+        handDetectedFrames: 0,
         storageBytes: 0,
         startedAt,
       };
       poseStatsRef.current = emptyStats;
       setPoseStats(emptyStats);
       setElapsedSeconds(0);
+      setDetectedHands(0);
+      setHeadDirectionLabel("머리 방향 미확인");
       setSessionCount((count) => count + 1);
       updatePoseStatus("searching");
       trackingActiveRef.current = true;
-      setCameraMessage("영상은 저장하지 않고 관절 좌표만 기록하고 있어요.");
-      setToast("스켈레톤 좌표 상시 기록을 시작했어요");
+      setCameraMessage("얼굴은 제외하고 몸·머리 방향·손가락 좌표를 기록하고 있어요.");
+      setToast("몸과 손가락 좌표 상시 기록을 시작했어요");
       poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
     } catch {
       updatePoseStatus("error");
-      setCameraMessage("스켈레톤 모델을 불러오지 못했어요. 다시 연결해 주세요.");
-      setToast("스켈레톤 모델을 준비하지 못했어요");
+      setCameraMessage("몸·손 추적 모델을 불러오지 못했어요. 다시 연결해 주세요.");
+      setToast("동작 추적 모델을 준비하지 못했어요");
     }
   }
 
@@ -647,7 +947,7 @@ export default function Home() {
     const session = poseSessionRef.current;
     if (session) {
       const endedAt = currentEpochTime();
-      const completed = await finishPoseSession(session, endedAt);
+      const completed = await finishMotionSession(session, endedAt);
       setLatestSession(completed);
       poseSessionRef.current = null;
     }
@@ -677,11 +977,13 @@ export default function Home() {
   function markTestEvent(preset: (typeof eventPresets)[number]) {
     const session = poseSessionRef.current;
     const landmarks = lastPoseRef.current;
+    const head = lastHeadDirectionRef.current;
+    const hands = lastHandsRef.current;
     if (!session || cameraStatus !== "connected") {
       setToast("먼저 카메라를 연결해 주세요");
       return;
     }
-    if (!landmarks) {
+    if (!landmarks || !head) {
       setToast("스켈레톤이 인식된 뒤 이벤트를 표시해 주세요");
       return;
     }
@@ -692,12 +994,21 @@ export default function Home() {
       detail: `${preset.detail} · 관절 좌표 시점`,
       kind: preset.kind,
       poseSessionId: session.id,
-      poseSnapshot: landmarks.flatMap((point) => [
-        point.x,
-        point.y,
-        point.z,
-        point.visibility,
-      ]),
+      motionSnapshot: {
+        body: landmarks.slice(11).flatMap((point) => [
+          point.x,
+          point.y,
+          point.z,
+          point.visibility,
+        ]),
+        leftHand: hands.left
+          ? hands.left.flatMap((point) => [point.x, point.y, point.z])
+          : null,
+        rightHand: hands.right
+          ? hands.right.flatMap((point) => [point.x, point.y, point.z])
+          : null,
+        head,
+      },
     };
     setEvents((previous) => [event, ...previous]);
     setToast("이벤트 시점을 좌표 기록에 표시했어요");
@@ -712,7 +1023,7 @@ export default function Home() {
         setToast("내보낼 좌표 기록이 아직 없어요");
         return;
       }
-      await downloadPoseSession(session);
+      await downloadMotionSession(session);
       setToast("학습용 좌표 데이터를 내려받았어요");
     } catch {
       setToast("좌표 데이터를 내보내지 못했어요");
@@ -798,7 +1109,7 @@ export default function Home() {
         : poseStatus === "searching"
           ? "사람을 찾고 있어요"
           : poseStatus === "loading"
-            ? "스켈레톤 모델 준비 중"
+            ? "동작 추적 모델 준비 중"
             : poseStatus === "error"
               ? "스켈레톤 인식 오류"
               : "좌표 기록 대기";
@@ -941,6 +1252,14 @@ export default function Home() {
                     </div>
                   )}
                   {cameraStatus === "connected" && (
+                    <div className="tracking-readout">
+                      <span>머리 · {headDirectionLabel}</span>
+                      <span className={detectedHands > 0 ? "hands-found" : ""}>
+                        손 · {detectedHands}/2 인식
+                      </span>
+                    </div>
+                  )}
+                  {cameraStatus === "connected" && (
                     <div className="camera-caption">
                       <span className={`pose-state ${poseStatus}`}>
                         <i aria-hidden="true" /> {poseStatusLabel}
@@ -955,7 +1274,7 @@ export default function Home() {
                 <div className="coordinate-recorder">
                   <div className="recorder-heading">
                     <div>
-                      <strong>스켈레톤 좌표 상시 기록</strong>
+                      <strong>몸·머리 방향·손가락 좌표 상시 기록</strong>
                       <p>{cameraMessage}</p>
                     </div>
                     <span className={cameraStatus === "connected" ? "recording" : ""}>
@@ -963,14 +1282,15 @@ export default function Home() {
                     </span>
                   </div>
                   <div className="coordinate-stats">
-                    <span><small>관절점</small><strong>33개</strong></span>
-                    <span><small>기록 속도</small><strong>{POSE_SAMPLE_RATE} FPS</strong></span>
+                    <span><small>몸 관절</small><strong>22개</strong></span>
+                    <span><small>손 관절</small><strong>최대 42개</strong></span>
+                    <span><small>기록 속도</small><strong>{MOTION_SAMPLE_RATE} FPS</strong></span>
                     <span><small>누적 프레임</small><strong>{poseStats.frames.toLocaleString()}</strong></span>
                     <span><small>전신 인식률</small><strong>{fullBodyRatio}%</strong></span>
                     <span><small>예상 용량</small><strong>{formatBytes(poseStats.storageBytes)}</strong></span>
                   </div>
                   <div className="coordinate-actions">
-                    <span>영상·음성 없이 좌표만 이 브라우저에 저장 · 세션 {sessionCount}개</span>
+                    <span>얼굴 특징·영상·음성 없이 동작 좌표만 이 브라우저에 저장 · 세션 {sessionCount}개</span>
                     <button
                       type="button"
                       onClick={() => void exportPoseData()}
@@ -1221,10 +1541,10 @@ export default function Home() {
               <p>{selectedEvent.detail}</p>
             </div>
             <div className="playback-frame">
-              {selectedEvent.poseSnapshot ? (
+              {selectedEvent.motionSnapshot ? (
                 <div className="pose-snapshot">
-                  <PoseSnapshot points={selectedEvent.poseSnapshot} />
-                  <span>영상이 아닌 33개 관절점 좌표로 복원한 장면이에요.</span>
+                  <PoseSnapshot snapshot={selectedEvent.motionSnapshot} />
+                  <span>몸 22개·손 최대 42개 관절과 머리 방향으로 복원한 장면이에요.</span>
                 </div>
               ) : (
                 <div className="no-clip">
