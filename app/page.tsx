@@ -1,9 +1,22 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { NormalizedLandmark, PoseLandmarker } from "@mediapipe/tasks-vision";
+import {
+  POSE_FRAME_STRIDE,
+  POSE_LANDMARK_COUNT,
+  POSE_SAMPLE_RATE,
+  appendPoseChunk,
+  createPoseSession,
+  downloadPoseSession,
+  finishPoseSession,
+  listPoseSessions,
+  type PoseSessionRecord,
+} from "./pose-store";
 
 type View = "today" | "timeline" | "closing" | "care";
 type CameraStatus = "idle" | "requesting" | "connected" | "error";
+type PoseStatus = "idle" | "loading" | "searching" | "partial" | "full" | "error";
 type ClosingStatus = "idle" | "checking" | "attention" | "done";
 type EventKind = "payment" | "door" | "safety" | "booking";
 
@@ -13,10 +26,29 @@ type TimelineEvent = {
   title: string;
   detail: string;
   kind: EventKind;
-  clipUrl?: string;
-  poster?: string;
-  isCapturing?: boolean;
+  poseSessionId?: string;
+  poseSnapshot?: number[];
 };
+
+type PoseStats = {
+  frames: number;
+  detectedFrames: number;
+  fullBodyFrames: number;
+  storageBytes: number;
+  startedAt: number | null;
+};
+
+const POSE_CONNECTIONS: Array<[number, number]> = [
+  [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8],
+  [9, 10], [11, 12], [11, 13], [13, 15], [15, 17], [15, 19],
+  [15, 21], [17, 19], [12, 14], [14, 16], [16, 18], [16, 20],
+  [16, 22], [18, 20], [11, 23], [12, 24], [23, 24], [23, 25],
+  [24, 26], [25, 27], [26, 28], [27, 29], [28, 30], [29, 31],
+  [30, 32], [27, 31], [28, 32],
+];
+
+const FULL_BODY_LANDMARKS = [0, 11, 12, 23, 24, 25, 26, 27, 28];
+const CHUNK_FRAME_COUNT = POSE_SAMPLE_RATE * 30;
 
 const initialEvents: TimelineEvent[] = [
   {
@@ -97,6 +129,93 @@ function currentTime() {
   }).format(new Date());
 }
 
+function currentMonotonicTime() {
+  return performance.now();
+}
+
+function currentEpochTime() {
+  return Math.round(performance.timeOrigin + performance.now());
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDuration(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
+  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+function drawSkeleton(
+  canvas: HTMLCanvasElement,
+  landmarks: NormalizedLandmark[] | number[],
+  fullBody: boolean,
+) {
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  const point = (index: number) => {
+    if (typeof landmarks[0] === "number") {
+      const flat = landmarks as number[];
+      return {
+        x: flat[index * 4],
+        y: flat[index * 4 + 1],
+        z: flat[index * 4 + 2],
+        visibility: flat[index * 4 + 3],
+      };
+    }
+    return (landmarks as NormalizedLandmark[])[index];
+  };
+
+  context.lineWidth = Math.max(3, canvas.width / 180);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = fullBody ? "#6ff0b7" : "#ffc36e";
+  context.shadowColor = "rgba(8, 38, 32, 0.75)";
+  context.shadowBlur = 8;
+
+  for (const [from, to] of POSE_CONNECTIONS) {
+    const start = point(from);
+    const end = point(to);
+    if (!start || !end || start.visibility < 0.35 || end.visibility < 0.35) continue;
+    context.beginPath();
+    context.moveTo(start.x * canvas.width, start.y * canvas.height);
+    context.lineTo(end.x * canvas.width, end.y * canvas.height);
+    context.stroke();
+  }
+
+  context.shadowBlur = 5;
+  for (let index = 0; index < POSE_LANDMARK_COUNT; index += 1) {
+    const landmark = point(index);
+    if (!landmark || landmark.visibility < 0.35) continue;
+    context.beginPath();
+    context.arc(
+      landmark.x * canvas.width,
+      landmark.y * canvas.height,
+      Math.max(3, canvas.width / 150),
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = index === 0 ? "#ffffff" : fullBody ? "#b9ffdc" : "#ffe0aa";
+    context.fill();
+  }
+}
+
+function PoseSnapshot({ points }: { points: number[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    drawSkeleton(canvasRef.current, points, true);
+  }, [points]);
+
+  return <canvas ref={canvasRef} width={640} height={360} aria-label="기록된 스켈레톤 좌표" />;
+}
+
 function TimelineList({
   events,
   onSelect,
@@ -127,10 +246,7 @@ function TimelineList({
           <span className="event-copy">
             <span className="event-title-row">
               <strong>{event.title}</strong>
-              {event.clipUrl && <span className="video-tag">영상</span>}
-              {event.isCapturing && (
-                <span className="saving-tag">저장 중</span>
-              )}
+              {event.poseSessionId && <span className="video-tag">좌표</span>}
             </span>
             <span>{event.detail}</span>
           </span>
@@ -149,9 +265,19 @@ export default function Home() {
   const [cameraMessage, setCameraMessage] = useState(
     "카메라를 연결하면 오늘의 장면을 확인할 수 있어요.",
   );
+  const [poseStatus, setPoseStatus] = useState<PoseStatus>("idle");
+  const [poseStats, setPoseStats] = useState<PoseStats>({
+    frames: 0,
+    detectedFrames: 0,
+    fullBodyFrames: 0,
+    storageBytes: 0,
+    startedAt: null,
+  });
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [sessionCount, setSessionCount] = useState(0);
+  const [latestSession, setLatestSession] = useState<PoseSessionRecord | null>(null);
   const [events, setEvents] = useState<TimelineEvent[]>(initialEvents);
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
-  const [isCapturing, setIsCapturing] = useState(false);
   const [toast, setToast] = useState("");
   const [heaterOn, setHeaterOn] = useState(true);
   const [closingStatus, setClosingStatus] = useState<ClosingStatus>("idle");
@@ -162,17 +288,66 @@ export default function Home() {
   const [bookingService, setBookingService] = useState("커트");
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const processingVideoRef = useRef<HTMLVideoElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const objectUrlsRef = useRef<string[]>([]);
+  const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  const poseAnimationRef = useRef<number | null>(null);
+  const trackingActiveRef = useRef(false);
+  const lastDetectionTimeRef = useRef(0);
+  const lastSampleTimeRef = useRef(0);
+  const lastPoseRef = useRef<NormalizedLandmark[] | null>(null);
+  const poseBufferRef = useRef<number[]>([]);
+  const chunkDetectedFramesRef = useRef(0);
+  const chunkFullBodyFramesRef = useRef(0);
+  const poseSessionRef = useRef<PoseSessionRecord | null>(null);
+  const poseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const sessionPerformanceStartRef = useRef(0);
+  const lastStatsUpdateRef = useRef(0);
+  const lastVideoTimeRef = useRef(-1);
+  const poseStatusRef = useRef<PoseStatus>("idle");
+  const poseStatsRef = useRef<PoseStats>({
+    frames: 0,
+    detectedFrames: 0,
+    fullBodyFrames: 0,
+    storageBytes: 0,
+    startedAt: null,
+  });
 
   const todayEvents = useMemo(() => events, [events]);
 
   useEffect(() => {
-    if (cameraStatus === "connected" && videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => undefined);
+    if (cameraStatus === "connected" && streamRef.current) {
+      if (videoRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch(() => undefined);
+      }
+      if (processingVideoRef.current) {
+        processingVideoRef.current.srcObject = streamRef.current;
+        processingVideoRef.current.play().catch(() => undefined);
+      }
     }
   }, [cameraStatus, view]);
+
+  useEffect(() => {
+    listPoseSessions()
+      .then((sessions) => {
+        setSessionCount(sessions.length);
+        setLatestSession(sessions[0] ?? null);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (cameraStatus !== "connected" || !poseStats.startedAt) return;
+    const timer = window.setInterval(() => {
+      const now = currentEpochTime();
+      setElapsedSeconds(
+        Math.max(0, Math.floor((now - poseStats.startedAt!) / 1000)),
+      );
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [cameraStatus, poseStats.startedAt]);
 
   useEffect(() => {
     if (!toast) return;
@@ -181,10 +356,13 @@ export default function Home() {
   }, [toast]);
 
   useEffect(() => {
-    const objectUrls = objectUrlsRef.current;
     return () => {
+      trackingActiveRef.current = false;
+      if (poseAnimationRef.current !== null) {
+        cancelAnimationFrame(poseAnimationRef.current);
+      }
       streamRef.current?.getTracks().forEach((track) => track.stop());
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+      poseLandmarkerRef.current?.close();
     };
   }, []);
 
@@ -225,9 +403,13 @@ export default function Home() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+      if (processingVideoRef.current) {
+        processingVideoRef.current.srcObject = stream;
+        await processingVideoRef.current.play();
+      }
       setCameraStatus("connected");
-      setCameraMessage("노트북 카메라가 안전하게 연결됐어요.");
-      setToast("카메라가 연결됐어요");
+      setCameraMessage("전신 스켈레톤 모델을 준비하고 있어요…");
+      await startPoseTracking();
     } catch {
       setCameraStatus("error");
       setCameraMessage(
@@ -236,112 +418,305 @@ export default function Home() {
     }
   }
 
-  function stopCamera() {
+  function updatePoseStatus(nextStatus: PoseStatus) {
+    if (poseStatusRef.current === nextStatus) return;
+    poseStatusRef.current = nextStatus;
+    setPoseStatus(nextStatus);
+  }
+
+  async function ensurePoseLandmarker() {
+    if (poseLandmarkerRef.current) return poseLandmarkerRef.current;
+    updatePoseStatus("loading");
+    const { FilesetResolver, PoseLandmarker: PoseLandmarkerClass } = await import(
+      "@mediapipe/tasks-vision"
+    );
+    const vision = await FilesetResolver.forVisionTasks("/mediapipe-wasm");
+    const baseOptions = {
+      modelAssetPath: "/models/pose_landmarker_lite.task",
+    };
+
+    try {
+      poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
+        vision,
+        {
+          baseOptions: { ...baseOptions, delegate: "GPU" },
+          runningMode: "VIDEO",
+          numPoses: 1,
+          minPoseDetectionConfidence: 0.5,
+          minPosePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+          outputSegmentationMasks: false,
+        },
+      );
+    } catch {
+      poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
+        vision,
+        {
+          baseOptions,
+          runningMode: "VIDEO",
+          numPoses: 1,
+          minPoseDetectionConfidence: 0.5,
+          minPosePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+          outputSegmentationMasks: false,
+        },
+      );
+    }
+    return poseLandmarkerRef.current;
+  }
+
+  function isFullBodyVisible(landmarks: NormalizedLandmark[]) {
+    const allRequiredVisible = FULL_BODY_LANDMARKS.every((index) => {
+      const point = landmarks[index];
+      return (
+        point &&
+        point.visibility >= 0.55 &&
+        point.x >= 0.015 &&
+        point.x <= 0.985 &&
+        point.y >= 0.015 &&
+        point.y <= 0.985
+      );
+    });
+    if (!allRequiredVisible) return false;
+    const ankleY = (landmarks[27].y + landmarks[28].y) / 2;
+    return ankleY - landmarks[0].y >= 0.5;
+  }
+
+  function flushPoseFrames() {
+    if (poseBufferRef.current.length === 0 || !poseSessionRef.current) {
+      return poseWriteQueueRef.current;
+    }
+    const values = new Float32Array(poseBufferRef.current);
+    const detectedFrames = chunkDetectedFramesRef.current;
+    const fullBodyFrames = chunkFullBodyFramesRef.current;
+    const sessionId = poseSessionRef.current.id;
+    poseBufferRef.current = [];
+    chunkDetectedFramesRef.current = 0;
+    chunkFullBodyFramesRef.current = 0;
+
+    poseWriteQueueRef.current = poseWriteQueueRef.current.then(async () => {
+      const session = poseSessionRef.current;
+      if (!session || session.id !== sessionId) return;
+      const updated = await appendPoseChunk(
+        session,
+        session.frameCount,
+        values,
+        detectedFrames,
+        fullBodyFrames,
+      );
+      poseSessionRef.current = updated;
+      setLatestSession(updated);
+    });
+    return poseWriteQueueRef.current;
+  }
+
+  function recordPoseFrame(
+    timestamp: number,
+    landmarks: NormalizedLandmark[] | null,
+    fullBody: boolean,
+  ) {
+    const buffer = poseBufferRef.current;
+    buffer.push(timestamp - sessionPerformanceStartRef.current);
+    buffer.push(landmarks ? 1 : 0);
+    buffer.push(fullBody ? 1 : 0);
+
+    if (landmarks) {
+      for (let index = 0; index < POSE_LANDMARK_COUNT; index += 1) {
+        const point = landmarks[index];
+        buffer.push(point.x, point.y, point.z, point.visibility);
+      }
+      chunkDetectedFramesRef.current += 1;
+    } else {
+      for (let index = 0; index < POSE_LANDMARK_COUNT * 4; index += 1) {
+        buffer.push(Number.NaN);
+      }
+    }
+    if (fullBody) chunkFullBodyFramesRef.current += 1;
+
+    const previous = poseStatsRef.current;
+    const next: PoseStats = {
+      ...previous,
+      frames: previous.frames + 1,
+      detectedFrames: previous.detectedFrames + (landmarks ? 1 : 0),
+      fullBodyFrames: previous.fullBodyFrames + (fullBody ? 1 : 0),
+      storageBytes: (previous.frames + 1) * POSE_FRAME_STRIDE * 4,
+    };
+    poseStatsRef.current = next;
+    if (timestamp - lastStatsUpdateRef.current >= 500) {
+      lastStatsUpdateRef.current = timestamp;
+      setPoseStats(next);
+    }
+
+    if (buffer.length / POSE_FRAME_STRIDE >= CHUNK_FRAME_COUNT) {
+      void flushPoseFrames();
+    }
+  }
+
+  function poseTrackingLoop() {
+    if (!trackingActiveRef.current) return;
+    const video = processingVideoRef.current;
+    const landmarker = poseLandmarkerRef.current;
+    const timestamp = currentMonotonicTime();
+
+    if (
+      video &&
+      landmarker &&
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      video.currentTime !== lastVideoTimeRef.current &&
+      timestamp - lastDetectionTimeRef.current >= 66
+    ) {
+      lastVideoTimeRef.current = video.currentTime;
+      lastDetectionTimeRef.current = timestamp;
+      try {
+        const result = landmarker.detectForVideo(video, timestamp);
+        const landmarks = result.landmarks[0] ?? null;
+        lastPoseRef.current = landmarks;
+        const fullBody = landmarks ? isFullBodyVisible(landmarks) : false;
+        updatePoseStatus(landmarks ? (fullBody ? "full" : "partial") : "searching");
+
+        const canvas = overlayCanvasRef.current;
+        if (canvas) {
+          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+          }
+          const context = canvas.getContext("2d");
+          context?.clearRect(0, 0, canvas.width, canvas.height);
+          if (landmarks) drawSkeleton(canvas, landmarks, fullBody);
+        }
+
+        if (timestamp - lastSampleTimeRef.current >= 1000 / POSE_SAMPLE_RATE) {
+          lastSampleTimeRef.current = timestamp;
+          recordPoseFrame(timestamp, landmarks, fullBody);
+        }
+      } catch {
+        updatePoseStatus("error");
+      }
+    }
+    poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
+  }
+
+  async function startPoseTracking() {
+    try {
+      await ensurePoseLandmarker();
+      const startedAt = currentEpochTime();
+      const session = await createPoseSession(
+        `pose-${crypto.randomUUID()}`,
+        startedAt,
+      );
+      poseSessionRef.current = session;
+      sessionPerformanceStartRef.current = currentMonotonicTime();
+      lastDetectionTimeRef.current = 0;
+      lastSampleTimeRef.current = 0;
+      lastVideoTimeRef.current = -1;
+      lastPoseRef.current = null;
+      poseBufferRef.current = [];
+      chunkDetectedFramesRef.current = 0;
+      chunkFullBodyFramesRef.current = 0;
+      const emptyStats: PoseStats = {
+        frames: 0,
+        detectedFrames: 0,
+        fullBodyFrames: 0,
+        storageBytes: 0,
+        startedAt,
+      };
+      poseStatsRef.current = emptyStats;
+      setPoseStats(emptyStats);
+      setElapsedSeconds(0);
+      setSessionCount((count) => count + 1);
+      updatePoseStatus("searching");
+      trackingActiveRef.current = true;
+      setCameraMessage("영상은 저장하지 않고 관절 좌표만 기록하고 있어요.");
+      setToast("스켈레톤 좌표 상시 기록을 시작했어요");
+      poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
+    } catch {
+      updatePoseStatus("error");
+      setCameraMessage("스켈레톤 모델을 불러오지 못했어요. 다시 연결해 주세요.");
+      setToast("스켈레톤 모델을 준비하지 못했어요");
+    }
+  }
+
+  async function stopPoseTracking() {
+    trackingActiveRef.current = false;
+    if (poseAnimationRef.current !== null) {
+      cancelAnimationFrame(poseAnimationRef.current);
+      poseAnimationRef.current = null;
+    }
+    await flushPoseFrames();
+    await poseWriteQueueRef.current;
+    const session = poseSessionRef.current;
+    if (session) {
+      const endedAt = currentEpochTime();
+      const completed = await finishPoseSession(session, endedAt);
+      setLatestSession(completed);
+      poseSessionRef.current = null;
+    }
+    overlayCanvasRef.current
+      ?.getContext("2d")
+      ?.clearRect(
+        0,
+        0,
+        overlayCanvasRef.current.width,
+        overlayCanvasRef.current.height,
+      );
+    updatePoseStatus("idle");
+  }
+
+  async function stopCamera() {
+    await stopPoseTracking();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
+    if (processingVideoRef.current) processingVideoRef.current.srcObject = null;
     setCameraStatus("idle");
+    setElapsedSeconds(0);
     setCameraMessage("카메라 연결을 멈췄어요.");
-    setToast("카메라 연결을 종료했어요");
+    setToast("좌표 기록을 안전하게 저장하고 카메라를 종료했어요");
   }
 
-  function capturePoster() {
-    const video = videoRef.current;
-    if (!video || video.videoWidth === 0) return undefined;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const context = canvas.getContext("2d");
-    if (!context) return undefined;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.78);
-  }
-
-  function recordTestEvent(preset: (typeof eventPresets)[number]) {
-    const stream = streamRef.current;
-    if (!stream || cameraStatus !== "connected") {
+  function markTestEvent(preset: (typeof eventPresets)[number]) {
+    const session = poseSessionRef.current;
+    const landmarks = lastPoseRef.current;
+    if (!session || cameraStatus !== "connected") {
       setToast("먼저 카메라를 연결해 주세요");
       return;
     }
-    if (!window.MediaRecorder) {
-      setToast("이 브라우저는 영상 기록을 지원하지 않아요");
+    if (!landmarks) {
+      setToast("스켈레톤이 인식된 뒤 이벤트를 표시해 주세요");
       return;
     }
-
-    const id = `camera-${crypto.randomUUID()}`;
-    const poster = capturePoster();
     const event: TimelineEvent = {
-      id,
+      id: `pose-event-${crypto.randomUUID()}`,
       time: currentTime(),
       title: preset.title,
-      detail: `${preset.detail} · 4초 장면`,
+      detail: `${preset.detail} · 관절 좌표 시점`,
       kind: preset.kind,
-      poster,
-      isCapturing: true,
+      poseSessionId: session.id,
+      poseSnapshot: landmarks.flatMap((point) => [
+        point.x,
+        point.y,
+        point.z,
+        point.visibility,
+      ]),
     };
-
     setEvents((previous) => [event, ...previous]);
-    setIsCapturing(true);
-    setToast("현재 장면을 4초 동안 기록하고 있어요");
+    setToast("이벤트 시점을 좌표 기록에 표시했어요");
+  }
 
-    const chunks: Blob[] = [];
-    let recorder: MediaRecorder;
-    const preferredTypes = [
-      "video/webm;codecs=vp9",
-      "video/webm;codecs=vp8",
-      "video/mp4",
-      "video/webm",
-    ];
-    const mimeType = preferredTypes.find((type) =>
-      MediaRecorder.isTypeSupported(type),
-    );
-
+  async function exportPoseData() {
     try {
-      recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-    } catch {
-      setEvents((previous) => previous.filter((item) => item.id !== id));
-      setIsCapturing(false);
-      setToast("영상 기록을 시작하지 못했어요");
-      return;
-    }
-
-    recorder.ondataavailable = (clipEvent) => {
-      if (clipEvent.data.size > 0) chunks.push(clipEvent.data);
-    };
-
-    recorder.onerror = () => {
-      setEvents((previous) => previous.filter((item) => item.id !== id));
-      setIsCapturing(false);
-      setToast("영상 기록 중 문제가 생겼어요");
-    };
-
-    recorder.onstop = () => {
-      if (chunks.length === 0) {
-        setEvents((previous) => previous.filter((item) => item.id !== id));
-        setToast("기록된 영상이 없어 다시 시도해 주세요");
-        setIsCapturing(false);
+      await flushPoseFrames();
+      await poseWriteQueueRef.current;
+      const session = poseSessionRef.current ?? latestSession;
+      if (!session || session.frameCount === 0) {
+        setToast("내보낼 좌표 기록이 아직 없어요");
         return;
       }
-      const blob = new Blob(chunks, {
-        type: recorder.mimeType || chunks[0].type || "video/webm",
-      });
-      const clipUrl = URL.createObjectURL(blob);
-      objectUrlsRef.current.push(clipUrl);
-      setEvents((previous) =>
-        previous.map((item) =>
-          item.id === id ? { ...item, clipUrl, isCapturing: false } : item,
-        ),
-      );
-      setIsCapturing(false);
-      setToast("장면이 메모리 타임라인에 저장됐어요");
-    };
-
-    recorder.start();
-    window.setTimeout(() => {
-      if (recorder.state === "recording") recorder.stop();
-    }, 4000);
+      await downloadPoseSession(session);
+      setToast("학습용 좌표 데이터를 내려받았어요");
+    } catch {
+      setToast("좌표 데이터를 내보내지 못했어요");
+    }
   }
 
   function startClosingCheck() {
@@ -405,10 +780,6 @@ export default function Home() {
   }
 
   function openTimelineEvent(event: TimelineEvent) {
-    if (event.isCapturing) {
-      setToast("영상을 저장하고 있어요. 잠시만 기다려 주세요");
-      return;
-    }
     setSelectedEvent(event);
   }
 
@@ -419,8 +790,32 @@ export default function Home() {
         ? "연결 중"
         : "카메라 대기";
 
+  const poseStatusLabel =
+    poseStatus === "full"
+      ? "전신 인식됨"
+      : poseStatus === "partial"
+        ? "전신이 보이게 뒤로 이동해 주세요"
+        : poseStatus === "searching"
+          ? "사람을 찾고 있어요"
+          : poseStatus === "loading"
+            ? "스켈레톤 모델 준비 중"
+            : poseStatus === "error"
+              ? "스켈레톤 인식 오류"
+              : "좌표 기록 대기";
+
+  const fullBodyRatio = poseStats.detectedFrames
+    ? Math.round((poseStats.fullBodyFrames / poseStats.detectedFrames) * 100)
+    : 0;
+
   return (
     <main className="app-shell">
+      <video
+        ref={processingVideoRef}
+        className="processing-video"
+        muted
+        playsInline
+        aria-hidden="true"
+      />
       <aside className="sidebar">
         <div className="brand" aria-label="메모리 가드">
           <span className="brand-mark" aria-hidden="true">
@@ -506,14 +901,24 @@ export default function Home() {
                     <h2>지금 매장 모습</h2>
                   </div>
                   {cameraStatus === "connected" && (
-                    <span className="live-badge">
-                      <i aria-hidden="true" /> LIVE
-                    </span>
+                    <div className="camera-badges">
+                      <span className="coordinate-badge">
+                        <i aria-hidden="true" /> 좌표 REC
+                      </span>
+                      <span className="live-badge">
+                        <i aria-hidden="true" /> LIVE
+                      </span>
+                    </div>
                   )}
                 </div>
 
                 <div className={`camera-frame ${cameraStatus}`}>
                   <video ref={videoRef} muted playsInline aria-label="실시간 카메라 영상" />
+                  <canvas
+                    ref={overlayCanvasRef}
+                    className="pose-overlay"
+                    aria-label="실시간 전신 스켈레톤"
+                  />
                   {cameraStatus !== "connected" && (
                     <div className="camera-empty">
                       <span className="camera-symbol" aria-hidden="true">
@@ -537,26 +942,60 @@ export default function Home() {
                   )}
                   {cameraStatus === "connected" && (
                     <div className="camera-caption">
-                      <span>{cameraMessage}</span>
-                      <button type="button" onClick={stopCamera}>
+                      <span className={`pose-state ${poseStatus}`}>
+                        <i aria-hidden="true" /> {poseStatusLabel}
+                      </span>
+                      <button type="button" onClick={() => void stopCamera()}>
                         카메라 끄기
                       </button>
                     </div>
                   )}
                 </div>
 
+                <div className="coordinate-recorder">
+                  <div className="recorder-heading">
+                    <div>
+                      <strong>스켈레톤 좌표 상시 기록</strong>
+                      <p>{cameraMessage}</p>
+                    </div>
+                    <span className={cameraStatus === "connected" ? "recording" : ""}>
+                      {cameraStatus === "connected" ? formatDuration(elapsedSeconds) : "대기"}
+                    </span>
+                  </div>
+                  <div className="coordinate-stats">
+                    <span><small>관절점</small><strong>33개</strong></span>
+                    <span><small>기록 속도</small><strong>{POSE_SAMPLE_RATE} FPS</strong></span>
+                    <span><small>누적 프레임</small><strong>{poseStats.frames.toLocaleString()}</strong></span>
+                    <span><small>전신 인식률</small><strong>{fullBodyRatio}%</strong></span>
+                    <span><small>예상 용량</small><strong>{formatBytes(poseStats.storageBytes)}</strong></span>
+                  </div>
+                  <div className="coordinate-actions">
+                    <span>영상·음성 없이 좌표만 이 브라우저에 저장 · 세션 {sessionCount}개</span>
+                    <button
+                      type="button"
+                      onClick={() => void exportPoseData()}
+                      disabled={!latestSession && poseStats.frames === 0}
+                    >
+                      학습용 JSON 내려받기
+                    </button>
+                  </div>
+                </div>
+
                 <div className="camera-test">
                   <div>
-                    <strong>이벤트 연동 테스트</strong>
-                    <p>아래 버튼을 누르면 현재 장면 4초가 타임라인에 저장돼요.</p>
+                    <strong>타임라인 이벤트 표시</strong>
+                    <p>버튼을 누른 시점의 스켈레톤 좌표를 타임라인에 표시해요.</p>
                   </div>
                   <div className="test-buttons">
                     {eventPresets.map((preset) => (
                       <button
                         type="button"
                         key={preset.button}
-                        disabled={isCapturing}
-                        onClick={() => recordTestEvent(preset)}
+                        disabled={
+                          cameraStatus !== "connected" ||
+                          (poseStatus !== "partial" && poseStatus !== "full")
+                        }
+                        onClick={() => markTestEvent(preset)}
                       >
                         {preset.button}
                       </button>
@@ -610,7 +1049,7 @@ export default function Home() {
             <div className="subpage-intro">
               <div>
                 <span className="section-kicker">하루의 기억을 한눈에</span>
-                <p>중요한 순간만 모았어요. 영상을 저장한 항목은 바로 다시 볼 수 있어요.</p>
+                <p>중요한 순간만 모았어요. 좌표 표시가 있는 항목은 당시 스켈레톤을 확인할 수 있어요.</p>
               </div>
               <span className="count-chip">오늘 {events.length}개 기록</span>
             </div>
@@ -782,13 +1221,16 @@ export default function Home() {
               <p>{selectedEvent.detail}</p>
             </div>
             <div className="playback-frame">
-              {selectedEvent.clipUrl ? (
-                <video src={selectedEvent.clipUrl} poster={selectedEvent.poster} controls autoPlay playsInline />
+              {selectedEvent.poseSnapshot ? (
+                <div className="pose-snapshot">
+                  <PoseSnapshot points={selectedEvent.poseSnapshot} />
+                  <span>영상이 아닌 33개 관절점 좌표로 복원한 장면이에요.</span>
+                </div>
               ) : (
                 <div className="no-clip">
                   <span className="camera-symbol" aria-hidden="true">●</span>
                   <strong>이 기록은 예시 타임라인이에요</strong>
-                  <p>카메라를 연결하고 이벤트 테스트를 하면 이곳에서 실제 장면을 다시 볼 수 있어요.</p>
+                  <p>카메라를 연결하고 이벤트 시점을 표시하면 이곳에서 당시 스켈레톤을 확인할 수 있어요.</p>
                 </div>
               )}
             </div>
