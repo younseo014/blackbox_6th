@@ -44,6 +44,90 @@ type PoseStats = {
   startedAt: number | null;
 };
 
+type DemoDay = {
+  day: string;
+  date: string;
+  safetyAlerts: number;
+  doubleChecks: number;
+  unfinishedTasks: number;
+  microDelay: number;
+  note: string;
+  examples: string[];
+};
+
+const demoWeek: DemoDay[] = [
+  {
+    day: "월",
+    date: "8/4",
+    safetyAlerts: 0,
+    doubleChecks: 0,
+    unfinishedTasks: 0,
+    microDelay: 8,
+    note: "평소와 비슷한 월요일 오픈·마감 흐름",
+    examples: ["08:41 매장 오픈", "19:07 스마트 마감 1회 완료"],
+  },
+  {
+    day: "화",
+    date: "8/5",
+    safetyAlerts: 0,
+    doubleChecks: 1,
+    unfinishedTasks: 0,
+    microDelay: 9,
+    note: "마감 뒤 출입문 상태를 한 번 더 확인",
+    examples: ["19:12 출입문 잠김 확인", "19:14 출입문 상태 재확인"],
+  },
+  {
+    day: "수",
+    date: "8/6",
+    safetyAlerts: 1,
+    doubleChecks: 1,
+    unfinishedTasks: 1,
+    microDelay: 12,
+    note: "온열기 차단 알림과 결제 입력 중단이 함께 발생",
+    examples: ["14:38 결제 입력이 6분간 중단", "19:21 온열기 차단 권고"],
+  },
+  {
+    day: "목",
+    date: "8/7",
+    safetyAlerts: 0,
+    doubleChecks: 1,
+    unfinishedTasks: 0,
+    microDelay: 13,
+    note: "점심 혼잡 시간대의 음료 세팅 소요 시간이 늘어남",
+    examples: ["12:16 음료 세팅 4분 10초", "19:09 가스 밸브 재확인"],
+  },
+  {
+    day: "금",
+    date: "8/8",
+    safetyAlerts: 1,
+    doubleChecks: 2,
+    unfinishedTasks: 1,
+    microDelay: 17,
+    note: "마감 반복 확인과 미완료 주문이 평소보다 늘어남",
+    examples: ["15:02 주문 입력 후 9분 지연", "19:28 스마트 플러그 차단 권고"],
+  },
+  {
+    day: "토",
+    date: "8/9",
+    safetyAlerts: 1,
+    doubleChecks: 2,
+    unfinishedTasks: 1,
+    microDelay: 19,
+    note: "바쁜 날에 여러 지표가 함께 높아진 날",
+    examples: ["11:47 카드 결제 재입력", "20:11 마감 항목 2회 재확인"],
+  },
+  {
+    day: "일",
+    date: "8/10",
+    safetyAlerts: 0,
+    doubleChecks: 1,
+    unfinishedTasks: 0,
+    microDelay: 14,
+    note: "휴식 후 일부 회복됐지만 마감 확인은 이어짐",
+    examples: ["10:26 오픈 준비 정상", "18:53 출입문 상태 재확인"],
+  },
+];
+
 type HeadDirection = {
   yaw: number;
   pitch: number;
@@ -404,6 +488,8 @@ export default function Home() {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingName, setBookingName] = useState("김하나");
   const [bookingService, setBookingService] = useState("커트");
+  const [demoMode, setDemoMode] = useState(true);
+  const [selectedDemoDay, setSelectedDemoDay] = useState(6);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const processingVideoRef = useRef<HTMLVideoElement>(null);
@@ -1117,6 +1203,7 @@ export default function Home() {
   const fullBodyRatio = poseStats.detectedFrames
     ? Math.round((poseStats.fullBodyFrames / poseStats.detectedFrames) * 100)
     : 0;
+  const demoDay = demoWeek[selectedDemoDay];
 
   return (
     <main className="app-shell">
@@ -1464,6 +1551,115 @@ export default function Home() {
 
         {view === "care" && (
           <div className="subpage care-page">
+            <section className="demo-switcher">
+              <div>
+                <span className="section-kicker">연구용 시뮬레이션</span>
+                <h2>가상 페르소나의 일주일 관찰 결과</h2>
+                <p>54세 여성 · 개인 카페 사장 · 실제 사용자 데이터가 아닌 예시입니다.</p>
+              </div>
+              <button
+                type="button"
+                className={demoMode ? "active" : ""}
+                onClick={() => setDemoMode((enabled) => !enabled)}
+                aria-pressed={demoMode}
+              >
+                <span aria-hidden="true" /> {demoMode ? "시뮬레이션 보는 중" : "시뮬레이션 보기"}
+              </button>
+            </section>
+
+            {demoMode ? (
+              <>
+                <section className="persona-card">
+                  <div className="persona-avatar" aria-hidden="true">카</div>
+                  <div>
+                    <span className="section-kicker">페르소나: 이수진 사장님</span>
+                    <h2>일주일의 흐름에서 함께 나타난 변화</h2>
+                    <p>평소에는 혼자 카페를 안정적으로 운영합니다. 이번 주 후반에는 깜빡함, 마감 반복 확인, 업무 중단, 단일 업무 지연이 함께 늘어나는 패턴을 가정했습니다.</p>
+                  </div>
+                  <span className="simulation-chip">가상 데이터</span>
+                </section>
+
+                <section className="panel week-observation">
+                  <div className="panel-heading">
+                    <div>
+                      <span className="section-kicker">7일 행동 흐름</span>
+                      <h2>하루를 선택해 상세 기록 보기</h2>
+                    </div>
+                    <span className="week-range">8월 4일–10일</span>
+                  </div>
+                  <div className="week-days" role="tablist" aria-label="가상 관찰 날짜">
+                    {demoWeek.map((day, index) => {
+                      const intensity = Math.max(
+                        day.safetyAlerts * 2 + day.doubleChecks + day.unfinishedTasks + Math.round(day.microDelay / 6) - 1,
+                        0,
+                      );
+                      return (
+                        <button
+                          key={day.day}
+                          className={selectedDemoDay === index ? "selected" : ""}
+                          type="button"
+                          role="tab"
+                          aria-selected={selectedDemoDay === index}
+                          onClick={() => setSelectedDemoDay(index)}
+                        >
+                          <span>{day.day}</span>
+                          <small>{day.date}</small>
+                          <i className={`signal-${Math.min(intensity, 5)}`} aria-label={`관찰 신호 ${intensity}단계`} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="day-detail" role="tabpanel">
+                    <div className="day-detail-head">
+                      <span>{demoDay.day}요일 · {demoDay.date}</span>
+                      <strong>{demoDay.note}</strong>
+                    </div>
+                    <div className="day-signal-grid">
+                      <article><span>안전 알림</span><strong>{demoDay.safetyAlerts}<small>회</small></strong></article>
+                      <article><span>마감 반복 확인</span><strong>{demoDay.doubleChecks}<small>회</small></strong></article>
+                      <article><span>업무 미완료</span><strong>{demoDay.unfinishedTasks}<small>건</small></strong></article>
+                      <article><span>미세 지연</span><strong>{demoDay.microDelay}<small>%</small></strong></article>
+                    </div>
+                    <ul className="day-examples">
+                      {demoDay.examples.map((example) => <li key={example}>{example}</li>)}
+                    </ul>
+                  </div>
+                </section>
+
+                <section className="insight-grid">
+                  <article className="insight-card observe">
+                    <span className="insight-icon" aria-hidden="true">↗</span>
+                    <div>
+                      <span className="section-kicker">1. 평소 대비 변화</span>
+                      <h3>후반 4일에 신호가 겹쳐요</h3>
+                      <p>수–일에는 안전 알림 3회, 반복 확인 7회, 미완료 업무 3건이 함께 나타납니다. 한 가지 실수보다 여러 일상 지표가 같은 기간에 변하는지를 봅니다.</p>
+                    </div>
+                  </article>
+                  <article className="insight-card timeline-insight">
+                    <span className="insight-icon" aria-hidden="true">⌁</span>
+                    <div>
+                      <span className="section-kicker">2. 시간축 연결</span>
+                      <h3>바쁜 시간대의 흐름을 확인해요</h3>
+                      <p>금·토 오후에는 주문 입력 중단과 음료 세팅 지연이 가까운 시간대에 기록됩니다. 타임라인은 “언제 일이 끊겼는지”를 되짚게 합니다.</p>
+                    </div>
+                  </article>
+                  <article className="insight-card care-insight">
+                    <span className="insight-icon" aria-hidden="true">♡</span>
+                    <div>
+                      <span className="section-kicker">3. 케어로 연결</span>
+                      <h3>진단 대신 휴식과 점검을 권해요</h3>
+                      <p>이 예시만으로 건강 상태를 판단하지 않습니다. 다만 변화가 이어질 때는 휴식, 점검 루틴, 필요 시 전문 상담을 조심스럽게 권할 수 있습니다.</p>
+                    </div>
+                  </article>
+                </section>
+
+                <section className="simulation-note">
+                  <strong>이 데모가 보여주는 범위</strong>
+                  <p>이수진 사장님의 데이터는 설명을 위한 가상 시나리오입니다. 메모리 가드는 질환을 진단하거나 단정하지 않으며, 실제 서비스에서는 장기간의 개인 기준선과 안전·업무 변화 패턴을 함께 살펴 케어 대화를 돕는 용도로 사용합니다.</p>
+                </section>
+              </>
+            ) : (
+              <>
             <section className="care-summary">
               <span className="care-summary-mark" aria-hidden="true">♡</span>
               <div>
@@ -1506,6 +1702,8 @@ export default function Home() {
               </div>
               <p>바쁜 날에는 마감 확인이 조금 늘었지만, 업무 흐름은 평소와 비슷했어요. 충분히 쉬는 것만으로도 다음 주가 한결 가벼워질 거예요.</p>
             </section>
+              </>
+            )}
           </div>
         )}
       </section>
