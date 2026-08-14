@@ -13,11 +13,55 @@ import {
   MOTION_SAMPLE_RATE,
   appendMotionChunk,
   createMotionSession,
+  deleteAllMotionSessions,
   downloadMotionSession,
+  extractHandPointTrajectory,
   finishMotionSession,
+  getSessionFrames,
   listMotionSessions,
   type MotionSessionRecord,
 } from "./pose-store";
+import {
+  describeHeadDirection,
+  getHeadDirection,
+  isFullBodyVisible,
+  computeHandMotionVariability,
+  computeMovementSmoothness,
+  type HeadDirection,
+} from "./motion-analysis";
+import { drawMotionSkeleton, type MotionSnapshot } from "./skeleton-draw";
+import { SessionReplayPanel } from "./session-replay";
+import { generateEventMotion, DEMO_MOTION_LABELS } from "./demo-motion";
+import { detectMotionEvents, motionSamplesFromRawFrames } from "./motion-detection";
+import {
+  computeBaseline,
+  detectChangeSignal,
+  summarizeLog,
+  type DailyLog,
+} from "./care-metrics";
+import {
+  deleteAllCareLogs,
+  estimateStorageUsage,
+  getConsent,
+  listRecentLogs,
+  recordDoubleCheck,
+  recordMicroDelay,
+  recordSafetyAlert,
+  recordTaskCompleted,
+  recordTaskStarted,
+  setBusyLevel as persistBusyLevel,
+  setConsent,
+  todayDateKey,
+  type ConsentState,
+} from "./metrics-store";
+import {
+  DEMO_PERSONAS,
+  explainDemoEvent,
+  signalLevelLabel,
+  type DemoDay,
+  type DemoEvent,
+  type DemoPersona,
+} from "./demo-personas";
 
 type View = "today" | "timeline" | "closing" | "care";
 type CameraStatus = "idle" | "requesting" | "connected" | "error";
@@ -44,98 +88,6 @@ type PoseStats = {
   startedAt: number | null;
 };
 
-type DemoDay = {
-  day: string;
-  date: string;
-  safetyAlerts: number;
-  doubleChecks: number;
-  unfinishedTasks: number;
-  microDelay: number;
-  note: string;
-  examples: string[];
-};
-
-const demoWeek: DemoDay[] = [
-  {
-    day: "월",
-    date: "8/4",
-    safetyAlerts: 0,
-    doubleChecks: 0,
-    unfinishedTasks: 0,
-    microDelay: 8,
-    note: "평소와 비슷한 월요일 오픈·마감 흐름",
-    examples: ["08:41 매장 오픈", "19:07 스마트 마감 1회 완료"],
-  },
-  {
-    day: "화",
-    date: "8/5",
-    safetyAlerts: 0,
-    doubleChecks: 1,
-    unfinishedTasks: 0,
-    microDelay: 9,
-    note: "마감 뒤 출입문 상태를 한 번 더 확인",
-    examples: ["19:12 출입문 잠김 확인", "19:14 출입문 상태 재확인"],
-  },
-  {
-    day: "수",
-    date: "8/6",
-    safetyAlerts: 1,
-    doubleChecks: 1,
-    unfinishedTasks: 1,
-    microDelay: 12,
-    note: "온열기 차단 알림과 결제 입력 중단이 함께 발생",
-    examples: ["14:38 결제 입력이 6분간 중단", "19:21 온열기 차단 권고"],
-  },
-  {
-    day: "목",
-    date: "8/7",
-    safetyAlerts: 0,
-    doubleChecks: 1,
-    unfinishedTasks: 0,
-    microDelay: 13,
-    note: "점심 혼잡 시간대의 음료 세팅 소요 시간이 늘어남",
-    examples: ["12:16 음료 세팅 4분 10초", "19:09 가스 밸브 재확인"],
-  },
-  {
-    day: "금",
-    date: "8/8",
-    safetyAlerts: 1,
-    doubleChecks: 2,
-    unfinishedTasks: 1,
-    microDelay: 17,
-    note: "마감 반복 확인과 미완료 주문이 평소보다 늘어남",
-    examples: ["15:02 주문 입력 후 9분 지연", "19:28 스마트 플러그 차단 권고"],
-  },
-  {
-    day: "토",
-    date: "8/9",
-    safetyAlerts: 1,
-    doubleChecks: 2,
-    unfinishedTasks: 1,
-    microDelay: 19,
-    note: "바쁜 날에 여러 지표가 함께 높아진 날",
-    examples: ["11:47 카드 결제 재입력", "20:11 마감 항목 2회 재확인"],
-  },
-  {
-    day: "일",
-    date: "8/10",
-    safetyAlerts: 0,
-    doubleChecks: 1,
-    unfinishedTasks: 0,
-    microDelay: 14,
-    note: "휴식 후 일부 회복됐지만 마감 확인은 이어짐",
-    examples: ["10:26 오픈 준비 정상", "18:53 출입문 상태 재확인"],
-  },
-];
-
-type HeadDirection = {
-  yaw: number;
-  pitch: number;
-  roll: number;
-  centerX: number;
-  centerY: number;
-};
-
 type HandState = {
   left: NormalizedLandmark[] | null;
   right: NormalizedLandmark[] | null;
@@ -143,30 +95,6 @@ type HandState = {
   rightScore: number;
 };
 
-type MotionSnapshot = {
-  body: number[];
-  leftHand: number[] | null;
-  rightHand: number[] | null;
-  head: HeadDirection;
-};
-
-const BODY_CONNECTIONS: Array<[number, number]> = [
-  [11, 12], [11, 13], [13, 15], [15, 17], [15, 19],
-  [15, 21], [17, 19], [12, 14], [14, 16], [16, 18], [16, 20],
-  [16, 22], [18, 20], [11, 23], [12, 24], [23, 24], [23, 25],
-  [24, 26], [25, 27], [26, 28], [27, 29], [28, 30], [29, 31],
-  [30, 32], [27, 31], [28, 32],
-];
-
-const HAND_CONNECTIONS: Array<[number, number]> = [
-  [0, 1], [1, 2], [2, 3], [3, 4],
-  [0, 5], [5, 6], [6, 7], [7, 8],
-  [5, 9], [9, 10], [10, 11], [11, 12],
-  [9, 13], [13, 14], [14, 15], [15, 16],
-  [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
-];
-
-const FULL_BODY_LANDMARKS = [7, 8, 11, 12, 23, 24, 25, 26, 27, 28];
 const CHUNK_FRAME_COUNT = MOTION_SAMPLE_RATE * 30;
 
 const initialEvents: TimelineEvent[] = [
@@ -256,6 +184,13 @@ function currentEpochTime() {
   return Math.round(performance.timeOrigin + performance.now());
 }
 
+// Kept as a top-level helper (rather than calling Date.now() inline inside
+// the component) so the React Compiler's purity check doesn't flag it -
+// same reasoning as currentEpochTime() above.
+function nowMs() {
+  return Date.now();
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -268,133 +203,14 @@ function formatDuration(totalSeconds: number) {
   return `${minutes}:${seconds}`;
 }
 
-function drawMotionSkeleton(
-  canvas: HTMLCanvasElement,
-  body: NormalizedLandmark[] | number[],
-  leftHand: NormalizedLandmark[] | number[] | null,
-  rightHand: NormalizedLandmark[] | number[] | null,
-  head: HeadDirection | null,
-  fullBody: boolean,
-) {
-  const context = canvas.getContext("2d");
-  if (!context) return;
-  context.clearRect(0, 0, canvas.width, canvas.height);
-
-  const bodyPoint = (index: number) => {
-    if (typeof body[0] === "number") {
-      const flat = body as number[];
-      const storedIndex = index - 11;
-      return {
-        x: flat[storedIndex * 4],
-        y: flat[storedIndex * 4 + 1],
-        z: flat[storedIndex * 4 + 2],
-        visibility: flat[storedIndex * 4 + 3],
-      };
-    }
-    return (body as NormalizedLandmark[])[index];
-  };
-
-  context.lineWidth = Math.max(3, canvas.width / 180);
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.strokeStyle = fullBody ? "#6ff0b7" : "#ffc36e";
-  context.shadowColor = "rgba(8, 38, 32, 0.75)";
-  context.shadowBlur = 8;
-
-  for (const [from, to] of BODY_CONNECTIONS) {
-    const start = bodyPoint(from);
-    const end = bodyPoint(to);
-    if (!start || !end || start.visibility < 0.35 || end.visibility < 0.35) continue;
-    context.beginPath();
-    context.moveTo(start.x * canvas.width, start.y * canvas.height);
-    context.lineTo(end.x * canvas.width, end.y * canvas.height);
-    context.stroke();
-  }
-
-  context.shadowBlur = 5;
-  for (let index = 11; index < 33; index += 1) {
-    const landmark = bodyPoint(index);
-    if (!landmark || landmark.visibility < 0.35) continue;
-    context.beginPath();
-    context.arc(
-      landmark.x * canvas.width,
-      landmark.y * canvas.height,
-      Math.max(3, canvas.width / 150),
-      0,
-      Math.PI * 2,
-    );
-    context.fillStyle = fullBody ? "#b9ffdc" : "#ffe0aa";
-    context.fill();
-  }
-
-  if (head) {
-    const leftShoulder = bodyPoint(11);
-    const rightShoulder = bodyPoint(12);
-    const shoulderWidth = leftShoulder && rightShoulder
-      ? Math.abs(leftShoulder.x - rightShoulder.x) * canvas.width
-      : canvas.width * 0.12;
-    const radius = Math.max(14, shoulderWidth * 0.28);
-    const centerX = head.centerX * canvas.width;
-    const centerY = head.centerY * canvas.height;
-    context.shadowBlur = 8;
-    context.strokeStyle = "#ffffff";
-    context.lineWidth = Math.max(3, canvas.width / 190);
-    context.beginPath();
-    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    context.stroke();
-    context.beginPath();
-    context.moveTo(centerX, centerY);
-    context.lineTo(
-      centerX + head.yaw * radius * 1.25,
-      centerY + head.pitch * radius * 1.25,
-    );
-    context.stroke();
-  }
-
-  const drawHand = (
-    hand: NormalizedLandmark[] | number[] | null,
-    color: string,
-  ) => {
-    if (!hand) return;
-    const handPoint = (index: number) => {
-      if (typeof hand[0] === "number") {
-        const flat = hand as number[];
-        return {
-          x: flat[index * 3],
-          y: flat[index * 3 + 1],
-          z: flat[index * 3 + 2],
-        };
-      }
-      return (hand as NormalizedLandmark[])[index];
-    };
-    context.strokeStyle = color;
-    context.fillStyle = color;
-    context.lineWidth = Math.max(2, canvas.width / 260);
-    context.shadowBlur = 6;
-    for (const [from, to] of HAND_CONNECTIONS) {
-      const start = handPoint(from);
-      const end = handPoint(to);
-      context.beginPath();
-      context.moveTo(start.x * canvas.width, start.y * canvas.height);
-      context.lineTo(end.x * canvas.width, end.y * canvas.height);
-      context.stroke();
-    }
-    for (let index = 0; index < HAND_LANDMARK_COUNT; index += 1) {
-      const landmark = handPoint(index);
-      context.beginPath();
-      context.arc(
-        landmark.x * canvas.width,
-        landmark.y * canvas.height,
-        Math.max(2, canvas.width / 230),
-        0,
-        Math.PI * 2,
-      );
-      context.fill();
-    }
-  };
-
-  drawHand(leftHand, "#74d9ff");
-  drawHand(rightHand, "#d9a0ff");
+function formatSessionTime(epochMs: number) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(epochMs));
 }
 
 function PoseSnapshot({ snapshot }: { snapshot: MotionSnapshot }) {
@@ -478,6 +294,14 @@ export default function Home() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionCount, setSessionCount] = useState(0);
   const [latestSession, setLatestSession] = useState<MotionSessionRecord | null>(null);
+  const [recentSessions, setRecentSessions] = useState<MotionSessionRecord[]>([]);
+  const [replaySessionId, setReplaySessionId] = useState<string | null>(null);
+  const [demoReplay, setDemoReplay] = useState<{
+    key: string;
+    label: string;
+    frames: number[][];
+    detectionExplanation: DemoDetectionExplanation;
+  } | null>(null);
   const [events, setEvents] = useState<TimelineEvent[]>(initialEvents);
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
   const [toast, setToast] = useState("");
@@ -489,7 +313,44 @@ export default function Home() {
   const [bookingName, setBookingName] = useState("김하나");
   const [bookingService, setBookingService] = useState("커트");
   const [demoMode, setDemoMode] = useState(true);
+  const [selectedPersonaIndex, setSelectedPersonaIndex] = useState(0);
   const [selectedDemoDay, setSelectedDemoDay] = useState(6);
+
+  // --- Consent, real observation metrics, and data controls ---
+  // Lazy initializer instead of an effect: getConsent() is SSR-safe (it
+  // checks `typeof window` itself and falls back to the default), so there's
+  // no need to synchronize it via setState in an effect after mount.
+  const [consent, setConsentState] = useState<ConsentState>(() => getConsent());
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [careLogs, setCareLogs] = useState<DailyLog[]>([]);
+  const [todayBusyLevel, setTodayBusyLevel] = useState<"quiet" | "normal" | "busy">(
+    "normal",
+  );
+  const [myDataOpen, setMyDataOpen] = useState(false);
+  const [storageUsage, setStorageUsage] = useState<{
+    usageBytes: number;
+    quotaBytes: number;
+  } | null>(null);
+  const [motionSignal, setMotionSignal] = useState<{
+    variability: number | null;
+    smoothness: number | null;
+  } | null>(null);
+  const pendingCameraStartRef = useRef(false);
+  const closingDoneTodayRef = useRef(false);
+  const bookingShownAtRef = useRef<number | null>(null);
+  const lastTestEventAtRef = useRef<number | null>(null);
+  const savepointStartRecordedRef = useRef(false);
+
+  async function refreshCareData() {
+    try {
+      const logs = await listRecentLogs(28);
+      setCareLogs(logs);
+      const today = logs.find((log) => log.date === todayDateKey());
+      if (today) setTodayBusyLevel(today.busyLevel);
+    } catch {
+      // local-only storage; ignore transient read errors
+    }
+  }
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const processingVideoRef = useRef<HTMLVideoElement>(null);
@@ -549,9 +410,64 @@ export default function Home() {
       .then((sessions) => {
         setSessionCount(sessions.length);
         setLatestSession(sessions[0] ?? null);
+        setRecentSessions(sessions.slice(0, 5));
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    listRecentLogs(28)
+      .then((logs) => {
+        setCareLogs(logs);
+        const today = logs.find((log) => log.date === todayDateKey());
+        if (today) setTodayBusyLevel(today.busyLevel);
+      })
+      .catch(() => undefined);
+    estimateStorageUsage().then((usage) => {
+      setStorageUsage(usage);
+      if (usage && usage.quotaBytes > 0 && usage.usageBytes / usage.quotaBytes > 0.9) {
+        setToast(
+          "브라우저 저장 공간이 거의 찼어요. 내 데이터 관리에서 오래된 기록을 정리해 주세요.",
+        );
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (
+      consent.observationConsent &&
+      savepointOpen &&
+      !savepointStartRecordedRef.current
+    ) {
+      savepointStartRecordedRef.current = true;
+      bookingShownAtRef.current = nowMs();
+      void recordTaskStarted().then(refreshCareData);
+    }
+  }, [consent.observationConsent, savepointOpen]);
+
+  useEffect(() => {
+    if (!consent.observationConsent || !latestSession || latestSession.frameCount < 20) {
+      return;
+    }
+    let cancelled = false;
+    getSessionFrames(latestSession.id)
+      .then((frames) => {
+        if (cancelled) return;
+        const rightHandTrajectory = extractHandPointTrajectory(
+          frames,
+          "right",
+          8, // index fingertip
+        );
+        setMotionSignal({
+          variability: computeHandMotionVariability(rightHandTrajectory),
+          smoothness: computeMovementSmoothness(rightHandTrajectory),
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [consent.observationConsent, latestSession]);
 
   useEffect(() => {
     if (cameraStatus !== "connected" || !poseStats.startedAt) return;
@@ -592,6 +508,25 @@ export default function Home() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  function requestCameraStart() {
+    if (!consent.decided) {
+      pendingCameraStartRef.current = true;
+      setShowConsentModal(true);
+      return;
+    }
+    void startCamera();
+  }
+
+  function handleConsentDecision(observationConsent: boolean) {
+    const next = setConsent(observationConsent);
+    setConsentState(next);
+    setShowConsentModal(false);
+    if (observationConsent && pendingCameraStartRef.current) {
+      void startCamera();
+    }
+    pendingCameraStartRef.current = false;
+  }
 
   async function startCamera() {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -713,69 +648,6 @@ export default function Home() {
         );
       }
     }
-  }
-
-  function isFullBodyVisible(landmarks: NormalizedLandmark[]) {
-    const allRequiredVisible = FULL_BODY_LANDMARKS.every((index) => {
-      const point = landmarks[index];
-      return (
-        point &&
-        point.visibility >= 0.55 &&
-        point.x >= 0.015 &&
-        point.x <= 0.985 &&
-        point.y >= 0.015 &&
-        point.y <= 0.985
-      );
-    });
-    if (!allRequiredVisible) return false;
-    const ankleY = (landmarks[27].y + landmarks[28].y) / 2;
-    const headY = (landmarks[7].y + landmarks[8].y) / 2;
-    return ankleY - headY >= 0.5;
-  }
-
-  function getHeadDirection(
-    landmarks: NormalizedLandmark[],
-  ): HeadDirection | null {
-    const nose = landmarks[0];
-    const leftEar = landmarks[7];
-    const rightEar = landmarks[8];
-    const leftShoulder = landmarks[11];
-    const rightShoulder = landmarks[12];
-    if (
-      !nose ||
-      !leftEar ||
-      !rightEar ||
-      leftEar.visibility < 0.35 ||
-      rightEar.visibility < 0.35
-    ) {
-      return null;
-    }
-    const centerX = (leftEar.x + rightEar.x) / 2;
-    const centerY = (leftEar.y + rightEar.y) / 2;
-    const shoulderWidth = Math.max(
-      0.08,
-      Math.abs(leftShoulder.x - rightShoulder.x),
-    );
-    const clamp = (value: number) => Math.max(-1, Math.min(1, value));
-    return {
-      yaw: clamp((nose.x - centerX) / (shoulderWidth * 0.32)),
-      pitch: clamp((nose.y - centerY) / (shoulderWidth * 0.32)),
-      roll: Math.atan2(
-        rightEar.y - leftEar.y,
-        rightEar.x - leftEar.x,
-      ),
-      centerX,
-      centerY,
-    };
-  }
-
-  function describeHeadDirection(head: HeadDirection | null) {
-    if (!head) return "머리 방향 미확인";
-    if (head.pitch < -0.32) return "위를 보는 중";
-    if (head.pitch > 0.32) return "아래를 보는 중";
-    if (head.yaw < -0.3) return "왼쪽을 보는 중";
-    if (head.yaw > 0.3) return "오른쪽을 보는 중";
-    return "정면을 보는 중";
   }
 
   function flushPoseFrames() {
@@ -1022,6 +894,31 @@ export default function Home() {
     }
   }
 
+  // Analyzes a just-finished session's real coordinates with the same
+  // motion detector used for the demo persona replay (app/motion-detection.ts)
+  // and records ANY detected events into today's log - ALONGSIDE the
+  // existing button/timer signals (recordDoubleCheck/recordSafetyAlert
+  // elsewhere in this file), not instead of them. Best-effort: a failed
+  // analysis shouldn't block ending the camera session.
+  async function recordMotionDetections(sessionId: string) {
+    try {
+      const rawFrames = await getSessionFrames(sessionId);
+      const samples = motionSamplesFromRawFrames(rawFrames);
+      const detections = detectMotionEvents(samples);
+      for (const detection of detections) {
+        if (detection.type === "safety_alert") {
+          await recordSafetyAlert();
+        } else if (detection.type === "double_check") {
+          await recordDoubleCheck();
+        } else {
+          await recordMicroDelay((detection.endMs - detection.startMs) / 1000);
+        }
+      }
+    } catch {
+      // local-only analysis; ignore transient read errors
+    }
+  }
+
   async function stopPoseTracking() {
     trackingActiveRef.current = false;
     if (poseAnimationRef.current !== null) {
@@ -1035,7 +932,11 @@ export default function Home() {
       const endedAt = currentEpochTime();
       const completed = await finishMotionSession(session, endedAt);
       setLatestSession(completed);
+      setRecentSessions((previous) => [completed, ...previous.filter((s) => s.id !== completed.id)].slice(0, 5));
       poseSessionRef.current = null;
+      if (consent.observationConsent && completed.frameCount >= 20) {
+        void recordMotionDetections(completed.id).then(refreshCareData);
+      }
     }
     overlayCanvasRef.current
       ?.getContext("2d")
@@ -1098,6 +999,19 @@ export default function Home() {
     };
     setEvents((previous) => [event, ...previous]);
     setToast("이벤트 시점을 좌표 기록에 표시했어요");
+
+    // Gap between consecutive logged moments is used as a rough proxy for
+    // the "미세 지연" (micro-delay) observation metric from the PRD. This is
+    // a coarse stand-in, not a precise task-timer.
+    if (consent.observationConsent) {
+      const now = nowMs();
+      if (lastTestEventAtRef.current !== null) {
+        void recordMicroDelay((now - lastTestEventAtRef.current) / 1000).then(
+          refreshCareData,
+        );
+      }
+      lastTestEventAtRef.current = now;
+    }
   }
 
   async function exportPoseData() {
@@ -1117,6 +1031,11 @@ export default function Home() {
   }
 
   function startClosingCheck() {
+    if (closingDoneTodayRef.current && consent.observationConsent) {
+      // Re-running the closing check after it was already marked done today
+      // is exactly the "마감 반복 확인 (Double Check)" pattern from the PRD.
+      void recordDoubleCheck().then(refreshCareData);
+    }
     setClosingStatus("checking");
     setClosingStep(0);
     let step = 0;
@@ -1127,6 +1046,9 @@ export default function Home() {
         window.clearInterval(timer);
         if (heaterOn) {
           setClosingStatus("attention");
+          if (consent.observationConsent) {
+            void recordSafetyAlert().then(refreshCareData);
+          }
         } else {
           completeClosing();
         }
@@ -1137,6 +1059,7 @@ export default function Home() {
   function completeClosing() {
     setClosingStatus("done");
     setClosingStep(3);
+    closingDoneTodayRef.current = true;
     setEvents((previous) => {
       if (previous[0]?.title === "오늘의 마감이 완료됐어요") return previous;
       return [
@@ -1159,6 +1082,32 @@ export default function Home() {
     setToast("온열기 전원을 차단했어요");
   }
 
+  function openDemoEventReplay(
+    persona: DemoPersona,
+    day: DemoDay,
+    dayIndex: number,
+    exampleIndex: number,
+    example: DemoEvent,
+  ) {
+    // Deterministic per (persona, day, event) - the same event always opens
+    // the same clip, but distinct events don't all play back identically.
+    const seed = dayIndex * 4 + exampleIndex;
+    const frames = generateEventMotion(example.motionType, seed);
+    setDemoReplay({
+      key: `${persona.id}-${dayIndex}-${exampleIndex}`,
+      label: `${persona.name} · ${example.label} · ${DEMO_MOTION_LABELS[example.motionType]}`,
+      frames,
+      detectionExplanation: explainDemoEvent(persona, dayIndex, day, example, frames),
+    });
+  }
+
+  function changeBusyLevel(level: "quiet" | "normal" | "busy") {
+    setTodayBusyLevel(level);
+    if (consent.observationConsent) {
+      void persistBusyLevel(level).then(refreshCareData);
+    }
+  }
+
   function saveBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setEvents((previous) => [
@@ -1174,10 +1123,83 @@ export default function Home() {
     setSavepointOpen(false);
     setBookingOpen(false);
     setToast("하던 업무를 이어서 완료했어요");
+    if (consent.observationConsent) {
+      void recordTaskCompleted().then(refreshCareData);
+      if (bookingShownAtRef.current !== null) {
+        void recordMicroDelay((nowMs() - bookingShownAtRef.current) / 1000);
+      }
+    }
+  }
+
+  function dismissSavepoint() {
+    setSavepointOpen(false);
+    setToast("나중에 다시 확인할 수 있어요. 세이브포인트는 그대로 남아있어요.");
+    // Left uncompleted on purpose: this is what "업무 누락율 (Drop Rate)"
+    // is meant to observe - a started task that never got finished.
   }
 
   function openTimelineEvent(event: TimelineEvent) {
     setSelectedEvent(event);
+  }
+
+  async function deleteAllMyData() {
+    // Stop any in-flight recording first and let its queued writes settle.
+    // Deleting while a session is still actively being written would let
+    // the next scheduled flush silently recreate a "1 session" row right
+    // after the wipe, which is confusing and defeats the point of "삭제".
+    if (cameraStatus === "connected") {
+      await stopCamera();
+    }
+    await Promise.all([deleteAllMotionSessions(), deleteAllCareLogs()]);
+    setSessionCount(0);
+    setLatestSession(null);
+    setRecentSessions([]);
+    setReplaySessionId(null);
+    setMotionSignal(null);
+    setCareLogs([]);
+    setPoseStats({
+      frames: 0,
+      detectedFrames: 0,
+      fullBodyFrames: 0,
+      handDetectedFrames: 0,
+      storageBytes: 0,
+      startedAt: null,
+    });
+    const usage = await estimateStorageUsage();
+    setStorageUsage(usage);
+    setToast("저장된 동작 좌표와 케어 기록을 모두 삭제했어요");
+  }
+
+  function withdrawObservationConsent() {
+    const next = setConsent(false);
+    setConsentState(next);
+    setToast("관찰 참여를 철회했어요. 매장 안전 기능은 계속 사용할 수 있어요.");
+  }
+
+  async function shareCareSummary() {
+    const recent = careLogs.slice(0, 7);
+    const safetyAlerts = recent.reduce((sum, log) => sum + log.safetyAlerts, 0);
+    const doubleChecks = recent.reduce((sum, log) => sum + log.doubleChecks, 0);
+    const summaryText =
+      `메모리 가드 케어 요약 (최근 ${recent.length || 0}일)\n` +
+      `안전 알림 ${safetyAlerts}회 · 마감 반복 확인 ${doubleChecks}회\n` +
+      `이 요약은 진단이 아니며 참고용 케어 정보입니다.`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "메모리 가드 케어 요약", text: summaryText });
+        setToast("공유 창을 열었어요");
+        return;
+      }
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(summaryText);
+        setToast("케어 요약을 클립보드에 복사했어요");
+        return;
+      }
+      setToast("이 브라우저에서는 공유를 지원하지 않아요");
+    } catch {
+      setToast("공유를 취소했어요");
+    }
   }
 
   const statusText =
@@ -1203,7 +1225,19 @@ export default function Home() {
   const fullBodyRatio = poseStats.detectedFrames
     ? Math.round((poseStats.fullBodyFrames / poseStats.detectedFrames) * 100)
     : 0;
-  const demoDay = demoWeek[selectedDemoDay];
+  const activePersona = DEMO_PERSONAS[selectedPersonaIndex] ?? DEMO_PERSONAS[0];
+  const demoDay = activePersona.week[selectedDemoDay] ?? activePersona.week[0];
+
+  const recentCareLogs = careLogs.slice(0, 7);
+  const careBaseline = computeBaseline(careLogs);
+  const changeSignal = detectChangeSignal(recentCareLogs, careBaseline);
+  const todaySummary = careLogs[0] ? summarizeLog(careLogs[0]) : null;
+  const totalSafetyAlerts = recentCareLogs.reduce((sum, log) => sum + log.safetyAlerts, 0);
+  const totalDoubleChecks = recentCareLogs.reduce((sum, log) => sum + log.doubleChecks, 0);
+  const totalDroppedTasks = recentCareLogs.reduce(
+    (sum, log) => sum + Math.max(0, log.tasksStarted - log.tasksCompleted),
+    0,
+  );
 
   return (
     <main className="app-shell">
@@ -1250,6 +1284,14 @@ export default function Home() {
           <p>사장님의 하루를</p>
           <strong>조용히 지켜드릴게요.</strong>
         </div>
+        <button
+          type="button"
+          className="my-data-entry"
+          onClick={() => setMyDataOpen(true)}
+        >
+          <span aria-hidden="true">⚙</span> 내 데이터 관리
+        </button>
+
         <div className="profile">
           <span className="avatar">김</span>
           <span>
@@ -1331,7 +1373,7 @@ export default function Home() {
                       <button
                         className="primary-button"
                         type="button"
-                        onClick={startCamera}
+                        onClick={requestCameraStart}
                         disabled={cameraStatus === "requesting"}
                       >
                         {cameraStatus === "requesting" ? "연결 중…" : "카메라 연결"}
@@ -1443,9 +1485,18 @@ export default function Home() {
                   <h2>아까 하던 예약 입력이 남아 있어요</h2>
                   <p>김하나 고객 · 커트 · 예약 시간 확인 단계</p>
                 </div>
-                <button type="button" onClick={() => setBookingOpen(true)}>
-                  이어서 하기 <span aria-hidden="true">›</span>
-                </button>
+                <div className="savepoint-actions">
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={dismissSavepoint}
+                  >
+                    나중에 할게요
+                  </button>
+                  <button type="button" onClick={() => setBookingOpen(true)}>
+                    이어서 하기 <span aria-hidden="true">›</span>
+                  </button>
+                </div>
               </section>
             )}
           </div>
@@ -1533,16 +1584,42 @@ export default function Home() {
                 </div>
               </div>
 
+              <div className="busy-level-picker">
+                <span>오늘 매장 분위기</span>
+                <div role="group" aria-label="오늘 매장 분위기">
+                  {(
+                    [
+                      { key: "quiet", label: "한산" },
+                      { key: "normal", label: "보통" },
+                      { key: "busy", label: "바쁨" },
+                    ] as const
+                  ).map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={todayBusyLevel === option.key ? "active" : ""}
+                      onClick={() => changeBusyLevel(option.key)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <small>
+                  바쁜 날은 케어 리포트에서 따로 표시해, 손님이 많아 생긴
+                  변화와 패턴 변화를 구분하는 데 참고해요.
+                </small>
+              </div>
+
               <button
                 className="closing-button"
                 type="button"
                 onClick={startClosingCheck}
-                disabled={closingStatus === "checking" || closingStatus === "done"}
+                disabled={closingStatus === "checking"}
               >
                 {closingStatus === "checking"
                   ? `안전 확인 중 ${closingStep}/3`
                   : closingStatus === "done"
-                    ? "마감 완료"
+                    ? "마감 완료 · 다시 확인하기"
                     : "퇴근 전 자동 점검"}
               </button>
             </section>
@@ -1555,7 +1632,7 @@ export default function Home() {
               <div>
                 <span className="section-kicker">연구용 시뮬레이션</span>
                 <h2>가상 페르소나의 일주일 관찰 결과</h2>
-                <p>54세 여성 · 개인 카페 사장 · 실제 사용자 데이터가 아닌 예시입니다.</p>
+                <p>실제 사용자 데이터가 아닌 예시입니다. 서로 다른 4가지 결과를 보여주는 페르소나 중 하나를 골라보세요.</p>
               </div>
               <button
                 type="button"
@@ -1569,14 +1646,53 @@ export default function Home() {
 
             {demoMode ? (
               <>
+                <div className="persona-switcher" role="tablist" aria-label="가상 페르소나 선택">
+                  {DEMO_PERSONAS.map((persona, index) => (
+                    <button
+                      key={persona.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={selectedPersonaIndex === index}
+                      className={selectedPersonaIndex === index ? "selected" : ""}
+                      onClick={() => {
+                        setSelectedPersonaIndex(index);
+                        setSelectedDemoDay(6);
+                      }}
+                    >
+                      <span className={`persona-tab-avatar level-${persona.signal.level}`} aria-hidden="true">
+                        {persona.avatarLabel}
+                      </span>
+                      <span className="persona-tab-copy">
+                        <strong>{persona.name}</strong>
+                        <small>{signalLevelLabel(persona.signal.level)}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
                 <section className="persona-card">
-                  <div className="persona-avatar" aria-hidden="true">카</div>
+                  <div className="persona-avatar" aria-hidden="true">{activePersona.avatarLabel}</div>
                   <div>
-                    <span className="section-kicker">페르소나: 이수진 사장님</span>
-                    <h2>일주일의 흐름에서 함께 나타난 변화</h2>
-                    <p>평소에는 혼자 카페를 안정적으로 운영합니다. 이번 주 후반에는 깜빡함, 마감 반복 확인, 업무 중단, 단일 업무 지연이 함께 늘어나는 패턴을 가정했습니다.</p>
+                    <span className="section-kicker">페르소나: {activePersona.name}</span>
+                    <h2>{activePersona.tagline}</h2>
+                    <p>{activePersona.summary}</p>
                   </div>
                   <span className="simulation-chip">가상 데이터</span>
+                </section>
+
+                <section className={`signal-result level-${activePersona.signal.level}`}>
+                  <div className="signal-result-head">
+                    <span className={`signal-pill level-${activePersona.signal.level}`}>
+                      {signalLevelLabel(activePersona.signal.level)}
+                    </span>
+                    <small>실제 케어 리포트와 같은 계산 로직(app/care-metrics.ts)으로 이 가상 데이터를 분석한 결과예요.</small>
+                  </div>
+                  <ul>
+                    {activePersona.signal.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                  </ul>
+                  {activePersona.signal.confoundNote && (
+                    <p className="confound-note">{activePersona.signal.confoundNote}</p>
+                  )}
                 </section>
 
                 <section className="panel week-observation">
@@ -1585,12 +1701,12 @@ export default function Home() {
                       <span className="section-kicker">7일 행동 흐름</span>
                       <h2>하루를 선택해 상세 기록 보기</h2>
                     </div>
-                    <span className="week-range">8월 4일–10일</span>
+                    <span className="week-range">{activePersona.weekRange}</span>
                   </div>
                   <div className="week-days" role="tablist" aria-label="가상 관찰 날짜">
-                    {demoWeek.map((day, index) => {
+                    {activePersona.week.map((day, index) => {
                       const intensity = Math.max(
-                        day.safetyAlerts * 2 + day.doubleChecks + day.unfinishedTasks + Math.round(day.microDelay / 6) - 1,
+                        day.safetyAlerts * 2 + day.doubleChecks + day.unfinishedTasks + Math.round(day.microDelayRate / 6) - 1,
                         0,
                       );
                       return (
@@ -1611,99 +1727,211 @@ export default function Home() {
                   </div>
                   <div className="day-detail" role="tabpanel">
                     <div className="day-detail-head">
-                      <span>{demoDay.day}요일 · {demoDay.date}</span>
+                      <span>{demoDay.day}요일 · {demoDay.date}{demoDay.busy ? " · 바쁨으로 표시됨" : ""}</span>
                       <strong>{demoDay.note}</strong>
                     </div>
                     <div className="day-signal-grid">
                       <article><span>안전 알림</span><strong>{demoDay.safetyAlerts}<small>회</small></strong></article>
                       <article><span>마감 반복 확인</span><strong>{demoDay.doubleChecks}<small>회</small></strong></article>
                       <article><span>업무 미완료</span><strong>{demoDay.unfinishedTasks}<small>건</small></strong></article>
-                      <article><span>미세 지연</span><strong>{demoDay.microDelay}<small>%</small></strong></article>
+                      <article><span>미세 지연</span><strong>{demoDay.microDelayRate}<small>%</small></strong></article>
                     </div>
                     <ul className="day-examples">
-                      {demoDay.examples.map((example) => <li key={example}>{example}</li>)}
+                      {demoDay.examples.map((example, exampleIndex) => (
+                        <li key={example.label}>
+                          <span>{example.label}</span>
+                          <button
+                            type="button"
+                            className="demo-event-replay-button"
+                            onClick={() =>
+                              openDemoEventReplay(
+                                activePersona,
+                                demoDay,
+                                selectedDemoDay,
+                                exampleIndex,
+                                example,
+                              )
+                            }
+                          >
+                            동작 보기
+                          </button>
+                        </li>
+                      ))}
                     </ul>
                   </div>
                 </section>
 
                 <section className="insight-grid">
-                  <article className="insight-card observe">
-                    <span className="insight-icon" aria-hidden="true">↗</span>
-                    <div>
-                      <span className="section-kicker">1. 평소 대비 변화</span>
-                      <h3>후반 4일에 신호가 겹쳐요</h3>
-                      <p>수–일에는 안전 알림 3회, 반복 확인 7회, 미완료 업무 3건이 함께 나타납니다. 한 가지 실수보다 여러 일상 지표가 같은 기간에 변하는지를 봅니다.</p>
-                    </div>
-                  </article>
-                  <article className="insight-card timeline-insight">
-                    <span className="insight-icon" aria-hidden="true">⌁</span>
-                    <div>
-                      <span className="section-kicker">2. 시간축 연결</span>
-                      <h3>바쁜 시간대의 흐름을 확인해요</h3>
-                      <p>금·토 오후에는 주문 입력 중단과 음료 세팅 지연이 가까운 시간대에 기록됩니다. 타임라인은 “언제 일이 끊겼는지”를 되짚게 합니다.</p>
-                    </div>
-                  </article>
-                  <article className="insight-card care-insight">
-                    <span className="insight-icon" aria-hidden="true">♡</span>
-                    <div>
-                      <span className="section-kicker">3. 케어로 연결</span>
-                      <h3>진단 대신 휴식과 점검을 권해요</h3>
-                      <p>이 예시만으로 건강 상태를 판단하지 않습니다. 다만 변화가 이어질 때는 휴식, 점검 루틴, 필요 시 전문 상담을 조심스럽게 권할 수 있습니다.</p>
-                    </div>
-                  </article>
+                  {activePersona.insights.map((insight, index) => {
+                    const toneClass = ["observe", "timeline-insight", "care-insight"][index] ?? "observe";
+                    return (
+                      <article className={`insight-card ${toneClass}`} key={insight.kicker}>
+                        <span className="insight-icon" aria-hidden="true">{insight.icon}</span>
+                        <div>
+                          <span className="section-kicker">{insight.kicker}</span>
+                          <h3>{insight.title}</h3>
+                          <p>{insight.body}</p>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </section>
 
                 <section className="simulation-note">
                   <strong>이 데모가 보여주는 범위</strong>
-                  <p>이수진 사장님의 데이터는 설명을 위한 가상 시나리오입니다. 메모리 가드는 질환을 진단하거나 단정하지 않으며, 실제 서비스에서는 장기간의 개인 기준선과 안전·업무 변화 패턴을 함께 살펴 케어 대화를 돕는 용도로 사용합니다.</p>
+                  <p>{activePersona.note}</p>
                 </section>
               </>
+            ) : !consent.observationConsent ? (
+              <section className="care-empty-state">
+                <span className="care-summary-mark" aria-hidden="true">♡</span>
+                <h2>아직 장기 관찰에 참여하고 있지 않아요</h2>
+                <p>
+                  카메라를 연결할 때 &ldquo;동의하고 카메라 켜기&rdquo;를 선택하면, 실제
+                  사용 기록을 바탕으로 한 케어 리포트가 이곳에 쌓이기
+                  시작해요. 지금은 시뮬레이션 예시만 보실 수 있어요.
+                </p>
+                <button type="button" onClick={() => handleConsentDecision(true)}>
+                  장기 관찰에 참여하기
+                </button>
+              </section>
+            ) : recentCareLogs.length === 0 ? (
+              <section className="care-empty-state">
+                <span className="care-summary-mark" aria-hidden="true">♡</span>
+                <h2>아직 쌓인 기록이 없어요</h2>
+                <p>
+                  스마트 마감을 확인하거나 세이브포인트를 사용하시면, 그
+                  기록을 바탕으로 케어 리포트가 만들어져요. 며칠 사용하시면
+                  평소 흐름과 비교한 리포트를 볼 수 있어요.
+                </p>
+              </section>
             ) : (
               <>
-            <section className="care-summary">
-              <span className="care-summary-mark" aria-hidden="true">♡</span>
-              <div>
-                <span className="section-kicker">최근 2주 케어 리포트</span>
-                <h2>대체로 평소와 비슷한 흐름이에요</h2>
-                <p>가스·전기 차단 알림이 3회 있었어요. 이번 주말은 푹 쉬면서 컨디션을 관리해 보세요.</p>
-              </div>
-            </section>
+                <section className="care-summary">
+                  <span className="care-summary-mark" aria-hidden="true">♡</span>
+                  <div>
+                    <span className="section-kicker">
+                      최근 {recentCareLogs.length}일 케어 리포트 · 실제 기록
+                    </span>
+                    <h2>
+                      {changeSignal.level === "notable"
+                        ? "요즘 몇 가지 흐름이 평소보다 늘었어요"
+                        : changeSignal.level === "watch"
+                          ? "한두 가지 변화가 눈에 띄어요"
+                          : "대체로 평소와 비슷한 흐름이에요"}
+                    </h2>
+                    {changeSignal.reasons.map((reason) => (
+                      <p key={reason}>{reason}</p>
+                    ))}
+                    {changeSignal.confoundNote && (
+                      <p className="confound-note">{changeSignal.confoundNote}</p>
+                    )}
+                    {!careBaseline && (
+                      <p className="confound-note">
+                        아직 평소 기준을 만들 만큼(최소 3일) 기록이 쌓이지
+                        않아, 변화 비교 없이 최근 기록만 보여드려요.
+                      </p>
+                    )}
+                  </div>
+                </section>
 
-            <div className="metric-grid">
-              <article className="metric-card">
-                <span>안전 알림</span>
-                <strong>3<small>회</small></strong>
-                <p><i className="up">↑ 1회</i> 지난 2주와 비교</p>
-              </article>
-              <article className="metric-card">
-                <span>마감 반복 확인</span>
-                <strong>2<small>회</small></strong>
-                <p><i>— 같음</i> 지난 2주와 비교</p>
-              </article>
-              <article className="metric-card">
-                <span>업무 누락</span>
-                <strong>1<small>건</small></strong>
-                <p><i className="down">↓ 1건</i> 지난 2주와 비교</p>
-              </article>
-              <article className="metric-card">
-                <span>업무 흐름</span>
-                <strong className="word-value">평소와 비슷</strong>
-                <p><i className="steady">● 안정</i> 일상 업무 소요 시간</p>
-              </article>
-            </div>
-
-            <section className="panel care-note">
-              <div className="panel-heading">
-                <div>
-                  <span className="section-kicker">따뜻한 한마디</span>
-                  <h2>이번 주의 케어 메모</h2>
+                <div className="metric-grid">
+                  <article className="metric-card">
+                    <span>안전 알림</span>
+                    <strong>
+                      {totalSafetyAlerts}
+                      <small>회</small>
+                    </strong>
+                    <p>최근 {recentCareLogs.length}일 합계</p>
+                  </article>
+                  <article className="metric-card">
+                    <span>마감 반복 확인</span>
+                    <strong>
+                      {totalDoubleChecks}
+                      <small>회</small>
+                    </strong>
+                    <p>최근 {recentCareLogs.length}일 합계</p>
+                  </article>
+                  <article className="metric-card">
+                    <span>업무 누락</span>
+                    <strong>
+                      {totalDroppedTasks}
+                      <small>건</small>
+                    </strong>
+                    <p>최근 {recentCareLogs.length}일 합계</p>
+                  </article>
+                  <article className="metric-card">
+                    <span>오늘 업무 흐름</span>
+                    <strong className="word-value">
+                      {todaySummary && todaySummary.microDelayRate > 0.3
+                        ? "지연 있음"
+                        : "평소와 비슷"}
+                    </strong>
+                    <p>
+                      <i className="steady">● 참고용</i> 반복 업무 처리 시간
+                      기준
+                    </p>
+                  </article>
                 </div>
-                <span>8월 11일</span>
-              </div>
-              <p>바쁜 날에는 마감 확인이 조금 늘었지만, 업무 흐름은 평소와 비슷했어요. 충분히 쉬는 것만으로도 다음 주가 한결 가벼워질 거예요.</p>
-            </section>
+
+                {motionSignal && (
+                  <section className="panel motion-signal-note">
+                    <div className="panel-heading">
+                      <div>
+                        <span className="section-kicker">참고용 · 검증되지 않음</span>
+                        <h2>손 동작 신호 (실험적)</h2>
+                      </div>
+                    </div>
+                    <p>
+                      최근 카메라 세션의 손 움직임에서 계산한 참고 지표예요.
+                      5FPS로 기록되기 때문에 실제 손 떨림(4~12Hz)을 정밀하게
+                      측정할 수 없고, 임상적으로 검증되지 않았어요. 추세를
+                      가볍게 참고하는 용도로만 사용해 주세요.
+                    </p>
+                    <div className="motion-signal-grid">
+                      <span>
+                        동작 변동성{" "}
+                        <strong>
+                          {motionSignal.variability !== null
+                            ? motionSignal.variability.toFixed(2)
+                            : "측정 중"}
+                        </strong>
+                      </span>
+                      <span>
+                        동작 매끄러움(값이 작을수록 부드러움){" "}
+                        <strong>
+                          {motionSignal.smoothness !== null
+                            ? motionSignal.smoothness.toFixed(4)
+                            : "측정 중"}
+                        </strong>
+                      </span>
+                    </div>
+                  </section>
+                )}
               </>
             )}
+
+            <section className="panel care-connect-card">
+              <div className="panel-heading">
+                <div>
+                  <span className="section-kicker">케어로 연결</span>
+                  <h2>도움이 필요할 때 연결할 수 있어요</h2>
+                </div>
+              </div>
+              <p>
+                이 리포트만으로 건강 상태를 판단하지 않아요. 다만 변화가
+                계속 이어져 걱정되신다면, 아래 상담 채널을 편하게
+                이용해보세요.
+              </p>
+              <div className="care-connect-actions">
+                <a className="care-connect-link" href="tel:1899-9988">
+                  치매상담콜센터(보건복지부) 1899-9988
+                </a>
+                <button type="button" onClick={() => void shareCareSummary()}>
+                  가족과 리포트 공유
+                </button>
+              </div>
+            </section>
           </div>
         )}
       </section>
@@ -1752,6 +1980,15 @@ export default function Home() {
                 </div>
               )}
             </div>
+            {selectedEvent.poseSessionId && (
+              <button
+                className="secondary-button replay-open-button"
+                type="button"
+                onClick={() => setReplaySessionId(selectedEvent.poseSessionId ?? null)}
+              >
+                이 순간이 기록된 세션 전체 리플레이 보기
+              </button>
+            )}
             <button className="modal-confirm" type="button" onClick={() => setSelectedEvent(null)}>확인했어요</button>
           </section>
         </div>
@@ -1791,6 +2028,187 @@ export default function Home() {
             </form>
           </section>
         </div>
+      )}
+
+      {showConsentModal && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="consent-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="consent-title"
+          >
+            <span className="section-kicker">카메라를 켜기 전에 알려드려요</span>
+            <h2 id="consent-title">이 카메라는 두 가지 목적으로 쓰일 수 있어요</h2>
+            <ul className="consent-list">
+              <li>
+                <strong>① 기억 복원</strong> — 결제·출입 같은 순간의 몸·손
+                좌표를 짧게 저장해, 나중에 &ldquo;그때 무슨 일이 있었는지&rdquo;를
+                스켈레톤으로 다시 확인할 수 있게 해요.
+              </li>
+              <li>
+                <strong>② 장기 인지 건강 관찰(선택)</strong> — 동의하시면,
+                안전 알림 빈도·마감 반복 확인·업무 지연 같은 행동 패턴을
+                오랜 기간 관찰해 케어 리포트를 만드는 데도 사용해요. 이
+                데이터는 진단이 아니라 변화를 알아차리는 참고용이며, 언제든
+                내 데이터 관리에서 철회하고 전부 삭제할 수 있어요.
+              </li>
+            </ul>
+            <p className="consent-note">
+              얼굴·영상·음성은 저장하지 않고, 좌표 데이터는 이 브라우저에만
+              남아요. 동의하지 않아도 타임라인·스마트 마감 같은 매장 안전
+              기능은 카메라 없이 그대로 사용할 수 있어요.
+            </p>
+            <div className="consent-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => handleConsentDecision(false)}
+              >
+                매장 안전 기능만 사용할게요
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => handleConsentDecision(true)}
+              >
+                동의하고 카메라 켜기
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {myDataOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={() => setMyDataOpen(false)}
+        >
+          <section
+            className="my-data-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="my-data-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              type="button"
+              onClick={() => setMyDataOpen(false)}
+              aria-label="닫기"
+            >
+              ×
+            </button>
+            <span className="section-kicker">내 데이터 관리</span>
+            <h2 id="my-data-title">저장된 데이터를 확인하고 관리하세요</h2>
+
+            <div className="my-data-grid">
+              <article>
+                <span>저장된 동작 좌표 세션</span>
+                <strong>{sessionCount}개</strong>
+              </article>
+              <article>
+                <span>케어 관찰 기록</span>
+                <strong>{careLogs.length}일치</strong>
+              </article>
+              <article>
+                <span>브라우저 저장 용량</span>
+                <strong>
+                  {storageUsage
+                    ? `${formatBytes(storageUsage.usageBytes)} 사용 중`
+                    : "확인 불가"}
+                </strong>
+              </article>
+              <article>
+                <span>장기 관찰 동의 상태</span>
+                <strong>
+                  {consent.decided
+                    ? consent.observationConsent
+                      ? "동의함"
+                      : "동의 안 함"
+                    : "아직 결정 안 함"}
+                </strong>
+              </article>
+            </div>
+
+            <p className="my-data-note">
+              얼굴·영상·음성은 저장되지 않으며, 모든 데이터는 이 브라우저
+              안에만 있어요. 다른 기기에서는 보이지 않고, 브라우저 데이터를
+              지우면 함께 사라져요.
+            </p>
+
+            {recentSessions.length > 0 && (
+              <div className="my-data-sessions">
+                <span className="section-kicker">개발용 · 최근 좌표 세션 리플레이</span>
+                <ul>
+                  {recentSessions.map((session) => (
+                    <li key={session.id}>
+                      <span>
+                        {formatSessionTime(session.startedAt)} · {session.frameCount}프레임
+                      </span>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => setReplaySessionId(session.id)}
+                        disabled={session.frameCount === 0}
+                      >
+                        리플레이
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="my-data-actions">
+              {consent.observationConsent ? (
+                <button type="button" onClick={withdrawObservationConsent}>
+                  장기 관찰 참여 철회하기
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleConsentDecision(true)}
+                >
+                  장기 관찰에 참여하기
+                </button>
+              )}
+              <button
+                type="button"
+                className="danger-button"
+                onClick={() => void deleteAllMyData()}
+              >
+                내 데이터 전체 삭제
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {replaySessionId && (
+        <SessionReplayPanel
+          key={replaySessionId}
+          source={{ kind: "recorded", sessionId: replaySessionId }}
+          sessionLabel={
+            recentSessions.find((session) => session.id === replaySessionId)
+              ? `${formatSessionTime(
+                  recentSessions.find((session) => session.id === replaySessionId)!.startedAt,
+                )} 세션`
+              : undefined
+          }
+          onClose={() => setReplaySessionId(null)}
+        />
+      )}
+
+      {demoReplay && (
+        <SessionReplayPanel
+          key={demoReplay.key}
+          source={{ kind: "synthetic", frames: demoReplay.frames }}
+          sessionLabel={demoReplay.label}
+          detectionExplanation={demoReplay.detectionExplanation}
+          onClose={() => setDemoReplay(null)}
+        />
       )}
 
       {toast && (

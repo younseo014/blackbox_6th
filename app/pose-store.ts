@@ -223,6 +223,111 @@ async function getMotionChunks(sessionId: string) {
   return chunks.sort((a, b) => a.startFrame - b.startFrame);
 }
 
+/** Parses a session's stored chunks back into per-frame numeric arrays. */
+export async function getSessionFrames(sessionId: string): Promise<number[][]> {
+  const chunks = await getMotionChunks(sessionId);
+  const frames: number[][] = [];
+  for (const chunk of chunks) {
+    const values = new Float32Array(chunk.data);
+    for (let offset = 0; offset < values.length; offset += MOTION_FRAME_STRIDE) {
+      frames.push(Array.from(values.subarray(offset, offset + MOTION_FRAME_STRIDE)));
+    }
+  }
+  return frames;
+}
+
+export type ParsedMotionFrame = {
+  relativeTimeMs: number;
+  bodyDetected: boolean;
+  fullBodyVisible: boolean;
+  /** Raw yaw/pitch/roll only - the ear midpoint used to *position* the head
+   * on screen isn't part of the compact stored frame (see BODY_LANDMARK_NAMES:
+   * storage starts at the shoulders, not the ears), so callers that need to
+   * draw a head marker must approximate its center from the shoulders. */
+  head: { yaw: number; pitch: number; roll: number } | null;
+  leftHandDetected: boolean;
+  rightHandDetected: boolean;
+  leftHandConfidence: number;
+  rightHandConfidence: number;
+  /** Flat [x,y,z,visibility] * BODY_LANDMARK_COUNT, same layout drawMotionSkeleton expects. */
+  body: number[];
+  /** Flat [x,y,z] * HAND_LANDMARK_COUNT, or null when that hand wasn't detected this frame. */
+  leftHand: number[] | null;
+  rightHand: number[] | null;
+};
+
+/**
+ * Parses one raw stored frame (see MOTION_FRAME_STRIDE) back into a
+ * structured shape usable for rendering (session-replay.tsx) or analysis.
+ * Pure and DOM-free so it's directly unit-testable.
+ */
+export function parseSessionFrame(frame: number[]): ParsedMotionFrame {
+  const bodyDetected = frame[1] === 1;
+  const fullBodyVisible = frame[2] === 1;
+  const leftHandDetected = frame[6] === 1;
+  const rightHandDetected = frame[7] === 1;
+
+  const headerLength = 10;
+  const bodyLength = BODY_LANDMARK_COUNT * 4;
+  const handLength = HAND_LANDMARK_COUNT * 3;
+  const leftHandOffset = headerLength + bodyLength;
+  const rightHandOffset = leftHandOffset + handLength;
+
+  return {
+    relativeTimeMs: frame[0],
+    bodyDetected,
+    fullBodyVisible,
+    head: bodyDetected ? { yaw: frame[3], pitch: frame[4], roll: frame[5] } : null,
+    leftHandDetected,
+    rightHandDetected,
+    leftHandConfidence: frame[8],
+    rightHandConfidence: frame[9],
+    body: frame.slice(headerLength, headerLength + bodyLength),
+    leftHand: leftHandDetected
+      ? frame.slice(leftHandOffset, leftHandOffset + handLength)
+      : null,
+    rightHand: rightHandDetected
+      ? frame.slice(rightHandOffset, rightHandOffset + handLength)
+      : null,
+  };
+}
+
+/** Extracts a single hand landmark's (x,y,z) trajectory across frames. */
+export function extractHandPointTrajectory(
+  frames: number[][],
+  hand: "left" | "right",
+  landmarkIndex: number,
+): Array<{ x: number; y: number; z: number } | null> {
+  // Frame layout (see MOTION_FRAME_STRIDE): 10 header values, then
+  // 22 body landmarks * 4, then 21 left-hand * 3, then 21 right-hand * 3.
+  const headerLength = 10;
+  const bodyLength = BODY_LANDMARK_COUNT * 4;
+  const leftHandOffset = headerLength + bodyLength;
+  const rightHandOffset = leftHandOffset + HAND_LANDMARK_COUNT * 3;
+  const baseOffset = hand === "left" ? leftHandOffset : rightHandOffset;
+
+  return frames.map((frame) => {
+    const x = frame[baseOffset + landmarkIndex * 3];
+    const y = frame[baseOffset + landmarkIndex * 3 + 1];
+    const z = frame[baseOffset + landmarkIndex * 3 + 2];
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return null;
+    return { x, y, z };
+  });
+}
+
+/** Deletes every locally stored motion session and chunk. Irreversible. */
+export async function deleteAllMotionSessions(): Promise<void> {
+  const database = await openMotionDatabase();
+  const transaction = database.transaction(
+    [SESSION_STORE, CHUNK_STORE],
+    "readwrite",
+  );
+  transaction.objectStore(SESSION_STORE).clear();
+  transaction.objectStore(CHUNK_STORE).clear();
+  await transactionDone(transaction);
+  database.close();
+}
+
 export async function downloadMotionSession(session: MotionSessionRecord) {
   const chunks = await getMotionChunks(session.id);
   const frames: number[][] = [];

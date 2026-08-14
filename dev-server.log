@@ -1,0 +1,50 @@
+
+> memory-guard@0.1.0 dev
+> WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev --port 8787
+
+file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:507
+		if (loadErrors.length > 0) throw new Error("Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.", { cause: loadErrors.reduce((err, cur) => {
+		                                 ^
+
+Error: Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.
+    at file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:507:36
+    at file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:9:49
+    at file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/parse-Ch28GO2f.mjs:3:46
+    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  [cause]: Error: Cannot find module '@rolldown/binding-linux-arm64-gnu'
+  Require stack:
+  - /sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs
+      at Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+      ... 5 lines matching cause stack trace ...
+      at require (node:internal/modules/helpers:147:16)
+      at requireNative (file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:306:21)
+      at file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:475:18
+      at file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:9:49 {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [
+      '/sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs'
+    ],
+    cause: Error: Cannot find module './rolldown-binding.linux-arm64-gnu.node'
+    Require stack:
+    - /sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs
+        at Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+        at defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+        at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+        at Function._load (node:internal/modules/cjs/loader:1216:25)
+        at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+        at Module.require (node:internal/modules/cjs/loader:1527:12)
+        at require (node:internal/modules/helpers:147:16)
+        at requireNative (file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:301:12)
+        at file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:475:18
+        at file:///sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs:9:49 {
+      code: 'MODULE_NOT_FOUND',
+      requireStack: [
+        '/sessions/rcw-01gxadzpmajimj6mpwggfcy6/mnt/blackbox/node_modules/rolldown/dist/shared/binding-C9S351wt.mjs'
+      ]
+    }
+  }
+}
+
+Node.js v22.22.3
