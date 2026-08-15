@@ -10,7 +10,7 @@
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs && npm run test:unit",
-    "test:unit": "node --import tsx --test tests/motion-analysis.test.ts tests/care-metrics.test.ts tests/demo-personas.test.ts tests/pose-store.test.ts tests/demo-motion.test.ts tests/motion-detection.test.ts",
+    "test:unit": "node --import tsx --test tests/motion-analysis.test.ts tests/care-metrics.test.ts tests/demo-personas.test.ts tests/pose-store.test.ts tests/demo-motion.test.ts tests/motion-detection.test.ts tests/observation-engine.test.ts",
     "test:e2e": "npm run build && node tests/e2e/run-personas.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern public/mediapipe-wasm",
     "db:generate": "drizzle-kit generate"

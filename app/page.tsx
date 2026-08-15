@@ -62,6 +62,29 @@ import {
   type DemoEvent,
   type DemoPersona,
 } from "./demo-personas";
+import {
+  OCCUPATION_TEMPLATES,
+  getOccupationTemplate,
+  phaseForHour,
+  type OccupationId,
+} from "./occupation-templates";
+import {
+  DEFAULT_PROFILE,
+  buildBaseline,
+  createObservationEpisode,
+  extractObservationFeatures,
+  type BaselineSnapshot,
+  type ObservationEpisode,
+  type ObservationMode,
+  type ObservationProfile,
+} from "./observation-engine";
+import {
+  deleteAllObservationData,
+  getObservationProfile,
+  listObservationEpisodes,
+  saveObservationEpisode,
+  saveObservationProfile,
+} from "./observation-store";
 
 type View = "today" | "timeline" | "closing" | "care";
 type CameraStatus = "idle" | "requesting" | "connected" | "error";
@@ -315,6 +338,11 @@ export default function Home() {
   const [demoMode, setDemoMode] = useState(true);
   const [selectedPersonaIndex, setSelectedPersonaIndex] = useState(0);
   const [selectedDemoDay, setSelectedDemoDay] = useState(6);
+  const [observationProfile, setObservationProfile] = useState<ObservationProfile>(DEFAULT_PROFILE);
+  const [observationEpisodes, setObservationEpisodes] = useState<ObservationEpisode[]>([]);
+  const [observationBaseline, setObservationBaseline] = useState<BaselineSnapshot>(() => buildBaseline([], 1));
+  const [zoneSetupOpen, setZoneSetupOpen] = useState(false);
+  const [selectedZoneId, setSelectedZoneId] = useState<string>("DRINK_PREP");
 
   // --- Consent, real observation metrics, and data controls ---
   // Lazy initializer instead of an effect: getConsent() is SSR-safe (it
@@ -349,6 +377,21 @@ export default function Home() {
       if (today) setTodayBusyLevel(today.busyLevel);
     } catch {
       // local-only storage; ignore transient read errors
+    }
+  }
+
+  async function refreshObservationData(profile = observationProfile) {
+    try {
+      const episodes = await listObservationEpisodes(500);
+      setObservationEpisodes(episodes);
+      const eligible = episodes.filter(
+        (episode) =>
+          episode.occupation === profile.occupation &&
+          episode.baselineVersion === profile.baselineVersion,
+      );
+      setObservationBaseline(buildBaseline(eligible, profile.baselineVersion));
+    } catch {
+      // Device-local observation data; keep the current UI state on transient errors.
     }
   }
 
@@ -411,6 +454,27 @@ export default function Home() {
         setSessionCount(sessions.length);
         setLatestSession(sessions[0] ?? null);
         setRecentSessions(sessions.slice(0, 5));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    getObservationProfile()
+      .then(async (profile) => {
+        const saved = await saveObservationProfile(profile);
+        setObservationProfile(saved);
+        const template = getOccupationTemplate(saved.occupation);
+        setSelectedZoneId(template.zones[0]?.id ?? "");
+        const episodes = await listObservationEpisodes(500);
+        setObservationEpisodes(episodes);
+        setObservationBaseline(buildBaseline(
+          episodes.filter(
+            (episode) =>
+              episode.occupation === saved.occupation &&
+              episode.baselineVersion === saved.baselineVersion,
+          ),
+          saved.baselineVersion,
+        ));
       })
       .catch(() => undefined);
   }, []);
@@ -919,6 +983,32 @@ export default function Home() {
     }
   }
 
+  async function recordObservationSession(sessionId: string, recordedAt: number) {
+    try {
+      const rawFrames = await getSessionFrames(sessionId);
+      const features = extractObservationFeatures(rawFrames, observationProfile.zoneGrid);
+      const episode = createObservationEpisode({
+        sessionId,
+        recordedAt,
+        profile: observationProfile,
+        phase: phaseForHour(new Date(recordedAt).getHours()),
+        features,
+        baseline: observationBaseline,
+      });
+      await saveObservationEpisode(episode);
+      await refreshObservationData(observationProfile);
+      setToast(
+        episode.disposition === "quarantined"
+          ? "평소 흐름으로 확정하기 어려운 동작은 학습에서 잠시 보류했어요"
+          : observationProfile.mode === "learning"
+            ? `${episode.taskLabel} 패턴을 학습 기록에 추가했어요`
+            : `${episode.taskLabel} 동작을 개인 기준과 비교했어요`,
+      );
+    } catch {
+      // Coordinate recording remains available even if contextual analysis fails.
+    }
+  }
+
   async function stopPoseTracking() {
     trackingActiveRef.current = false;
     if (poseAnimationRef.current !== null) {
@@ -936,6 +1026,7 @@ export default function Home() {
       poseSessionRef.current = null;
       if (consent.observationConsent && completed.frameCount >= 20) {
         void recordMotionDetections(completed.id).then(refreshCareData);
+        void recordObservationSession(completed.id, endedAt);
       }
     }
     overlayCanvasRef.current
@@ -1108,6 +1199,52 @@ export default function Home() {
     }
   }
 
+  async function changeOccupation(occupation: OccupationId) {
+    const template = getOccupationTemplate(occupation);
+    const next = await saveObservationProfile({
+      ...observationProfile,
+      occupation,
+      mode: "learning",
+      learningStartedAt: nowMs(),
+      baselineVersion: observationProfile.baselineVersion + 1,
+      zoneGrid: Array(9).fill(null),
+    });
+    setObservationProfile(next);
+    setSelectedZoneId(template.zones[0]?.id ?? "");
+    await refreshObservationData(next);
+    setToast(`${template.label} 기본 업무 맥락으로 새 학습을 시작했어요`);
+  }
+
+  async function changeObservationMode(mode: ObservationMode) {
+    if (mode === observationProfile.mode) return;
+    const next = await saveObservationProfile({
+      ...observationProfile,
+      mode,
+      learningStartedAt:
+        mode === "learning" ? nowMs() : observationProfile.learningStartedAt,
+      baselineVersion:
+        mode === "learning"
+          ? observationProfile.baselineVersion + 1
+          : observationProfile.baselineVersion,
+    });
+    setObservationProfile(next);
+    await refreshObservationData(next);
+    setToast(
+      mode === "learning"
+        ? "기존 기준선은 보관하고 새로운 평소 흐름을 학습해요"
+        : observationBaseline.confidence < 70
+          ? "기록이 아직 적어 임시 기준으로 분석을 시작해요"
+          : "학습한 개인 업무 패턴을 기준으로 분석을 시작해요",
+    );
+  }
+
+  async function assignZoneCell(index: number) {
+    const zoneGrid = [...observationProfile.zoneGrid];
+    zoneGrid[index] = zoneGrid[index] === selectedZoneId ? null : selectedZoneId;
+    const next = await saveObservationProfile({ ...observationProfile, zoneGrid });
+    setObservationProfile(next);
+  }
+
   function saveBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setEvents((previous) => [
@@ -1150,13 +1287,25 @@ export default function Home() {
     if (cameraStatus === "connected") {
       await stopCamera();
     }
-    await Promise.all([deleteAllMotionSessions(), deleteAllCareLogs()]);
+    await Promise.all([
+      deleteAllMotionSessions(),
+      deleteAllCareLogs(),
+      deleteAllObservationData(),
+    ]);
     setSessionCount(0);
     setLatestSession(null);
     setRecentSessions([]);
     setReplaySessionId(null);
     setMotionSignal(null);
     setCareLogs([]);
+    const resetProfile = {
+      ...DEFAULT_PROFILE,
+      learningStartedAt: nowMs(),
+      updatedAt: nowMs(),
+    };
+    setObservationProfile(resetProfile);
+    setObservationEpisodes([]);
+    setObservationBaseline(buildBaseline([], resetProfile.baselineVersion));
     setPoseStats({
       frames: 0,
       detectedFrames: 0,
@@ -1237,6 +1386,26 @@ export default function Home() {
   const totalDroppedTasks = recentCareLogs.reduce(
     (sum, log) => sum + Math.max(0, log.tasksStarted - log.tasksCompleted),
     0,
+  );
+  const occupationTemplate = getOccupationTemplate(observationProfile.occupation);
+  const currentObservationEpisodes = observationEpisodes.filter(
+    (episode) =>
+      episode.occupation === observationProfile.occupation &&
+      episode.baselineVersion === observationProfile.baselineVersion,
+  );
+  const acceptedObservationCount = currentObservationEpisodes.filter(
+    (episode) => episode.disposition === "accepted",
+  ).length;
+  const quarantinedObservationCount = currentObservationEpisodes.filter(
+    (episode) => episode.disposition === "quarantined",
+  ).length;
+  const mappedZoneCount = new Set(observationProfile.zoneGrid.filter(Boolean)).size;
+  const latestObservationEpisode = currentObservationEpisodes[0] ?? null;
+  const analysisObservationSignals = currentObservationEpisodes.filter(
+    (episode) =>
+      episode.mode === "analysis" &&
+      episode.disposition !== "excluded" &&
+      ((episode.durationZScore ?? 0) >= 1.5 || (episode.pauseZScore ?? 0) >= 1.5),
   );
 
   return (
@@ -1331,6 +1500,79 @@ export default function Home() {
               <button type="button" onClick={() => setView("closing")}>
                 확인하기 <span aria-hidden="true">›</span>
               </button>
+            </section>
+
+            <section className={`observation-mode-card mode-${observationProfile.mode}`}>
+              <div className="mode-card-heading">
+                <div className="occupation-select-wrap">
+                  <span className="occupation-icon" aria-hidden="true">{occupationTemplate.icon}</span>
+                  <label>
+                    <span>나의 업무 환경</span>
+                    <select
+                      value={observationProfile.occupation}
+                      onChange={(event) => void changeOccupation(event.target.value as OccupationId)}
+                      aria-label="직업 선택"
+                    >
+                      {OCCUPATION_TEMPLATES.map((template) => (
+                        <option key={template.id} value={template.id}>{template.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="mode-toggle" role="group" aria-label="관찰 모드">
+                  <button
+                    type="button"
+                    className={observationProfile.mode === "learning" ? "active" : ""}
+                    onClick={() => void changeObservationMode("learning")}
+                  >
+                    학습 모드
+                  </button>
+                  <button
+                    type="button"
+                    className={observationProfile.mode === "analysis" ? "active" : ""}
+                    onClick={() => void changeObservationMode("analysis")}
+                  >
+                    분석 모드
+                  </button>
+                </div>
+              </div>
+              <div className="mode-card-body">
+                <div className="mode-copy">
+                  <span className="mode-status-dot" aria-hidden="true" />
+                  <div>
+                    <strong>
+                      {observationProfile.mode === "learning"
+                        ? "평소 업무 흐름을 알아가고 있어요"
+                        : "개인 업무 패턴과 비교하고 있어요"}
+                    </strong>
+                    <p>
+                      {observationProfile.mode === "learning"
+                        ? "확정하기 어려운 행동은 기준선에 넣지 않고 잠시 보류해요."
+                        : `기준선 v${observationProfile.baselineVersion}을 고정해 최근 동작의 변화를 살펴봐요.`}
+                    </p>
+                  </div>
+                </div>
+                <div className="learning-progress" aria-label={`기준선 완성도 ${observationBaseline.confidence}%`}>
+                  <div><span>개인 기준선 완성도</span><strong>{observationBaseline.confidence}%</strong></div>
+                  <i><span style={{ width: `${observationBaseline.confidence}%` }} /></i>
+                </div>
+                <div className="mode-stats">
+                  <span><small>학습 포함</small><strong>{acceptedObservationCount}건</strong></span>
+                  <span><small>학습 보류</small><strong>{quarantinedObservationCount}건</strong></span>
+                  <span><small>익힌 업무</small><strong>{observationBaseline.tasks.length}개</strong></span>
+                  <span><small>설정한 구역</small><strong>{mappedZoneCount}개</strong></span>
+                </div>
+                <div className="mode-card-actions">
+                  <p>{occupationTemplate.description}</p>
+                  <button type="button" onClick={() => setZoneSetupOpen(true)}>매장 구역 설정</button>
+                </div>
+                {latestObservationEpisode && (
+                  <div className={`latest-learning-result disposition-${latestObservationEpisode.disposition}`}>
+                    <span>최근 관찰 · {latestObservationEpisode.taskLabel}</span>
+                    <strong>{latestObservationEpisode.dispositionReason}</strong>
+                  </div>
+                )}
+              </div>
             </section>
 
             <div className="dashboard-grid">
@@ -1874,6 +2116,38 @@ export default function Home() {
                   </article>
                 </div>
 
+                <section className={`panel personal-pattern-panel mode-${observationProfile.mode}`}>
+                  <div className="panel-heading">
+                    <div>
+                      <span className="section-kicker">{occupationTemplate.icon} 개인 업무 패턴 · 기준선 v{observationProfile.baselineVersion}</span>
+                      <h2>
+                        {observationProfile.mode === "learning"
+                          ? "평소 업무 흐름을 학습하고 있어요"
+                          : analysisObservationSignals.length > 0
+                            ? "평소 범위를 벗어난 동작을 조금 더 살펴봐요"
+                            : "최근 동작은 학습한 범위와 비슷해요"}
+                      </h2>
+                    </div>
+                    <span className="pattern-mode-chip">{observationProfile.mode === "learning" ? "학습 모드" : "분석 모드"}</span>
+                  </div>
+                  <p>
+                    {observationProfile.mode === "learning"
+                      ? `정상 후보 ${acceptedObservationCount}건을 기준선에 포함했고, 확정하기 어려운 ${quarantinedObservationCount}건은 학습에서 보류했어요.`
+                      : `업무별 평균과 표준편차를 따로 비교했습니다. 최근 변화 후보 ${analysisObservationSignals.length}건을 기록했어요.`}
+                  </p>
+                  <div className="pattern-summary-grid">
+                    <span><small>기준선 완성도</small><strong>{observationBaseline.confidence}%</strong></span>
+                    <span><small>학습된 업무</small><strong>{observationBaseline.tasks.length}개</strong></span>
+                    <span><small>유효 학습일</small><strong>{observationBaseline.eligibleDays}일</strong></span>
+                    <span><small>변화 후보</small><strong>{analysisObservationSignals.length}건</strong></span>
+                  </div>
+                  {analysisObservationSignals[0] && (
+                    <p className="pattern-latest-signal">
+                      최근 {analysisObservationSignals[0].taskLabel}에서 개인 기준보다 긴 지연이 관찰됐어요. 한 번의 장면으로 판단하지 않고 같은 흐름이 반복되는지 살펴봅니다.
+                    </p>
+                  )}
+                </section>
+
                 {motionSignal && (
                   <section className="panel motion-signal-note">
                     <div className="panel-heading">
@@ -2186,6 +2460,38 @@ export default function Home() {
         </div>
       )}
 
+      {zoneSetupOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setZoneSetupOpen(false)}>
+          <section className="zone-setup-modal" role="dialog" aria-modal="true" aria-labelledby="zone-setup-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" onClick={() => setZoneSetupOpen(false)} aria-label="닫기">×</button>
+            <span className="section-kicker">{occupationTemplate.icon} {occupationTemplate.label} 관찰 맥락</span>
+            <h2 id="zone-setup-title">카메라 화면에 매장 구역을 표시해 주세요</h2>
+            <p>구역을 고른 뒤 실제 카메라 화면에서 해당 위치에 가까운 칸을 눌러주세요. 카메라 위치가 바뀌면 다시 설정해야 해요.</p>
+            <label className="zone-picker">
+              <span>지정할 구역</span>
+              <select value={selectedZoneId} onChange={(event) => setSelectedZoneId(event.target.value)}>
+                {occupationTemplate.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
+              </select>
+            </label>
+            <div className="zone-camera-grid" aria-label="카메라 화면 3×3 구역 설정">
+              {observationProfile.zoneGrid.map((zoneId, index) => {
+                const zone = occupationTemplate.zones.find((item) => item.id === zoneId);
+                return (
+                  <button key={index} type="button" className={zoneId ? "mapped" : ""} onClick={() => void assignZoneCell(index)}>
+                    <small>{index + 1}</small>
+                    <strong>{zone?.label ?? "구역 지정"}</strong>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="zone-setup-footer">
+              <span>{mappedZoneCount}개 구역 설정됨 · 정밀 거리 대신 화면상 위치를 사용해요.</span>
+              <button type="button" onClick={() => setZoneSetupOpen(false)}>설정 완료</button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {replaySessionId && (
         <SessionReplayPanel
           key={replaySessionId}
@@ -2197,6 +2503,11 @@ export default function Home() {
                 )} 세션`
               : undefined
           }
+          feedbackEventId={
+            observationEpisodes.find((episode) => episode.sessionId === replaySessionId)?.id
+          }
+          observationMode={observationProfile.mode}
+          baselineVersion={observationProfile.baselineVersion}
           onClose={() => setReplaySessionId(null)}
         />
       )}
@@ -2207,6 +2518,9 @@ export default function Home() {
           source={{ kind: "synthetic", frames: demoReplay.frames }}
           sessionLabel={demoReplay.label}
           detectionExplanation={demoReplay.detectionExplanation}
+          feedbackEventId={demoReplay.key}
+          observationMode={observationProfile.mode}
+          baselineVersion={observationProfile.baselineVersion}
           onClose={() => setDemoReplay(null)}
         />
       )}
