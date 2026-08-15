@@ -143,6 +143,7 @@ const EXPECTED_TYPES: Record<DemoMotionType, string[]> = {
   safety_alert: ["safety_alert"],
   register_tap: ["micro_delay"],
   normal_task: [],
+  fine_hand_task: [],
   queue_shift: [],
   high_reach: [],
   low_bend: [],

@@ -15,6 +15,7 @@ const ALL_TYPES: DemoMotionType[] = [
   "micro_delay",
   "safety_alert",
   "normal_task",
+  "fine_hand_task",
   "register_tap",
   "queue_shift",
   "high_reach",

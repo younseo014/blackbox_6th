@@ -31,6 +31,7 @@ export type DemoMotionType =
   | "micro_delay"
   | "safety_alert"
   | "normal_task"
+  | "fine_hand_task"
   | "register_tap"
   | "queue_shift"
   | "high_reach"
@@ -260,6 +261,7 @@ const CLIP_SECONDS: Record<DemoMotionType, number> = {
   micro_delay: 7,
   safety_alert: 4.5,
   normal_task: 6,
+  fine_hand_task: 6,
   register_tap: 6.5,
   queue_shift: 7,
   high_reach: 5.5,
@@ -430,6 +432,33 @@ function generateNormalTaskMotion(seed: number): number[][] {
   return frames;
 }
 
+/** Normal small-joint work such as counting cash or tapping a POS screen. */
+function generateFineHandTaskMotion(seed: number): number[][] {
+  const frameCount = frameCountFor("fine_hand_task");
+  const target: Point2D = { x: 0.57 + seedJitter(seed, 0.012), y: 0.48 };
+  const frames: number[][] = [];
+  for (let i = 0; i < frameCount; i += 1) {
+    const t = i / (frameCount - 1);
+    const rhythm = Math.sin(t * Math.PI * 2 * 4 + seed * 0.25);
+    const progress = 0.72 + rhythm * 0.08;
+    frames.push(
+      buildRawFrame(i, {
+        headYaw: -0.04,
+        headPitch: 0.08,
+        headRoll: 0,
+        torsoLean: { x: 0.006, y: 0.008 },
+        rightHandCenter: lerpPoint(REST_RIGHT, target, progress),
+        rightHandAngle: REST_RIGHT_ANGLE - 0.18,
+        rightOpenness: 0.48 + rhythm * 0.28,
+        leftHandCenter: { x: 0.47, y: 0.5 + rhythm * 0.006 },
+        leftHandAngle: REST_LEFT_ANGLE + 0.1,
+        leftOpenness: 0.45 - rhythm * 0.12,
+      }),
+    );
+  }
+  return frames;
+}
+
 /**
  * "결제·입력 재시도" - a burst of quick small taps (e.g. re-entering a card
  * or order), which then gets INTERRUPTED mid-sequence (holds mid-tap, not
@@ -579,6 +608,8 @@ export function generateEventMotion(type: DemoMotionType, seed = 0): number[][] 
       return generateSafetyAlertMotion(seed);
     case "register_tap":
       return generateRegisterTapMotion(seed);
+    case "fine_hand_task":
+      return generateFineHandTaskMotion(seed);
     case "queue_shift":
       return generateQueueShiftMotion(seed);
     case "high_reach":
@@ -596,6 +627,7 @@ export const DEMO_MOTION_LABELS: Record<DemoMotionType, string> = {
   micro_delay: "미세 지연(머뭇거림) 동작",
   safety_alert: "안전 알림 반응 동작",
   normal_task: "평소 업무 동작",
+  fine_hand_task: "손가락 중심의 정상 업무 동작",
   register_tap: "결제·입력 재시도 동작",
   queue_shift: "대기·서성임 동작",
   high_reach: "높은 선반 정리 동작",

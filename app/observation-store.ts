@@ -85,6 +85,17 @@ export async function saveObservationEpisode(episode: ObservationEpisode) {
   return episode;
 }
 
+export async function saveObservationEpisodes(episodes: ObservationEpisode[]) {
+  if (episodes.length === 0) return episodes;
+  const database = await openObservationDatabase();
+  const transaction = database.transaction(EPISODE_STORE, "readwrite");
+  const store = transaction.objectStore(EPISODE_STORE);
+  episodes.forEach((episode) => store.put(episode));
+  await transactionDone(transaction);
+  database.close();
+  return episodes;
+}
+
 export async function listObservationEpisodes(limit = 200): Promise<ObservationEpisode[]> {
   const database = await openObservationDatabase();
   const transaction = database.transaction(EPISODE_STORE, "readonly");

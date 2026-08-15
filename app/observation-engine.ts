@@ -18,6 +18,9 @@ export type ObservationProfile = {
   mode: ObservationMode;
   learningStartedAt: number;
   baselineVersion: number;
+  baselineSource?: "real" | "synthetic";
+  syntheticDatasetId?: string | null;
+  activeTestTaskId?: string | null;
   zoneGrid: ZoneGrid;
   updatedAt: number;
 };
@@ -53,6 +56,9 @@ export type ObservationEpisode = {
   pauseZScore: number | null;
   contextWeight: 0 | 1 | 2 | 3;
   baselineVersion: number;
+  source?: "real_learning" | "synthetic_training" | "real_analysis" | "performance_test";
+  syntheticDatasetId?: string;
+  testTargetTaskType?: string;
 };
 
 export type TaskBaseline = {
@@ -91,6 +97,9 @@ export const DEFAULT_PROFILE: ObservationProfile = {
   mode: "learning",
   learningStartedAt: 0,
   baselineVersion: 1,
+  baselineSource: "real",
+  syntheticDatasetId: null,
+  activeTestTaskId: null,
   zoneGrid: Array(9).fill(null),
   updatedAt: 0,
 };
@@ -309,12 +318,12 @@ export function createObservationEpisode(args: {
   phase: WorkPhase;
   features: ObservationFeatures;
   baseline: BaselineSnapshot;
+  taskOverride?: TaskTemplate;
 }): ObservationEpisode {
-  const { task: inferredTask, confidence, primitiveLabels } = inferTask(
-    args.profile.occupation,
-    args.phase,
-    args.features,
-  );
+  const inferred = inferTask(args.profile.occupation, args.phase, args.features);
+  const inferredTask = args.taskOverride ?? inferred.task;
+  const confidence = args.taskOverride ? 0.94 : inferred.confidence;
+  const primitiveLabels = args.taskOverride ? args.taskOverride.motions : inferred.primitiveLabels;
   const taskBaseline = args.baseline.tasks.find((item) => item.taskType === inferredTask.id);
   const durationZScore = taskBaseline
     ? safeZScore(args.features.durationSeconds, taskBaseline.meanDuration, taskBaseline.durationSD)
@@ -357,6 +366,12 @@ export function createObservationEpisode(args: {
     pauseZScore,
     contextWeight: contextWeight(args.features, inferredTask),
     baselineVersion: args.profile.baselineVersion,
+    source: args.taskOverride
+      ? "performance_test"
+      : args.profile.mode === "analysis"
+        ? "real_analysis"
+        : "real_learning",
+    testTargetTaskType: args.taskOverride?.id,
   };
 }
 
