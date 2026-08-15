@@ -2515,6 +2515,17 @@ select:focus-visible {
   font-weight: 800;
 }
 
+.body-profile-chip {
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  border: 1px solid rgba(47, 110, 79, 0.18);
+  border-radius: 999px;
+  background: #eaf6ee;
+  color: #2f6e4f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .mode-action-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -2854,7 +2865,8 @@ select:focus-visible {
     align-items: stretch;
   }
 
-  .synthetic-baseline-chip { align-self: flex-start; }
+  .synthetic-baseline-chip,
+  .body-profile-chip { align-self: flex-start; }
   .synthetic-library-modal { padding: 24px 18px; }
   .synthetic-library-count { align-self: flex-start; }
   .synthetic-phase-tabs { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }

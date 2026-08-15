@@ -45,3 +45,42 @@ test("synthetic generation is stable for the same occupation", () => {
   assert.deepEqual(first, second);
 });
 
+test("every labeled task has a distinct visible motion trajectory", () => {
+  const clips = OCCUPATION_TEMPLATES.flatMap((occupation) => getSyntheticTrainingClips(occupation.id));
+  const signatures = clips.map((clip) => {
+    const sampleIndexes = Array.from({ length: 10 }, (_, index) =>
+      Math.min(clip.frames.length - 1, Math.round((clip.frames.length - 1) * index / 9)),
+    );
+    return sampleIndexes.map((frameIndex) => {
+      const frame = clip.frames[frameIndex];
+      const bodyStart = 10;
+      const values = [
+        frame[bodyStart + 4 * 4], frame[bodyStart + 4 * 4 + 1],
+        frame[bodyStart + 5 * 4], frame[bodyStart + 5 * 4 + 1],
+        frame[bodyStart + 12 * 4], frame[bodyStart + 13 * 4],
+      ];
+      return values.map((value) => value.toFixed(4)).join(",");
+    }).join("|");
+  });
+  assert.equal(new Set(signatures).size, clips.length);
+});
+
+test("default skeleton uses narrower shoulders and longer human-like limbs", () => {
+  const clip = getSyntheticTrainingClips("cafe")[0];
+  const body = clip.frames[0].slice(10, 98);
+  const metric = (from: number, to: number) => Math.hypot(
+    (body[from * 4] - body[to * 4]) * (16 / 9),
+    body[from * 4 + 1] - body[to * 4 + 1],
+  );
+  const shoulderMid = {
+    x: (body[0] + body[4]) / 2,
+    y: (body[1] + body[5]) / 2,
+  };
+  const hipMid = {
+    x: (body[12 * 4] + body[13 * 4]) / 2,
+    y: (body[12 * 4 + 1] + body[13 * 4 + 1]) / 2,
+  };
+  const torso = Math.hypot((shoulderMid.x - hipMid.x) * (16 / 9), shoulderMid.y - hipMid.y);
+  assert.ok(metric(0, 1) / torso < 0.95);
+  assert.ok((metric(0, 2) + metric(2, 4)) / torso > 1.25);
+});

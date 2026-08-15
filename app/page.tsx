@@ -18,6 +18,7 @@ import {
   extractHandPointTrajectory,
   finishMotionSession,
   getSessionFrames,
+  getLatestBodyProportionProfile,
   listMotionSessions,
   type MotionSessionRecord,
 } from "./pose-store";
@@ -485,6 +486,14 @@ export default function Home() {
           ),
           saved.baselineVersion,
         ));
+        const latestBodyProfile = await getLatestBodyProportionProfile().catch(() => null);
+        if (latestBodyProfile && latestBodyProfile.sourceSessionId !== saved.bodyProportionProfile?.sourceSessionId) {
+          const profiled = await saveObservationProfile({
+            ...saved,
+            bodyProportionProfile: latestBodyProfile,
+          });
+          setObservationProfile(profiled);
+        }
       })
       .catch(() => undefined);
   }, []);
@@ -1046,6 +1055,15 @@ export default function Home() {
         void recordMotionDetections(completed.id).then(refreshCareData);
         void recordObservationSession(completed.id, endedAt);
       }
+      void getLatestBodyProportionProfile().then(async (bodyProportionProfile) => {
+        if (!bodyProportionProfile) return;
+        const currentProfile = await getObservationProfile();
+        const next = await saveObservationProfile({
+          ...currentProfile,
+          bodyProportionProfile,
+        });
+        setObservationProfile(next);
+      }).catch(() => undefined);
     }
     overlayCanvasRef.current
       ?.getContext("2d")
@@ -1274,10 +1292,13 @@ export default function Home() {
     setApplyingSyntheticBaseline(true);
     try {
       const baselineVersion = observationProfile.baselineVersion + 1;
+      const latestBodyProfile = await getLatestBodyProportionProfile().catch(() => null);
+      const bodyProportionProfile = latestBodyProfile ?? observationProfile.bodyProportionProfile ?? null;
       const dataset = createSyntheticTrainingDataset(
         observationProfile.occupation,
         baselineVersion,
         nowMs(),
+        bodyProportionProfile,
       );
       await saveObservationEpisodes(dataset.episodes);
       const next = await saveObservationProfile({
@@ -1288,11 +1309,16 @@ export default function Home() {
         baselineSource: "synthetic",
         syntheticDatasetId: dataset.id,
         activeTestTaskId: null,
+        bodyProportionProfile,
         zoneGrid: dataset.zoneGrid,
       });
       setObservationProfile(next);
       await refreshObservationData(next);
-      setToast(`${getOccupationTemplate(next.occupation).label} 2주 가상 기준선이 100% 적용됐어요`);
+      setToast(
+        bodyProportionProfile
+          ? `최근 촬영 전신 비율로 ${getOccupationTemplate(next.occupation).label} 가상 기준선을 적용했어요`
+          : `촬영 비율이 없어 개선된 표준 인체 비율로 ${getOccupationTemplate(next.occupation).label} 기준선을 적용했어요`,
+      );
     } finally {
       setApplyingSyntheticBaseline(false);
     }
@@ -1469,7 +1495,10 @@ export default function Home() {
     0,
   );
   const occupationTemplate = getOccupationTemplate(observationProfile.occupation);
-  const syntheticTrainingClips = getSyntheticTrainingClips(observationProfile.occupation);
+  const syntheticTrainingClips = getSyntheticTrainingClips(
+    observationProfile.occupation,
+    observationProfile.bodyProportionProfile,
+  );
   const visibleSyntheticClips = syntheticTrainingClips.filter(
     (clip) => clip.phase === syntheticLibraryPhase,
   );
@@ -1648,6 +1677,11 @@ export default function Home() {
                   </div>
                   {observationProfile.baselineSource === "synthetic" && (
                     <span className="synthetic-baseline-chip">가상 기준선 적용 중</span>
+                  )}
+                  {observationProfile.bodyProportionProfile && (
+                    <span className="body-profile-chip">
+                      최근 촬영 비율 · {observationProfile.bodyProportionProfile.usableFrames}프레임
+                    </span>
                   )}
                 </div>
                 <div className="learning-progress" aria-label={`기준선 완성도 ${observationBaseline.confidence}%`}>
@@ -2604,7 +2638,7 @@ export default function Home() {
               <div>
                 <span className="section-kicker">{occupationTemplate.icon} {occupationTemplate.label} · 14일 정상 업무 표본</span>
                 <h2 id="synthetic-library-title">가상 학습 행동을 보고 직접 따라 해보세요</h2>
-                <p>실제 사용자의 영상이 아닌 좌표로 만든 예시입니다. 행동을 고르면 이번 웹캠 기록을 해당 업무 기준과 직접 비교해요.</p>
+                <p>실제 사용자의 영상이 아닌 좌표로 만든 예시입니다. 최근 전신 촬영 기록이 있으면 그 사람의 몸 비율만 가져와 적용하고, 각 업무에는 서로 다른 전신·양팔·손가락 궤적을 사용해요.</p>
               </div>
               <span className="synthetic-library-count">{syntheticTrainingClips.length}개 행동</span>
             </header>

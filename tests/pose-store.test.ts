@@ -4,8 +4,10 @@ import {
   BODY_LANDMARK_COUNT,
   HAND_LANDMARK_COUNT,
   MOTION_FRAME_STRIDE,
+  deriveBodyProportionProfile,
   parseSessionFrame,
 } from "../app/pose-store.ts";
+import { generateEventMotion } from "../app/demo-motion.ts";
 
 // Builds a synthetic raw frame matching the stored layout (see
 // MOTION_FRAME_STRIDE / downloadMotionSession's frame_layout schema), so
@@ -47,6 +49,17 @@ function buildRawFrame(overrides: {
 
   return frame;
 }
+
+test("deriveBodyProportionProfile: extracts anonymous ratios from full-body coordinate frames", () => {
+  const frames = generateEventMotion("normal_task", 4);
+  const profile = deriveBodyProportionProfile(frames, "recent-local-session", 1234);
+  assert.ok(profile);
+  assert.equal(profile?.sourceSessionId, "recent-local-session");
+  assert.ok((profile?.usableFrames ?? 0) >= 3);
+  assert.ok((profile?.shoulderToTorso ?? 0) > 0.45);
+  assert.ok((profile?.thighToTorso ?? 0) > 0.65);
+  assert.ok((profile?.handToForearm ?? 0) >= 0.25);
+});
 
 test("parseSessionFrame: reads header fields (time, detection flags, head direction)", () => {
   const parsed = parseSessionFrame(buildRawFrame({ relativeTimeMs: 4400, headYaw: 0.3, headPitch: -0.2, headRoll: 0.05 }));

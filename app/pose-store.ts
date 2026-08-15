@@ -256,6 +256,19 @@ export type ParsedMotionFrame = {
   rightHand: number[] | null;
 };
 
+export type BodyProportionProfile = {
+  sourceSessionId: string;
+  sampledAt: number;
+  usableFrames: number;
+  shoulderToTorso: number;
+  hipToTorso: number;
+  upperArmToTorso: number;
+  forearmToTorso: number;
+  thighToTorso: number;
+  shinToTorso: number;
+  handToForearm: number;
+};
+
 /**
  * Parses one raw stored frame (see MOTION_FRAME_STRIDE) back into a
  * structured shape usable for rendering (session-replay.tsx) or analysis.
@@ -290,6 +303,106 @@ export function parseSessionFrame(frame: number[]): ParsedMotionFrame {
       ? frame.slice(rightHandOffset, rightHandOffset + handLength)
       : null,
   };
+}
+
+const DISPLAY_ASPECT_RATIO = 16 / 9;
+
+function median(values: number[]) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function clampRatio(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+/**
+ * Builds an anonymous body-proportion profile from coordinate frames only.
+ * Absolute position, video pixels, face geometry and identity are not retained.
+ */
+export function deriveBodyProportionProfile(
+  frames: number[][],
+  sourceSessionId = "local-session",
+  sampledAt = Date.now(),
+): BodyProportionProfile | null {
+  const samples: Array<Omit<BodyProportionProfile, "sourceSessionId" | "sampledAt" | "usableFrames">> = [];
+  const metricDistance = (body: number[], from: number, to: number) => {
+    const dx = (body[from * 4] - body[to * 4]) * DISPLAY_ASPECT_RATIO;
+    const dy = body[from * 4 + 1] - body[to * 4 + 1];
+    return Math.hypot(dx, dy);
+  };
+  const midpoint = (body: number[], left: number, right: number) => ({
+    x: (body[left * 4] + body[right * 4]) / 2,
+    y: (body[left * 4 + 1] + body[right * 4 + 1]) / 2,
+  });
+  const midpointDistance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot((a.x - b.x) * DISPLAY_ASPECT_RATIO, a.y - b.y);
+  const handLength = (hand: number[] | null) => {
+    if (!hand) return null;
+    const dx = (hand[9 * 3] - hand[12 * 3]) * DISPLAY_ASPECT_RATIO;
+    const dy = hand[9 * 3 + 1] - hand[12 * 3 + 1];
+    return Math.hypot(dx, dy);
+  };
+
+  for (const rawFrame of frames) {
+    const frame = parseSessionFrame(rawFrame);
+    if (!frame.bodyDetected || !frame.fullBodyVisible) continue;
+    const body = frame.body;
+    const required = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17];
+    if (required.some((index) => (body[index * 4 + 3] ?? 0) < 0.5)) continue;
+    const shoulders = midpoint(body, 0, 1);
+    const hips = midpoint(body, 12, 13);
+    const torso = midpointDistance(shoulders, hips);
+    if (torso < 0.05) continue;
+    const shoulder = metricDistance(body, 0, 1);
+    const hip = metricDistance(body, 12, 13);
+    const upperArm = (metricDistance(body, 0, 2) + metricDistance(body, 1, 3)) / 2;
+    const forearm = (metricDistance(body, 2, 4) + metricDistance(body, 3, 5)) / 2;
+    const thigh = (metricDistance(body, 12, 14) + metricDistance(body, 13, 15)) / 2;
+    const shin = (metricDistance(body, 14, 16) + metricDistance(body, 15, 17)) / 2;
+    if (shoulder < 0.04 || forearm < 0.04 || thigh + shin < 0.12) continue;
+    const measuredHands = [handLength(frame.leftHand), handLength(frame.rightHand)].filter(
+      (value): value is number => value !== null && Number.isFinite(value) && value > 0.01,
+    );
+    const hand = measuredHands.length
+      ? measuredHands.reduce((sum, value) => sum + value, 0) / measuredHands.length
+      : forearm * 0.42;
+    samples.push({
+      shoulderToTorso: shoulder / torso,
+      hipToTorso: hip / torso,
+      upperArmToTorso: upperArm / torso,
+      forearmToTorso: forearm / torso,
+      thighToTorso: thigh / torso,
+      shinToTorso: shin / torso,
+      handToForearm: hand / forearm,
+    });
+  }
+  if (samples.length < 3) return null;
+  const value = (key: keyof (typeof samples)[number]) => median(samples.map((sample) => sample[key])) ?? 1;
+  return {
+    sourceSessionId,
+    sampledAt,
+    usableFrames: samples.length,
+    shoulderToTorso: clampRatio(value("shoulderToTorso"), 0.45, 1.45),
+    hipToTorso: clampRatio(value("hipToTorso"), 0.35, 1.2),
+    upperArmToTorso: clampRatio(value("upperArmToTorso"), 0.45, 1.15),
+    forearmToTorso: clampRatio(value("forearmToTorso"), 0.4, 1.05),
+    thighToTorso: clampRatio(value("thighToTorso"), 0.65, 1.65),
+    shinToTorso: clampRatio(value("shinToTorso"), 0.6, 1.55),
+    handToForearm: clampRatio(value("handToForearm"), 0.25, 0.72),
+  };
+}
+
+export async function getLatestBodyProportionProfile(): Promise<BodyProportionProfile | null> {
+  const sessions = await listMotionSessions();
+  for (const session of sessions) {
+    if (session.frameCount < 3 || session.fullBodyFrameCount < 3) continue;
+    const frames = await getSessionFrames(session.id);
+    const profile = deriveBodyProportionProfile(frames, session.id, session.endedAt ?? session.startedAt);
+    if (profile) return profile;
+  }
+  return null;
 }
 
 /** Extracts a single hand landmark's (x,y,z) trajectory across frames. */

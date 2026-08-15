@@ -1,4 +1,4 @@
-import { parseSessionFrame } from "./pose-store";
+import { parseSessionFrame, type BodyProportionProfile } from "./pose-store";
 import {
   getOccupationTemplate,
   type OccupationId,
@@ -21,6 +21,7 @@ export type ObservationProfile = {
   baselineSource?: "real" | "synthetic";
   syntheticDatasetId?: string | null;
   activeTestTaskId?: string | null;
+  bodyProportionProfile?: BodyProportionProfile | null;
   zoneGrid: ZoneGrid;
   updatedAt: number;
 };
@@ -100,6 +101,7 @@ export const DEFAULT_PROFILE: ObservationProfile = {
   baselineSource: "real",
   syntheticDatasetId: null,
   activeTestTaskId: null,
+  bodyProportionProfile: null,
   zoneGrid: Array(9).fill(null),
   updatedAt: 0,
 };
