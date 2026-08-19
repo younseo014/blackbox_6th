@@ -42,6 +42,7 @@ import {
 } from "./care-metrics";
 import {
   deleteAllCareLogs,
+  clearConsent,
   estimateStorageUsage,
   getConsent,
   listRecentLogs,
@@ -65,6 +66,7 @@ import {
 } from "./demo-personas";
 import {
   OCCUPATION_TEMPLATES,
+  PRIMITIVE_MOTION_LABELS,
   getOccupationTemplate,
   phaseForHour,
   type OccupationId,
@@ -93,6 +95,13 @@ import {
   getSyntheticTrainingClips,
   type SyntheticTrainingClip,
 } from "./synthetic-training";
+import { classifySkeletonMotion } from "./motion-classifier";
+import { sliceTargetMotion } from "./motion-segmentation";
+import {
+  handBelongsToPose,
+  selectLockedPose,
+  type PoseTargetLock,
+} from "./pose-target-lock";
 
 type View = "today" | "timeline" | "closing" | "care";
 type CameraStatus = "idle" | "requesting" | "connected" | "error";
@@ -322,6 +331,8 @@ export default function Home() {
   });
   const [detectedHands, setDetectedHands] = useState(0);
   const [headDirectionLabel, setHeadDirectionLabel] = useState("대기");
+  const [targetLocked, setTargetLocked] = useState(false);
+  const [cameraFullscreen, setCameraFullscreen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionCount, setSessionCount] = useState(0);
   const [latestSession, setLatestSession] = useState<MotionSessionRecord | null>(null);
@@ -409,6 +420,7 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const processingVideoRef = useRef<HTMLVideoElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const cameraFrameRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
@@ -418,6 +430,7 @@ export default function Home() {
   const lastHandDetectionTimeRef = useRef(0);
   const lastSampleTimeRef = useRef(0);
   const lastPoseRef = useRef<NormalizedLandmark[] | null>(null);
+  const poseTargetLockRef = useRef<PoseTargetLock | null>(null);
   const lastHandsRef = useRef<HandState>({
     left: null,
     right: null,
@@ -564,6 +577,14 @@ export default function Home() {
   }, [cameraStatus, poseStats.startedAt]);
 
   useEffect(() => {
+    const syncFullscreenState = () => {
+      setCameraFullscreen(document.fullscreenElement === cameraFrameRef.current);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timer);
@@ -599,6 +620,21 @@ export default function Home() {
       return;
     }
     void startCamera();
+  }
+
+  async function toggleCameraFullscreen() {
+    const cameraFrame = cameraFrameRef.current;
+    if (!cameraFrame) return;
+
+    try {
+      if (document.fullscreenElement === cameraFrame) {
+        await document.exitFullscreen();
+      } else {
+        await cameraFrame.requestFullscreen();
+      }
+    } catch {
+      setToast("이 브라우저에서는 카메라 전체화면을 열 수 없어요");
+    }
   }
 
   function handleConsentDecision(observationConsent: boolean) {
@@ -681,7 +717,7 @@ export default function Home() {
           {
             baseOptions: { ...poseBaseOptions, delegate: "GPU" },
             runningMode: "VIDEO",
-            numPoses: 1,
+            numPoses: 3,
             minPoseDetectionConfidence: 0.5,
             minPosePresenceConfidence: 0.5,
             minTrackingConfidence: 0.5,
@@ -694,7 +730,7 @@ export default function Home() {
           {
             baseOptions: poseBaseOptions,
             runningMode: "VIDEO",
-            numPoses: 1,
+            numPoses: 3,
             minPoseDetectionConfidence: 0.5,
             minPosePresenceConfidence: 0.5,
             minTrackingConfidence: 0.5,
@@ -853,7 +889,15 @@ export default function Home() {
       lastDetectionTimeRef.current = timestamp;
       try {
         const result = landmarker.detectForVideo(video, timestamp);
-        const landmarks = result.landmarks[0] ?? null;
+        const targetSelection = selectLockedPose(
+          result.landmarks,
+          poseTargetLockRef.current,
+          timestamp,
+        );
+        poseTargetLockRef.current = targetSelection.lock;
+        const landmarks = targetSelection.landmarks;
+        const nextTargetLocked = Boolean(targetSelection.lock);
+        setTargetLocked((current) => current === nextTargetLocked ? current : nextTargetLocked);
         lastPoseRef.current = landmarks;
         const fullBody = landmarks ? isFullBodyVisible(landmarks) : false;
         const head = landmarks ? getHeadDirection(landmarks) : null;
@@ -873,6 +917,7 @@ export default function Home() {
             rightScore: 0,
           };
           handResult.landmarks.forEach((hand, index) => {
+            if (!handBelongsToPose(hand, landmarks)) return;
             const category = handResult.handedness[index]?.[0];
             if (category?.categoryName === "Left") {
               hands.left = hand;
@@ -940,6 +985,7 @@ export default function Home() {
       lastSampleTimeRef.current = 0;
       lastVideoTimeRef.current = -1;
       lastPoseRef.current = null;
+      poseTargetLockRef.current = null;
       lastHandsRef.current = {
         left: null,
         right: null,
@@ -963,6 +1009,7 @@ export default function Home() {
       setPoseStats(emptyStats);
       setElapsedSeconds(0);
       setDetectedHands(0);
+      setTargetLocked(false);
       setHeadDirectionLabel("머리 방향 미확인");
       setSessionCount((count) => count + 1);
       updatePoseStatus("searching");
@@ -1005,20 +1052,40 @@ export default function Home() {
   async function recordObservationSession(sessionId: string, recordedAt: number) {
     try {
       const rawFrames = await getSessionFrames(sessionId);
-      const features = extractObservationFeatures(rawFrames, observationProfile.zoneGrid);
-      const taskOverride = observationProfile.activeTestTaskId
+      const testTargetTask = observationProfile.activeTestTaskId
         ? getOccupationTemplate(observationProfile.occupation).tasks.find(
             (task) => task.id === observationProfile.activeTestTaskId,
+          )
+        : undefined;
+      const motionSlice = sliceTargetMotion(rawFrames, testTargetTask?.motions);
+      const features = extractObservationFeatures(motionSlice.frames, observationProfile.zoneGrid);
+      const referenceClips = getSyntheticTrainingClips(
+        observationProfile.occupation,
+        observationProfile.bodyProportionProfile,
+      );
+      const motionClassification = classifySkeletonMotion(motionSlice.frames, referenceClips);
+      const predictedTask = motionClassification.predictedTaskType
+        ? getOccupationTemplate(observationProfile.occupation).tasks.find(
+            (task) => task.id === motionClassification.predictedTaskType,
           )
         : undefined;
       const episode = createObservationEpisode({
         sessionId,
         recordedAt,
         profile: observationProfile,
-        phase: taskOverride?.phase ?? phaseForHour(new Date(recordedAt).getHours()),
+        phase: predictedTask?.phase ?? testTargetTask?.phase ?? phaseForHour(new Date(recordedAt).getHours()),
         features,
         baseline: observationBaseline,
-        taskOverride,
+        motionClassification,
+        motionSlice: {
+          startMs: motionSlice.startMs,
+          endMs: motionSlice.endMs,
+          durationSeconds: motionSlice.durationSeconds,
+          originalDurationSeconds: motionSlice.originalDurationSeconds,
+          excludedFrameCount: motionSlice.excludedFrameCount,
+          reason: motionSlice.reason,
+        },
+        testTargetTask,
       });
       await saveObservationEpisode(episode);
       await refreshObservationData(observationProfile);
@@ -1027,8 +1094,10 @@ export default function Home() {
           ? "평소 흐름으로 확정하기 어려운 동작은 학습에서 잠시 보류했어요"
           : observationProfile.mode === "learning"
             ? `${episode.taskLabel} 패턴을 학습 기록에 추가했어요`
-            : taskOverride
-              ? `${episode.taskLabel} 성능 테스트를 개인 기준과 비교했어요`
+            : testTargetTask
+              ? motionClassification.status === "matched"
+                ? `${episode.taskLabel} 동작으로 자동 분석했어요`
+                : "동작 후보를 찾았지만 확정하려면 한 번 더 촬영해 주세요"
               : `${episode.taskLabel} 동작을 개인 기준과 비교했어요`,
       );
     } catch {
@@ -1077,12 +1146,17 @@ export default function Home() {
   }
 
   async function stopCamera() {
+    if (document.fullscreenElement === cameraFrameRef.current) {
+      await document.exitFullscreen().catch(() => undefined);
+    }
     await stopPoseTracking();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     if (processingVideoRef.current) processingVideoRef.current.srcObject = null;
     setCameraStatus("idle");
+    poseTargetLockRef.current = null;
+    setTargetLocked(false);
     setElapsedSeconds(0);
     setCameraMessage("카메라 연결을 멈췄어요.");
     setToast("좌표 기록을 안전하게 저장하고 카메라를 종료했어요");
@@ -1399,6 +1473,8 @@ export default function Home() {
       deleteAllCareLogs(),
       deleteAllObservationData(),
     ]);
+    clearConsent();
+    setConsentState(getConsent());
     setSessionCount(0);
     setLatestSession(null);
     setRecentSessions([]);
@@ -1728,18 +1804,99 @@ export default function Home() {
                     <strong>{latestObservationEpisode.dispositionReason}</strong>
                   </div>
                 )}
-                {latestPerformanceTest && latestPerformanceBaseline && (
+                {latestPerformanceTest && (
                   <div className={`performance-test-result ${(latestPerformanceTest.durationZScore ?? 0) >= 1.5 ? "changed" : "within"}`}>
-                    <div className="performance-result-heading">
-                      <span>최근 성능 테스트 · {latestPerformanceTest.taskLabel}</span>
-                      <strong>{(latestPerformanceTest.durationZScore ?? 0) >= 1.5 ? "평소 범위를 벗어난 변화 후보" : "가상 기준 범위 안"}</strong>
+                    <div className="motion-classification-heading">
+                      <div>
+                        <span>AI 동작 자동 분석</span>
+                        <strong>
+                          {latestPerformanceTest.motionClassification?.status === "insufficient"
+                            ? "동작을 확인하기 어려워요"
+                            : latestPerformanceTest.motionClassification?.status === "uncertain"
+                              ? "가능성이 높은 동작을 찾았어요"
+                              : latestPerformanceTest.taskLabel}
+                        </strong>
+                      </div>
+                      {latestPerformanceTest.motionClassification && (
+                        <span className={`classification-confidence status-${latestPerformanceTest.motionClassification.status}`}>
+                          일치 신뢰도 {Math.round(latestPerformanceTest.motionClassification.confidence * 100)}%
+                        </span>
+                      )}
                     </div>
-                    <div className="performance-result-metrics">
-                      <span><small>가상 기준 평균</small><strong>{latestPerformanceBaseline.meanDuration.toFixed(1)}초</strong></span>
-                      <span><small>이번 수행</small><strong>{latestPerformanceTest.features.durationSeconds.toFixed(1)}초</strong></span>
-                      <span><small>가장 긴 멈춤</small><strong>{latestPerformanceTest.features.longestPauseSeconds.toFixed(1)}초</strong></span>
-                    </div>
-                    <p>{(latestPerformanceTest.durationZScore ?? 0) >= 1.5 ? "한 번의 결과로 판단하지 않고 같은 동작을 반복했을 때도 이어지는지 확인해 주세요." : "동작 속도와 흐름이 2주 가상 기준선의 일반적인 범위와 비슷해요."}</p>
+
+                    {latestPerformanceTest.motionClassification?.predictedTaskLabel && (
+                      <div className="motion-prediction-summary">
+                        <span>감지한 동작</span>
+                        <strong>{latestPerformanceTest.motionClassification.predictedTaskLabel}</strong>
+                        {latestPerformanceTest.testTargetTaskType && (
+                          <small>
+                            테스트 목표 · {occupationTemplate.tasks.find((task) => task.id === latestPerformanceTest.testTargetTaskType)?.label ?? latestPerformanceTest.testTargetTaskType}
+                            {latestPerformanceTest.testTargetTaskType === latestPerformanceTest.motionClassification.predictedTaskType
+                              ? " · 목표와 일치"
+                              : " · 다른 동작으로 분석됨"}
+                          </small>
+                        )}
+                      </div>
+                    )}
+
+                    {latestPerformanceTest.motionClassification?.primitiveLabels.length ? (
+                      <div className="detected-motion-tags" aria-label="일치한 기초 움직임">
+                        {latestPerformanceTest.motionClassification.primitiveLabels.slice(0, 4).map((label) => (
+                          <span key={label}>{PRIMITIVE_MOTION_LABELS[label]}</span>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {(latestPerformanceTest.motionClassification?.candidates.length ?? 0) > 1 && (
+                      <div className="motion-candidates">
+                        <span>다른 후보</span>
+                        <div>
+                          {latestPerformanceTest.motionClassification!.candidates.slice(1).map((candidate) => (
+                            <span key={candidate.taskType}>
+                              {candidate.taskLabel} <strong>{Math.round(candidate.confidence * 100)}%</strong>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {latestPerformanceTest.motionSlice && (
+                      <div className="motion-slice-summary">
+                        <div>
+                          <span>자동 분석 구간</span>
+                          <strong>{latestPerformanceTest.motionSlice.durationSeconds.toFixed(1)}초</strong>
+                        </div>
+                        <p>
+                          전체 촬영 {latestPerformanceTest.motionSlice.originalDurationSeconds.toFixed(1)}초에서
+                          카메라 접근·거리 조정·대기 구간을 제외했어요.
+                        </p>
+                      </div>
+                    )}
+
+                    {latestPerformanceBaseline && (
+                      <>
+                        <div className="performance-result-heading">
+                          <span>개인 기준선 비교 · {latestPerformanceTest.taskLabel}</span>
+                          <strong>{(latestPerformanceTest.durationZScore ?? 0) >= 1.5 ? "평소 범위를 벗어난 변화 후보" : "가상 기준 범위 안"}</strong>
+                        </div>
+                        <div className="performance-result-metrics">
+                          <span><small>가상 기준 평균</small><strong>{latestPerformanceBaseline.meanDuration.toFixed(1)}초</strong></span>
+                          <span><small>이번 수행</small><strong>{latestPerformanceTest.features.durationSeconds.toFixed(1)}초</strong></span>
+                          <span><small>가장 긴 멈춤</small><strong>{latestPerformanceTest.features.longestPauseSeconds.toFixed(1)}초</strong></span>
+                        </div>
+                      </>
+                    )}
+
+                    {latestPerformanceTest.motionClassification?.evidence.length ? (
+                      <details className="classification-evidence">
+                        <summary>분석 근거 보기</summary>
+                        <ul>
+                          {latestPerformanceTest.motionClassification.evidence.map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      </details>
+                    ) : (
+                      <p>이전 방식으로 저장된 기록이에요. 새로 촬영하면 스켈레톤 좌표로 동작을 자동 분류해요.</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1764,7 +1921,10 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className={`camera-frame ${cameraStatus}`}>
+                <div
+                  ref={cameraFrameRef}
+                  className={`camera-frame ${cameraStatus}`}
+                >
                   <video ref={videoRef} muted playsInline aria-label="실시간 카메라 영상" />
                   <canvas
                     ref={overlayCanvasRef}
@@ -1794,11 +1954,25 @@ export default function Home() {
                   )}
                   {cameraStatus === "connected" && (
                     <div className="tracking-readout">
+                      <span className={targetLocked ? "target-locked" : ""}>
+                        대상 · {targetLocked ? "고정됨" : "찾는 중"}
+                      </span>
                       <span>머리 · {headDirectionLabel}</span>
                       <span className={detectedHands > 0 ? "hands-found" : ""}>
                         손 · {detectedHands}/2 인식
                       </span>
                     </div>
+                  )}
+                  {cameraStatus === "connected" && (
+                    <button
+                      className="camera-fullscreen-button"
+                      type="button"
+                      onClick={() => void toggleCameraFullscreen()}
+                      aria-label={cameraFullscreen ? "카메라 전체화면 닫기" : "카메라 전체화면으로 보기"}
+                    >
+                      <span aria-hidden="true">{cameraFullscreen ? "↙" : "↗"}</span>
+                      {cameraFullscreen ? "전체화면 닫기" : "전체화면"}
+                    </button>
                   )}
                   {cameraStatus === "connected" && (
                     <div className="camera-caption">

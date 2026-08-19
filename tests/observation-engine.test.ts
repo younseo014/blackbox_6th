@@ -95,6 +95,51 @@ test("analysis mode: episodes never become baseline learning samples", () => {
   assert.equal(buildBaseline([episode], 1).acceptedSamples, 0);
 });
 
+test("performance test uses the skeleton prediction, not the manually selected target label", () => {
+  const template = getOccupationTemplate("cafe");
+  const selectedTarget = template.tasks.find((task) => task.id === "ORDER_ZONE")!;
+  const predictedTask = template.tasks.find((task) => task.id === "DRINK_PREP_TASK")!;
+  const profile = {
+    ...DEFAULT_PROFILE,
+    mode: "analysis" as const,
+    learningStartedAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  const episode = createObservationEpisode({
+    sessionId: "auto-label-test",
+    recordedAt: Date.now(),
+    profile,
+    phase: "business",
+    features: {
+      durationSeconds: 18,
+      activeRatio: 0.6,
+      pauseCount: 0,
+      longestPauseSeconds: 0,
+      pathLength: 0.9,
+      routeComplexity: 1,
+      repetitionCount: 3,
+      dominantZone: "DRINK_PREP",
+      zoneTransitions: 0,
+    },
+    baseline: buildBaseline([], 1),
+    testTargetTask: selectedTarget,
+    motionClassification: {
+      status: "matched",
+      predictedTaskType: predictedTask.id,
+      predictedTaskLabel: predictedTask.label,
+      confidence: 0.82,
+      candidates: [],
+      primitiveLabels: predictedTask.motions,
+      evidence: ["관절 궤적 비교"],
+    },
+  });
+  assert.equal(episode.source, "performance_test");
+  assert.equal(episode.testTargetTaskType, selectedTarget.id);
+  assert.equal(episode.taskType, predictedTask.id);
+  assert.equal(episode.taskLabel, predictedTask.label);
+  assert.equal(episode.taskConfidence, 0.82);
+});
+
 test("buildBaseline: separates task baselines and counts only accepted episodes", () => {
   const base = {
     id: "episode",

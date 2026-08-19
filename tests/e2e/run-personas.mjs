@@ -62,7 +62,15 @@ async function withPage(options, run) {
     ...options,
   });
   const page = await context.newPage();
-  page.setDefaultTimeout(25000);
+  // 25s used to be comfortable margin, but the app now does noticeably more
+  // per-frame work while the camera/pose loop is running (occupation-aware
+  // baselines, personalized skeleton proportions, etc.), and this sandbox's
+  // software-rendered WebGL fallback (no real GPU) makes that contention
+  // worse than it would be on real hardware. A slow click here is a real,
+  // reproducible timing margin issue - not a broken feature (confirmed by
+  // manually clicking with a much longer timeout, which always succeeds) -
+  // so the fix is more headroom, not retrying or skipping the assertion.
+  page.setDefaultTimeout(45000);
   try {
     await run(page, context);
   } finally {
@@ -328,6 +336,11 @@ test("개발용 세션 리플레이: 기록된 세션을 재생하면 스켈레�
       "expected a scrubber control for stepping through frames",
     );
 
+    // The frame-by-frame stats (including the frame counter) live inside a
+    // collapsed "분석 상세 정보 보기" <details> panel in the redesigned replay
+    // UI - it must be expanded before its text is actually visible/readable.
+    await page.locator(".analysis-details summary").click();
+
     // Scrub to a specific frame and confirm the frame counter follows it -
     // this is the core "let me see exactly what motion happened here" flow.
     const scrubber = page.locator(".replay-scrubber");
@@ -375,17 +388,15 @@ test("개발용 합성 시나리오 리플레이: 페르소나의 '동작 보기
 
     // This is the critical distinction the user asked for: a synthetic demo
     // clip must never be mistaken for a real recorded session.
-    const noteText = await page.locator(".replay-note").innerText();
-    assert.match(noteText, /실제 기록이 아니에요/);
+    const chipText = await page.locator(".replay-source-chip.synthetic").innerText();
+    assert.match(chipText, /가상 시나리오/);
 
     // The default persona/day's first example is a routine ("normal_task")
-    // event, so the detection-basis panel should honestly say it isn't a
-    // counted signal rather than inventing a fake reason.
-    await assert.doesNotReject(
-      page.locator(".detection-basis").waitFor({ timeout: 5000 }),
-      "expected the '왜 이 신호로 잡혔을까요?' detection-basis panel to render",
-    );
-    const routineRuleText = await page.locator(".detection-basis-rule").innerText();
+    // event, so the detection-basis rule (rendered inside the collapsed
+    // "분석 상세 정보 보기" panel) should honestly say it isn't a counted
+    // signal rather than inventing a fake reason.
+    await page.locator(".analysis-details summary").click();
+    const routineRuleText = await page.locator(".technical-evidence").last().innerText();
     assert.match(routineRuleText, /집계되지 않는 일반 업무 장면이에요/);
 
     await assert.doesNotReject(
@@ -415,13 +426,16 @@ test("개발용 합성 시나리오 리플레이: 페르소나의 '동작 보기
     await doubleCheckButton.click();
 
     await assert.doesNotReject(
-      page.locator(".detection-basis").waitFor({ timeout: 5000 }),
-      "expected the detection-basis panel for a counted event",
+      page.locator(".replay-modal").waitFor({ timeout: 8000 }),
+      "expected the replay modal to open for a counted event",
     );
-    const countedRuleText = await page.locator(".detection-basis-rule").innerText();
-    assert.match(countedRuleText, /마감 반복 확인/);
-    const metricText = await page.locator(".detection-basis-metric").innerText();
+    // The baseline comparison line renders directly in the analysis panel
+    // (not behind the collapsed details), so it's checked first.
+    const metricText = await page.locator(".analysis-message small").innerText();
     assert.match(metricText, /평소 하루 평균/);
+    await page.locator(".analysis-details summary").click();
+    const countedRuleText = await page.locator(".technical-evidence").last().innerText();
+    assert.match(countedRuleText, /마감 반복 확인/);
 
     await page.locator(".replay-modal .modal-close").click();
     await assert.doesNotReject(
@@ -446,7 +460,15 @@ test("페르소나: GPU 미가속 환경 - GPU 비활성화 상태에서도 카�
     try {
       await context.grantPermissions(["camera"], { origin: BASE_URL });
       const page = await context.newPage();
-      page.setDefaultTimeout(25000);
+      // 25s used to be comfortable margin, but the app now does noticeably more
+  // per-frame work while the camera/pose loop is running (occupation-aware
+  // baselines, personalized skeleton proportions, etc.), and this sandbox's
+  // software-rendered WebGL fallback (no real GPU) makes that contention
+  // worse than it would be on real hardware. A slow click here is a real,
+  // reproducible timing margin issue - not a broken feature (confirmed by
+  // manually clicking with a much longer timeout, which always succeeds) -
+  // so the fix is more headroom, not retrying or skipping the assertion.
+  page.setDefaultTimeout(45000);
       const pageErrors = [];
       page.on("pageerror", (err) => pageErrors.push(err.message));
 

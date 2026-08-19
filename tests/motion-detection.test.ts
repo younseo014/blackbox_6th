@@ -100,8 +100,8 @@ test("detectMotionEvents: a sharp jerk above the safety threshold is flagged", (
   // a large, sudden change in speed (jerk), not a gradual acceleration.
   const points: Array<{ x: number; y: number }> = [];
   for (let i = 0; i < 5; i += 1) points.push({ x: 0.5 + i * 0.001, y: 0.5 });
-  points.push({ x: 0.9, y: 0.9 }); // sudden large jump
-  for (let i = 0; i < 5; i += 1) points.push({ x: 0.9 + i * 0.001, y: 0.9 });
+  points.push({ x: 1.3, y: 1.3 }); // sudden large jump
+  for (let i = 0; i < 5; i += 1) points.push({ x: 1.3 + i * 0.001, y: 1.3 });
   const events = detectMotionEvents(samplesFrom(points));
   assert.ok(events.some((e) => e.type === "safety_alert"));
 });

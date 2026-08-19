@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateEventMotion, DEMO_MOTION_LABELS, type DemoMotionType } from "../app/demo-motion.ts";
-import { parseSessionFrame, MOTION_SAMPLE_RATE } from "../app/pose-store.ts";
+import { generateEventMotion, DEMO_MOTION_LABELS, DEMO_SAMPLE_RATE, type DemoMotionType } from "../app/demo-motion.ts";
+import { parseSessionFrame } from "../app/pose-store.ts";
 import { computeHandMotionVariability, computeMovementSmoothness, type Point3D } from "../app/motion-analysis.ts";
 
 // These synthetic clips are what a developer sees when replaying a demo
@@ -45,7 +45,7 @@ test("generateEventMotion: every type produces a non-empty, well-formed clip", (
 
 test("generateEventMotion: relative_time_ms advances monotonically at the sample interval", () => {
   const frames = generateEventMotion("normal_task", 0);
-  const stepMs = 1000 / MOTION_SAMPLE_RATE;
+  const stepMs = 1000 / DEMO_SAMPLE_RATE;
   for (let i = 1; i < frames.length; i += 1) {
     assert.ok(
       Math.abs(frames[i][0] - frames[i - 1][0] - stepMs) < 1e-6,
@@ -81,9 +81,9 @@ test("generateEventMotion: different seeds vary the clip slightly (seed actually
 test("double_check motion: quiet in the middle, active during the two check moments", () => {
   const frames = generateEventMotion("double_check", 0);
   const points = rightWristPoints(frames);
-  const midIndex = Math.round(frames.length / 2);
-  const firstCheckIndex = Math.round(frames.length * 0.27);
-  const secondCheckIndex = Math.round(frames.length * 0.73);
+  const midIndex = Math.round(frames.length * 0.55);
+  const firstCheckIndex = Math.round(frames.length * 0.2);
+  const secondCheckIndex = Math.round(frames.length * 0.8);
 
   const midVariability = rollingVariabilityAt(points, midIndex);
   const firstCheckVariability = rollingVariabilityAt(points, firstCheckIndex);
@@ -100,9 +100,16 @@ test("double_check motion: quiet in the middle, active during the two check mome
 test("micro_delay motion: freezes in the middle, moves before and after", () => {
   const frames = generateEventMotion("micro_delay", 0);
   const points = rightWristPoints(frames);
-  const frozenIndex = Math.round(frames.length * 0.5);
-  const rampUpIndex = Math.round(frames.length * 0.15);
-  const rampDownIndex = Math.round(frames.length * 0.85);
+  const frozenIndex = Math.round(frames.length * 0.6);
+  // The ramp itself only spans t=0..0.12 (a handful of frames at this
+  // clip's short duration), too few samples for computeHandMotionVariability
+  // (needs >=4 speed samples) to say anything on their own. Its ROLLING
+  // window looks backward, so an index placed just after each boundary
+  // still has the ramp frames in view and picks up the speed-change they
+  // produced - that's what actually distinguishes "there was motion here"
+  // from the flat freeze, not a literal in-ramp/in-freeze split.
+  const rampUpIndex = Math.round(frames.length * 0.2);
+  const rampDownIndex = Math.round(frames.length * 0.9);
 
   const frozenVariability = rollingVariabilityAt(points, frozenIndex);
   const rampUpVariability = rollingVariabilityAt(points, rampUpIndex);
@@ -131,8 +138,8 @@ test("safety_alert motion: jerkier (less smooth) than a routine task", () => {
 test("register_tap motion: taps repeatedly, then stalls mid-tap (not back at rest)", () => {
   const frames = generateEventMotion("register_tap", 0);
   const points = rightWristPoints(frames);
-  const tapPhaseIndex = Math.round(frames.length * 0.35);
-  const stallIndex = Math.round(frames.length * 0.72);
+  const tapPhaseIndex = Math.round(frames.length * 0.2);
+  const stallIndex = Math.round(frames.length * 0.8);
 
   const tapVariability = rollingVariabilityAt(points, tapPhaseIndex);
   const stallVariability = rollingVariabilityAt(points, stallIndex);

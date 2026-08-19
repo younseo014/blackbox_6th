@@ -25,6 +25,24 @@ export type PrimitiveMotionLabel =
   | "REPETITIVE_ARM"
   | "ZONE_TRANSITION";
 
+export const PRIMITIVE_MOTION_LABELS: Record<PrimitiveMotionLabel, string> = {
+  WALK: "이동",
+  STAND: "서 있기",
+  SIT: "앉기",
+  BEND_FORWARD: "상체 숙이기",
+  BEND_DOWN: "아래로 굽히기",
+  REACH_UP: "위로 손 뻗기",
+  REACH_DOWN: "아래로 손 뻗기",
+  REACH_FORWARD: "앞으로 손 뻗기",
+  ARM_ELEVATED: "팔 들기",
+  TURN_BODY: "몸통 돌리기",
+  CARRY: "물건 들고 이동",
+  PUSH_PULL: "밀고 당기기",
+  STATIC_PAUSE: "잠시 멈춤",
+  REPETITIVE_ARM: "팔 반복 움직임",
+  ZONE_TRANSITION: "구역 간 이동",
+};
+
 export type TaskTemplate = {
   id: string;
   label: string;

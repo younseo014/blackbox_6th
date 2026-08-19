@@ -23,7 +23,6 @@ import {
   BODY_LANDMARK_COUNT,
   HAND_LANDMARK_COUNT,
   MOTION_FRAME_STRIDE,
-  MOTION_SAMPLE_RATE,
 } from "./pose-store";
 
 export type DemoMotionType =
@@ -39,7 +38,19 @@ export type DemoMotionType =
 
 type Point2D = { x: number; y: number };
 
-const FRAME_INTERVAL_MS = 1000 / MOTION_SAMPLE_RATE;
+// Real camera capture samples at MOTION_SAMPLE_RATE (5Hz, pose-store.ts) -
+// these synthetic clips deliberately do NOT reuse that rate. At 5Hz, a
+// genuinely fast (short, human-paced) motion only gets 2-3 frames to work
+// with, which plays back as a jarring teleport rather than a fast, fluid
+// movement - the sampling was too coarse to represent real speed, not the
+// clip itself being too slow. Sampling finer here (still deterministic, no
+// Math.random()/Date.now()) makes a short, fast motion look like fast
+// motion instead of a slideshow. This has no effect on detection accuracy:
+// motion-detection.ts measures speed/jerk per unit of real TIME (seconds),
+// not per sample, so it reads identically whether a clip is sampled at 5Hz
+// or here.
+export const DEMO_SAMPLE_RATE = 20; // Hz; occupation previews are interpolated to 30fps separately
+const FRAME_INTERVAL_MS = 1000 / DEMO_SAMPLE_RATE;
 
 // Baseline standing pose, one point per storedIndex 0..21 - see
 // BODY_LANDMARK_NAMES in pose-store.ts (starts at the shoulders, in the
@@ -256,20 +267,32 @@ function buildRawFrame(frameIndex: number, spec: FrameSpec): number[] {
   return frame;
 }
 
+// Pushed as fast as each type can honestly go. Six types have no "hold
+// still" requirement and are simply ~2x faster than the previous pass.
+// The other three (double_check, micro_delay, register_tap) are judged by
+// the SAME real-time thresholds real camera footage is judged by
+// (FREEZE_MIN_DURATION_MS = 1s, EPISODE_MIN_DURATION_MS = 0.5s in
+// motion-detection.ts) - shortening their hold/stall/episode segments
+// below that would make them silently stop being detectable, which would
+// be dishonest (the "감지 근거" panel would show nothing for a clip
+// that's SUPPOSED to demonstrate that exact pattern). Those thresholds are
+// intentionally left untouched since they also govern real user sessions,
+// not just this synthetic replay - so these three types only get the
+// reach/approach portions sped up, capped at ~1.3-1.5x overall.
 const CLIP_SECONDS: Record<DemoMotionType, number> = {
-  double_check: 8,
-  micro_delay: 7,
-  safety_alert: 4.5,
-  normal_task: 6,
-  fine_hand_task: 6,
-  register_tap: 6.5,
-  queue_shift: 7,
-  high_reach: 5.5,
-  low_bend: 6,
+  double_check: 2.6,
+  micro_delay: 1.6,
+  safety_alert: 0.6,
+  normal_task: 0.9,
+  fine_hand_task: 0.9,
+  register_tap: 1.95,
+  queue_shift: 0.9,
+  high_reach: 0.8,
+  low_bend: 0.8,
 };
 
 function frameCountFor(type: DemoMotionType): number {
-  return Math.round(CLIP_SECONDS[type] * MOTION_SAMPLE_RATE);
+  return Math.round(CLIP_SECONDS[type] * DEMO_SAMPLE_RATE);
 }
 
 // A small deterministic offset derived from the seed, so events of the same
@@ -287,13 +310,17 @@ function seedJitter(seed: number, scale: number): number {
  */
 function generateDoubleCheckMotion(seed: number): number[][] {
   const frameCount = frameCountFor("double_check");
-  const firstTarget: Point2D = { x: 0.67 + seedJitter(seed, 0.02), y: 0.42 };
-  const secondTarget: Point2D = { x: 0.73 + seedJitter(seed + 1, 0.02), y: 0.26 };
+  // Both reaches now move a clearly comparable distance from rest (the
+  // first used to be a much smaller wobble than the second, which - at
+  // this shorter overall clip length - meant its "away" episode barely
+  // lasted EPISODE_MIN_DURATION_MS at all).
+  const firstTarget: Point2D = { x: 0.72 + seedJitter(seed, 0.02), y: 0.35 };
+  const secondTarget: Point2D = { x: 0.75 + seedJitter(seed + 1, 0.02), y: 0.24 };
   const frames: number[][] = [];
   for (let i = 0; i < frameCount; i += 1) {
     const t = i / (frameCount - 1);
-    const firstProgress = bump(t, 0.27, 0.1);
-    const secondProgress = bump(t, 0.73, 0.1);
+    const firstProgress = bump(t, 0.15, 0.18);
+    const secondProgress = bump(t, 0.85, 0.18);
     const combined = clamp01(firstProgress + secondProgress);
     frames.push(
       buildRawFrame(i, {
@@ -334,18 +361,21 @@ function generateMicroDelayMotion(seed: number): number[][] {
     let rightHandCenter: Point2D;
     let headPitch: number;
     let handAngle: number;
-    if (t < 0.28) {
-      const local = clamp01(t / 0.28);
+    if (t < 0.12) {
+      // A fast, snappy reach - the freeze below is the part that matters
+      // for detection, so it keeps almost all of the clip's real time
+      // (needs to clear FREEZE_MIN_DURATION_MS with real margin).
+      const local = clamp01(t / 0.12);
       rightHandCenter = lerpPoint(REST_RIGHT, reachTarget, local);
       headPitch = 0.05 + 0.12 * local;
       handAngle = REST_RIGHT_ANGLE - 0.35 * local;
-    } else if (t < 0.72) {
+    } else if (t < 0.88) {
       // the hesitation / freeze - held exactly at reachTarget
       rightHandCenter = reachTarget;
       headPitch = 0.17;
       handAngle = REST_RIGHT_ANGLE - 0.35;
     } else {
-      const local = clamp01((t - 0.72) / 0.28);
+      const local = clamp01((t - 0.88) / 0.12);
       rightHandCenter = lerpPoint(reachTarget, finishTarget, local);
       headPitch = 0.17 - 0.12 * local;
       handAngle = REST_RIGHT_ANGLE - 0.35 + 0.2 * local;
@@ -474,14 +504,21 @@ function generateRegisterTapMotion(seed: number): number[][] {
   for (let i = 0; i < frameCount; i += 1) {
     const t = i / (frameCount - 1);
     let progress: number;
-    if (t < 0.55) {
-      const envelope = clamp01(t / 0.18);
-      const tapOscillation = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 7 + seed);
+    if (t < 0.28) {
+      const envelope = clamp01(t / 0.12);
+      // 2 cycles over the (now much shorter) tap-burst window is roughly a
+      // real couple-of-taps rate; the original "7" was tuned against a burst
+      // window several times longer in absolute time, which would now read
+      // as an unrealistically rapid-fire tap.
+      const tapOscillation = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 2 + seed);
       progress = envelope * (0.55 + 0.45 * tapOscillation);
-    } else if (t < 0.78) {
-      progress = 0.55; // interrupted - holds mid-tap, not back at rest
+    } else if (t < 0.92) {
+      // interrupted - holds mid-tap, not back at rest. This fraction is
+      // wide enough to keep the stall's ABSOLUTE hold time safely above
+      // FREEZE_MIN_DURATION_MS even in this much shorter clip.
+      progress = 0.55;
     } else {
-      const local = clamp01((t - 0.78) / 0.22);
+      const local = clamp01((t - 0.92) / 0.08);
       progress = 0.55 + 0.45 * local;
     }
     frames.push(
@@ -544,7 +581,7 @@ function generateHighReachMotion(seed: number): number[][] {
   const frames: number[][] = [];
   for (let i = 0; i < frameCount; i += 1) {
     const t = i / (frameCount - 1);
-    const progress = clamp01(Math.max(bump(t, 0.32, 0.22), bump(t, 0.68, 0.22)));
+    const progress = clamp01(Math.max(bump(t, 0.32, 0.6), bump(t, 0.68, 0.6)));
     frames.push(
       buildRawFrame(i, {
         headYaw: 0,
@@ -574,7 +611,7 @@ function generateLowBendMotion(seed: number): number[][] {
   const frames: number[][] = [];
   for (let i = 0; i < frameCount; i += 1) {
     const t = i / (frameCount - 1);
-    const progress = clamp01(bump(t, 0.5, 0.38));
+    const progress = clamp01(bump(t, 0.5, 0.48));
     frames.push(
       buildRawFrame(i, {
         headYaw: 0,

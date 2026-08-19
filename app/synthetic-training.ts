@@ -52,6 +52,8 @@ const BODY_START = 10;
 const LEFT_HAND_START = BODY_START + BODY_LANDMARK_COUNT * 4;
 const RIGHT_HAND_START = LEFT_HAND_START + HAND_LANDMARK_COUNT * 3;
 const DISPLAY_ASPECT_RATIO = 16 / 9;
+export const SYNTHETIC_REPLAY_FPS = 30;
+const OBSERVED_TEST_MOTION_SECONDS = 5.2;
 
 export const DEFAULT_BODY_PROPORTIONS: Omit<BodyProportionProfile, "sourceSessionId" | "sampledAt" | "usableFrames"> = {
   shoulderToTorso: 0.86,
@@ -344,7 +346,7 @@ function baseDurationForTask(task: TaskTemplate) {
   return duration;
 }
 
-function stretchFrames(frames: number[][], durationSeconds: number) {
+function retimeFrames(frames: number[][], durationSeconds: number) {
   const lastTime = frames[frames.length - 1]?.[0] ?? 1;
   const scale = lastTime > 0 ? (durationSeconds * 1000) / lastTime : 1;
   return frames.map((frame) => {
@@ -354,10 +356,43 @@ function stretchFrames(frames: number[][], durationSeconds: number) {
   });
 }
 
+function previewDurationForTask(task: TaskTemplate) {
+  if (task.motions.includes("WALK") || task.motions.includes("ZONE_TRANSITION")) {
+    return OBSERVED_TEST_MOTION_SECONDS + 0.8;
+  }
+  if (task.motions.includes("REPETITIVE_ARM")) return OBSERVED_TEST_MOTION_SECONDS;
+  return OBSERVED_TEST_MOTION_SECONDS - 0.4;
+}
+
+/**
+ * The camera sample used for calibration contained about five seconds of
+ * actual target motion inside a much longer setup/stop session. Replay clips
+ * use that human-paced duration, then interpolate coordinates to 30fps so a
+ * short gesture remains readable instead of jumping between sparse poses.
+ */
+function smoothReplayFrames(frames: number[][], durationSeconds: number) {
+  if (frames.length < 2) return retimeFrames(frames, durationSeconds);
+  const outputCount = Math.max(2, Math.round(durationSeconds * SYNTHETIC_REPLAY_FPS) + 1);
+  return Array.from({ length: outputCount }, (_, outputIndex) => {
+    const progress = outputIndex / (outputCount - 1);
+    const sourcePosition = progress * (frames.length - 1);
+    const beforeIndex = Math.floor(sourcePosition);
+    const afterIndex = Math.min(frames.length - 1, beforeIndex + 1);
+    const amount = sourcePosition - beforeIndex;
+    const before = frames[beforeIndex];
+    const after = frames[afterIndex];
+    return before.map((value, valueIndex) =>
+      valueIndex === 0
+        ? progress * durationSeconds * 1000
+        : value + (after[valueIndex] - value) * amount,
+    );
+  });
+}
+
 function featuresForTask(task: TaskTemplate, frames: number[][], durationSeconds: number): ObservationFeatures {
   const zoneId = task.zones[0] ?? null;
   const grid = Array(9).fill(zoneId) as ZoneGrid;
-  const features = extractObservationFeatures(stretchFrames(frames, durationSeconds), grid);
+  const features = extractObservationFeatures(retimeFrames(frames, durationSeconds), grid);
   return {
     ...features,
     durationSeconds,
@@ -421,7 +456,7 @@ export function getSyntheticTrainingClips(
         instruction: instructionForTask(task),
         expectedMinSeconds: Math.round(baseDuration * VARIATIONS[0] * 10) / 10,
         expectedMaxSeconds: Math.round(baseDuration * VARIATIONS[VARIATIONS.length - 1] * 10) / 10,
-        frames: stretchFrames(frames, Math.min(14, Math.max(7, baseDuration * 0.45 + index * 0.1))),
+        frames: smoothReplayFrames(frames, previewDurationForTask(task) + (index % 3) * 0.08),
       };
     });
 }
