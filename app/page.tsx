@@ -103,7 +103,7 @@ import {
   type PoseTargetLock,
 } from "./pose-target-lock";
 
-type View = "today" | "timeline" | "closing" | "care";
+type View = "home" | "settings" | "today" | "timeline" | "closing" | "care";
 type CameraStatus = "idle" | "requesting" | "connected" | "error";
 type PoseStatus = "idle" | "loading" | "searching" | "partial" | "full" | "error";
 type ClosingStatus = "idle" | "checking" | "attention" | "done";
@@ -169,10 +169,9 @@ const initialEvents: TimelineEvent[] = [
 ];
 
 const navItems: Array<{ id: View; label: string; icon: string }> = [
-  { id: "today", label: "오늘", icon: "⌂" },
-  { id: "timeline", label: "타임라인", icon: "≡" },
-  { id: "closing", label: "스마트 마감", icon: "✓" },
-  { id: "care", label: "케어 기록", icon: "♡" },
+  { id: "home", label: "홈", icon: "⌂" },
+  { id: "care", label: "기록", icon: "♡" },
+  { id: "settings", label: "설정", icon: "⚙" },
 ];
 
 const eventPresets: Array<{
@@ -315,7 +314,7 @@ function TimelineList({
 }
 
 export default function Home() {
-  const [view, setView] = useState<View>("today");
+  const [view, setView] = useState<View>("home");
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>("idle");
   const [cameraMessage, setCameraMessage] = useState(
     "카메라를 연결하면 오늘의 장면을 확인할 수 있어요.",
@@ -1559,6 +1558,21 @@ export default function Home() {
     : 0;
   const activePersona = DEMO_PERSONAS[selectedPersonaIndex] ?? DEMO_PERSONAS[0];
   const demoDay = activePersona.week[selectedDemoDay] ?? activePersona.week[0];
+  const demoFlowScore = Math.max(
+    54,
+    96 -
+      demoDay.safetyAlerts * 5 -
+      demoDay.doubleChecks * 3 -
+      demoDay.unfinishedTasks * 6 -
+      Math.round(demoDay.microDelayRate * 0.45),
+  );
+  const demoHasNotice =
+    demoDay.doubleChecks > 0 ||
+    demoDay.unfinishedTasks > 0 ||
+    demoDay.microDelayRate >= 10;
+  const homeStatusCopy = demoHasNotice
+    ? "오늘, 평소와 다른 흐름이 한 번 관찰됐어요."
+    : "오늘은 평소와 비슷한 흐름으로 업무를 마쳤어요.";
 
   const recentCareLogs = careLogs.slice(0, 7);
   const careBaseline = computeBaseline(careLogs);
@@ -1675,10 +1689,12 @@ export default function Home() {
           <div>
             <span className="eyebrow">8월 11일 화요일</span>
             <h1>
-              {view === "today" && "안녕하세요, 사장님"}
+              {view === "home" && "오늘의 케어"}
+              {view === "today" && "기능 테스트"}
               {view === "timeline" && "오늘의 메모리 타임라인"}
               {view === "closing" && "스마트 마감"}
               {view === "care" && "나의 케어 기록"}
+              {view === "settings" && "설정"}
             </h1>
           </div>
           <div className={`camera-pill ${cameraStatus}`}>
@@ -1687,6 +1703,76 @@ export default function Home() {
           </div>
         </header>
 
+        {view === "home" && (
+          <div className="mobile-home-view">
+            <section className={`home-status-card ${demoHasNotice ? "has-notice" : ""}`}>
+              <span className="home-status-icon" aria-hidden="true">{demoHasNotice ? "!" : "✓"}</span>
+              <div>
+                <span className="section-kicker">오늘의 상태</span>
+                <h2>{homeStatusCopy}</h2>
+                <p>
+                  {demoHasNotice
+                    ? "한 장면만으로 판단하지 않고, 같은 변화가 반복되는지 차분히 살펴볼게요."
+                    : "필요한 변화가 생기면 이유와 함께 알려드릴게요."}
+                </p>
+              </div>
+            </section>
+
+            {demoHasNotice && (
+              <button className="home-notice-card" type="button" onClick={() => setView("care")}>
+                <span className="notice-dot" aria-hidden="true" />
+                <span>
+                  <small>확인할 기록</small>
+                  <strong>{demoDay.examples[0]?.label ?? "평소와 다른 동작 흐름"}</strong>
+                  <em>왜 기록됐는지 보기 ›</em>
+                </span>
+              </button>
+            )}
+
+            <section className="home-flow-card">
+              <div className="home-flow-heading">
+                <div>
+                  <span className="section-kicker">최근 흐름</span>
+                  <h2>평소 흐름 일치도</h2>
+                </div>
+                <button type="button" className="text-button" onClick={() => setView("care")}>기록 보기</button>
+              </div>
+              <div className="flow-score-row">
+                <strong>{demoFlowScore}<small>점</small></strong>
+                <p>오늘의 업무 흐름이 평소와 얼마나 비슷했는지 보여주는 참고 점수예요.</p>
+              </div>
+              <div className="mini-flow-chart" aria-label="최근 7일 평소 흐름 일치도">
+                {activePersona.week.map((day, index) => {
+                  const score = Math.max(54, 96 - day.safetyAlerts * 5 - day.doubleChecks * 3 - day.unfinishedTasks * 6 - Math.round(day.microDelayRate * 0.45));
+                  return (
+                    <button
+                      type="button"
+                      key={`${day.date}-${index}`}
+                      className={index === selectedDemoDay ? "selected" : ""}
+                      onClick={() => setSelectedDemoDay(index)}
+                      aria-label={`${day.day}요일, 평소 흐름 일치도 ${score}점`}
+                    >
+                      <i style={{ height: `${score}%` }} />
+                      <span>{day.day}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="home-report-card">
+              <div>
+                <span className="section-kicker">최근 케어 기록</span>
+                <h2>{activePersona.name} 사장님의 이번 주 요약</h2>
+                <p>{activePersona.summary}</p>
+              </div>
+              <button type="button" onClick={() => setView("care")}>자세히 보기 <span aria-hidden="true">›</span></button>
+            </section>
+
+            <p className="home-disclaimer">이 결과는 진단이 아닌, 평소 업무 흐름의 변화를 알아차리기 위한 참고 정보예요.</p>
+          </div>
+        )}
+
         {view === "today" && (
           <div className="today-view">
             <section className="safety-banner">
@@ -1694,11 +1780,11 @@ export default function Home() {
                 ✓
               </div>
               <div>
-                <strong>매장은 대체로 안전해요</strong>
-                <p>온열기 한 가지만 확인하면 마음 놓고 마감할 수 있어요.</p>
+                <strong>테스트 중인 기능이에요</strong>
+                <p>가상 기준선을 적용한 뒤 카메라 앞에서 예시 동작을 따라 해보세요.</p>
               </div>
-              <button type="button" onClick={() => setView("closing")}>
-                확인하기 <span aria-hidden="true">›</span>
+              <button type="button" onClick={() => setView("settings")}>
+                설정으로 <span aria-hidden="true">›</span>
               </button>
             </section>
 
@@ -1996,24 +2082,30 @@ export default function Home() {
                       {cameraStatus === "connected" ? formatDuration(elapsedSeconds) : "대기"}
                     </span>
                   </div>
-                  <div className="coordinate-stats">
-                    <span><small>몸 관절</small><strong>22개</strong></span>
-                    <span><small>손 관절</small><strong>최대 42개</strong></span>
-                    <span><small>기록 속도</small><strong>{MOTION_SAMPLE_RATE} FPS</strong></span>
-                    <span><small>누적 프레임</small><strong>{poseStats.frames.toLocaleString()}</strong></span>
-                    <span><small>전신 인식률</small><strong>{fullBodyRatio}%</strong></span>
-                    <span><small>예상 용량</small><strong>{formatBytes(poseStats.storageBytes)}</strong></span>
-                  </div>
-                  <div className="coordinate-actions">
-                    <span>얼굴 특징·영상·음성 없이 동작 좌표만 이 브라우저에 저장 · 세션 {sessionCount}개</span>
-                    <button
-                      type="button"
-                      onClick={() => void exportPoseData()}
-                      disabled={!latestSession && poseStats.frames === 0}
-                    >
-                      학습용 JSON 내려받기
-                    </button>
-                  </div>
+                  <details className="recorder-details">
+                    <summary>
+                      <span>기록 정보 자세히 보기</span>
+                      <small>{poseStats.frames.toLocaleString()}프레임 · 세션 {sessionCount}개</small>
+                    </summary>
+                    <div className="coordinate-stats">
+                      <span><small>몸 관절</small><strong>22개</strong></span>
+                      <span><small>손 관절</small><strong>최대 42개</strong></span>
+                      <span><small>기록 속도</small><strong>{MOTION_SAMPLE_RATE} FPS</strong></span>
+                      <span><small>누적 프레임</small><strong>{poseStats.frames.toLocaleString()}</strong></span>
+                      <span><small>전신 인식률</small><strong>{fullBodyRatio}%</strong></span>
+                      <span><small>예상 용량</small><strong>{formatBytes(poseStats.storageBytes)}</strong></span>
+                    </div>
+                    <div className="coordinate-actions">
+                      <span>얼굴 특징·영상·음성 없이 동작 좌표만 이 브라우저에 저장 · 세션 {sessionCount}개</span>
+                      <button
+                        type="button"
+                        onClick={() => void exportPoseData()}
+                        disabled={!latestSession && poseStats.frames === 0}
+                      >
+                        학습용 JSON 내려받기
+                      </button>
+                    </div>
+                  </details>
                 </div>
 
                 <div className="camera-test">
@@ -2212,13 +2304,61 @@ export default function Home() {
           </div>
         )}
 
+        {view === "settings" && (
+          <div className="settings-page">
+            <section className="settings-intro-card">
+              <span className="section-kicker">나의 업무 환경</span>
+              <h2>{occupationTemplate.icon} {occupationTemplate.label}로 설정되어 있어요</h2>
+              <p>직군과 매장 구역은 처음 설정한 뒤 필요할 때만 바꿀 수 있어요.</p>
+              <div className="settings-inline-actions">
+                <button type="button" onClick={() => setZoneSetupOpen(true)}>매장 구역 설정</button>
+                <label>
+                  <span className="sr-only">직군 선택</span>
+                  <select
+                    value={observationProfile.occupation}
+                    onChange={(event) => void changeOccupation(event.target.value as OccupationId)}
+                    aria-label="직군 선택"
+                  >
+                    {OCCUPATION_TEMPLATES.map((template) => (
+                      <option key={template.id} value={template.id}>{template.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section className="settings-list" aria-label="설정 목록">
+              <button type="button" onClick={() => setMyDataOpen(true)}>
+                <span aria-hidden="true">◌</span>
+                <span><strong>내 데이터 관리</strong><small>저장된 테스트 기록을 확인하거나 삭제해요</small></span>
+                <i aria-hidden="true">›</i>
+              </button>
+              <button type="button" onClick={() => setView("today")}>
+                <span aria-hidden="true">⌁</span>
+                <span><strong>기능 테스트</strong><small>가상 기준선, 카메라, 스켈레톤 분석을 시험해요</small></span>
+                <i aria-hidden="true">›</i>
+              </button>
+              <button type="button" onClick={() => setSyntheticLibraryOpen(true)}>
+                <span aria-hidden="true">△</span>
+                <span><strong>가상 학습 데이터 보기</strong><small>직군별 예시 동작과 라벨을 확인해요</small></span>
+                <i aria-hidden="true">›</i>
+              </button>
+            </section>
+
+            <section className="settings-note">
+              <strong>모바일 MVP 안내</strong>
+              <p>현재는 짧은 카메라 테스트와 결과 확인을 위한 버전이에요. 매장 상시 분석과 실제 알림 연동은 다음 단계에서 연결합니다.</p>
+            </section>
+          </div>
+        )}
+
         {view === "care" && (
           <div className="subpage care-page">
             <section className="demo-switcher">
               <div>
-                <span className="section-kicker">연구용 시뮬레이션</span>
-                <h2>가상 페르소나의 일주일 관찰 결과</h2>
-                <p>실제 사용자 데이터가 아닌 예시입니다. 서로 다른 4가지 결과를 보여주는 페르소나 중 하나를 골라보세요.</p>
+                <span className="section-kicker">테스트용 케어 기록</span>
+                <h2>가상 기준선으로 만든 이번 주 기록</h2>
+                <p>실제 사용 기록이 쌓이기 전, 화면과 알림 흐름을 확인하기 위한 예시예요.</p>
               </div>
               <button
                 type="button"
@@ -2226,7 +2366,7 @@ export default function Home() {
                 onClick={() => setDemoMode((enabled) => !enabled)}
                 aria-pressed={demoMode}
               >
-                <span aria-hidden="true" /> {demoMode ? "시뮬레이션 보는 중" : "시뮬레이션 보기"}
+                <span aria-hidden="true" /> {demoMode ? "예시 기록 보는 중" : "예시 기록 보기"}
               </button>
             </section>
 
@@ -2271,7 +2411,7 @@ export default function Home() {
                     <span className={`signal-pill level-${activePersona.signal.level}`}>
                       {signalLevelLabel(activePersona.signal.level)}
                     </span>
-                    <small>실제 케어 리포트와 같은 계산 로직(app/care-metrics.ts)으로 이 가상 데이터를 분석한 결과예요.</small>
+                    <small>가상 기준선과 비교해 평소와 달랐던 흐름만 정리한 결과예요.</small>
                   </div>
                   <ul>
                     {activePersona.signal.reasons.map((reason) => <li key={reason}>{reason}</li>)}
@@ -2284,8 +2424,8 @@ export default function Home() {
                 <section className="panel week-observation">
                   <div className="panel-heading">
                     <div>
-                      <span className="section-kicker">7일 행동 흐름</span>
-                      <h2>하루를 선택해 상세 기록 보기</h2>
+                      <span className="section-kicker">이번 주 흐름</span>
+                      <h2>날짜를 눌러 확인할 기록 보기</h2>
                     </div>
                     <span className="week-range">{activePersona.weekRange}</span>
                   </div>
@@ -2317,10 +2457,10 @@ export default function Home() {
                       <strong>{demoDay.note}</strong>
                     </div>
                     <div className="day-signal-grid">
-                      <article><span>안전 알림</span><strong>{demoDay.safetyAlerts}<small>회</small></strong></article>
-                      <article><span>마감 반복 확인</span><strong>{demoDay.doubleChecks}<small>회</small></strong></article>
-                      <article><span>업무 미완료</span><strong>{demoDay.unfinishedTasks}<small>건</small></strong></article>
-                      <article><span>미세 지연</span><strong>{demoDay.microDelayRate}<small>%</small></strong></article>
+                      <article><span>안전 확인</span><strong>{demoDay.safetyAlerts}<small>회</small></strong></article>
+                      <article><span>반복 확인</span><strong>{demoDay.doubleChecks}<small>회</small></strong></article>
+                      <article><span>마무리 전 이탈</span><strong>{demoDay.unfinishedTasks}<small>건</small></strong></article>
+                      <article><span>업무 흐름</span><strong className="word-value">{demoDay.microDelayRate >= 12 ? "변화 있음" : "평소와 비슷"}</strong></article>
                     </div>
                     <ul className="day-examples">
                       {demoDay.examples.map((example, exampleIndex) => (
@@ -2352,12 +2492,14 @@ export default function Home() {
                     const toneClass = ["observe", "timeline-insight", "care-insight"][index] ?? "observe";
                     return (
                       <article className={`insight-card ${toneClass}`} key={insight.kicker}>
-                        <span className="insight-icon" aria-hidden="true">{insight.icon}</span>
-                        <div>
+                        <div className="insight-card-heading">
+                          <span className="insight-icon" aria-hidden="true">{insight.icon}</span>
+                          <div>
                           <span className="section-kicker">{insight.kicker}</span>
                           <h3>{insight.title}</h3>
-                          <p>{insight.body}</p>
+                          </div>
                         </div>
+                        <p>{insight.body}</p>
                       </article>
                     );
                   })}

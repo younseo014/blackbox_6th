@@ -4068,6 +4068,150 @@ select:focus-visible {
   }
 }
 
+/* -- Mobile MVP information architecture -------------------------------- */
+.mobile-home-view,
+.settings-page {
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+.home-status-card,
+.home-flow-card,
+.home-report-card,
+.settings-intro-card,
+.settings-list,
+.settings-note {
+  border: 1px solid rgba(100, 126, 143, 0.14);
+  border-radius: 24px;
+  background: rgba(255, 253, 249, 0.92);
+  box-shadow: 0 12px 30px rgba(49, 73, 89, 0.06);
+}
+
+.home-status-card {
+  padding: 28px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  background: linear-gradient(135deg, #eff7f4, #fbfcf9);
+}
+
+.home-status-card.has-notice {
+  background: linear-gradient(135deg, #fff5e7, #fffdf9);
+}
+
+.home-status-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  background: #dcece5;
+  color: #477361;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.home-status-card.has-notice .home-status-icon {
+  background: #ffe5bf;
+  color: #a86218;
+}
+
+.home-status-card h2,
+.home-flow-card h2,
+.home-report-card h2,
+.settings-intro-card h2 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: clamp(20px, 3.8vw, 25px);
+  letter-spacing: -0.05em;
+}
+
+.home-status-card p,
+.home-report-card p,
+.settings-intro-card p,
+.settings-note p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.home-notice-card {
+  width: 100%;
+  margin-top: 14px;
+  padding: 18px 20px;
+  border: 1px solid #f0d6b1;
+  border-radius: 20px;
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  text-align: left;
+  background: #fffaf2;
+  cursor: pointer;
+}
+
+.notice-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #d78528;
+}
+
+.home-notice-card span:not(.notice-dot) { display: grid; gap: 3px; }
+.home-notice-card small { color: #9b6a33; font-size: 11px; font-weight: 800; }
+.home-notice-card strong { color: var(--ink); font-size: 15px; }
+.home-notice-card em { color: #6b879c; font-size: 12px; font-style: normal; font-weight: 750; }
+
+.home-flow-card { margin-top: 14px; padding: 25px 24px 19px; }
+.home-flow-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.home-flow-heading .text-button { padding: 4px 0; color: #587990; font-size: 13px; }
+.flow-score-row { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
+.flow-score-row strong { color: #50748e; font-size: 46px; letter-spacing: -0.08em; line-height: 1; }
+.flow-score-row strong small { margin-left: 3px; font-size: 15px; letter-spacing: -0.02em; }
+.flow-score-row p { max-width: 250px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+.mini-flow-chart { height: 108px; margin-top: 21px; display: grid; grid-template-columns: repeat(7, 1fr); align-items: end; gap: 7px; }
+.mini-flow-chart button { height: 100%; padding: 0; border: 0; display: grid; grid-template-rows: 1fr auto; align-items: end; gap: 7px; background: transparent; color: #8394a0; font-size: 10px; cursor: pointer; }
+.mini-flow-chart i { width: 100%; min-height: 26px; border-radius: 8px 8px 4px 4px; display: block; background: #c9dce3; transition: background 160ms ease; }
+.mini-flow-chart button.selected i { background: #7094ad; }
+.mini-flow-chart button.selected { color: #45677f; font-weight: 900; }
+
+.home-report-card { margin-top: 14px; padding: 23px 24px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.home-report-card h2 { font-size: 18px; }
+.home-report-card p { max-width: 400px; font-size: 13px; }
+.home-report-card > button { min-height: 46px; padding: 0 15px; border: 0; border-radius: 14px; flex: 0 0 auto; background: #617f96; color: white; font-size: 13px; font-weight: 850; cursor: pointer; }
+.home-disclaimer { margin: 17px 6px 0; color: #8a969e; font-size: 11px; line-height: 1.55; text-align: center; }
+
+.settings-intro-card { padding: 26px; }
+.settings-inline-actions { margin-top: 20px; display: flex; gap: 9px; }
+.settings-inline-actions button,
+.settings-inline-actions select { min-height: 43px; padding: 0 13px; border: 1px solid #cedae0; border-radius: 12px; background: white; color: #4b6b80; font-size: 13px; font-weight: 750; }
+.settings-list { margin-top: 14px; overflow: hidden; }
+.settings-list > button { width: 100%; min-height: 78px; padding: 16px 20px; border: 0; border-bottom: 1px solid #edf0ee; display: grid; grid-template-columns: 27px 1fr 16px; align-items: center; gap: 10px; text-align: left; background: transparent; cursor: pointer; }
+.settings-list > button:last-child { border-bottom: 0; }
+.settings-list > button > span:first-child { color: #668aa3; font-size: 21px; text-align: center; }
+.settings-list strong, .settings-list small { display: block; }
+.settings-list strong { color: var(--ink); font-size: 14px; }
+.settings-list small { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.settings-list i { color: #97a4aa; font-size: 23px; font-style: normal; }
+.settings-note { margin-top: 14px; padding: 19px 21px; background: #f4f8fa; }
+.settings-note strong { color: #527087; font-size: 13px; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 820px) {
+  .mobile-nav { grid-template-columns: repeat(3, 1fr); }
+  .topbar .camera-pill { display: none; }
+}
+
+@media (max-width: 420px) {
+  .home-status-card, .home-flow-card, .home-report-card, .settings-intro-card { padding-left: 20px; padding-right: 20px; }
+  .home-report-card { align-items: flex-start; flex-direction: column; }
+  .home-report-card > button { width: 100%; }
+}
+
 /* -- Calm blue / cream visual system ------------------------------------ */
 
 .sidebar {
@@ -4561,4 +4705,610 @@ select:focus-visible {
 
 .toast span {
   color: #aad1df;
+}
+
+/* -- Clear, task-first information hierarchy ---------------------------- */
+
+body {
+  line-height: 1.45;
+}
+
+.workspace {
+  padding-top: 44px;
+}
+
+.topbar,
+.today-view,
+.subpage {
+  max-width: 1120px;
+}
+
+.topbar {
+  margin-bottom: 32px;
+}
+
+.topbar h1 {
+  margin-top: 10px;
+  font-size: clamp(32px, 3vw, 40px);
+  font-weight: 720;
+  letter-spacing: -0.045em;
+}
+
+.eyebrow,
+.section-kicker {
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.sidebar {
+  padding-inline: 20px;
+}
+
+.main-nav {
+  gap: 5px;
+}
+
+.main-nav button {
+  min-height: 54px;
+  border-radius: 16px;
+}
+
+.panel,
+.observation-mode-card,
+.safety-banner,
+.savepoint-card,
+.closing-hero,
+.care-summary,
+.metric-card,
+.demo-switcher,
+.persona-card,
+.week-observation,
+.signal-result,
+.simulation-note,
+.insight-card {
+  border: 0;
+  box-shadow: none;
+}
+
+.safety-banner {
+  min-height: 112px;
+  padding: 26px 28px;
+  border-radius: 24px;
+}
+
+.safety-banner strong {
+  font-size: 20px;
+}
+
+.safety-banner p {
+  margin-top: 7px;
+  font-size: 14px;
+}
+
+.safety-banner button,
+.mode-card-actions button,
+.zone-setup-footer button,
+.primary-button,
+.secondary-button,
+.closing-button,
+.savepoint-card button {
+  min-height: 44px;
+  border-radius: 13px;
+}
+
+.observation-mode-card,
+.observation-mode-card.mode-analysis {
+  margin: 24px 0;
+  padding: 30px;
+  border-radius: 24px;
+  background: var(--card);
+}
+
+.mode-card-heading {
+  padding-bottom: 22px;
+  border-bottom: 1px solid #e8e1da;
+}
+
+.occupation-icon {
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 16px;
+  background: #f4eee7;
+}
+
+.occupation-select-wrap label > span {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.occupation-select-wrap select,
+.zone-picker select {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.mode-toggle {
+  padding: 4px;
+  border: 0;
+  border-radius: 14px;
+  background: #f1f3f4;
+}
+
+.mode-toggle button {
+  min-height: 38px;
+  padding-inline: 16px;
+  border-radius: 11px;
+}
+
+.mode-card-body {
+  margin-top: 24px;
+  gap: 20px 28px;
+}
+
+.mode-copy {
+  align-items: flex-start;
+}
+
+.mode-copy strong {
+  font-size: 18px;
+  letter-spacing: -0.025em;
+}
+
+.mode-copy p,
+.mode-card-actions p {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.mode-status-dot {
+  margin-top: 5px;
+}
+
+.learning-progress {
+  gap: 10px;
+}
+
+.learning-progress span,
+.learning-progress strong {
+  font-size: 13px;
+}
+
+.learning-progress i {
+  height: 10px;
+}
+
+.mode-stats {
+  gap: 10px;
+}
+
+.mode-stats span {
+  padding: 15px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: #f4f6f6;
+}
+
+.mode-stats small {
+  font-size: 11px;
+}
+
+.mode-stats strong {
+  margin-top: 6px;
+  font-size: 17px;
+}
+
+.mode-card-actions {
+  padding-top: 20px;
+  border-top: 1px solid #ebe5df;
+}
+
+.mode-action-buttons {
+  gap: 8px;
+}
+
+.mode-card-actions button,
+.zone-setup-footer button {
+  padding: 10px 15px;
+  font-size: 12px;
+}
+
+.mode-action-buttons .synthetic-apply-button {
+  padding-inline: 18px;
+}
+
+.dashboard-grid {
+  margin-top: 20px;
+  grid-template-columns: minmax(0, 1.18fr) minmax(350px, 0.82fr);
+  gap: 20px;
+}
+
+.camera-panel,
+.timeline-panel,
+.closing-card,
+.care-note {
+  padding: 30px;
+}
+
+.panel-heading h2,
+.savepoint-card h2,
+.closing-hero h2,
+.care-summary h2 {
+  margin-top: 7px;
+  font-size: 24px;
+  font-weight: 720;
+  letter-spacing: -0.035em;
+}
+
+.camera-frame {
+  margin-top: 22px;
+  border-radius: 20px;
+}
+
+.coordinate-recorder {
+  margin-top: 18px;
+  padding: 18px;
+  border: 0;
+  border-radius: 18px;
+  background: #edf4f6;
+}
+
+.recorder-heading strong {
+  font-size: 15px;
+}
+
+.recorder-heading p {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.recorder-heading > span {
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.recorder-details {
+  margin-top: 14px;
+  padding-top: 2px;
+  border-top: 1px solid rgba(111, 153, 185, 0.17);
+}
+
+.recorder-details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #4b6e86;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  list-style: none;
+}
+
+.recorder-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.recorder-details summary small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.recorder-details summary::after {
+  content: "⌄";
+  color: #7991a0;
+  font-size: 17px;
+  transition: transform 160ms ease;
+}
+
+.recorder-details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.coordinate-stats {
+  margin-top: 4px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.coordinate-stats > span {
+  padding: 13px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.coordinate-stats small {
+  font-size: 10px;
+}
+
+.coordinate-stats strong {
+  margin-top: 5px;
+  font-size: 14px;
+}
+
+.coordinate-actions {
+  margin-top: 10px;
+  padding-top: 12px;
+}
+
+.camera-test {
+  margin-top: 20px;
+  padding: 20px 0 0;
+  border: 0;
+  border-top: 1px solid #ebe5df;
+  border-radius: 0;
+  background: transparent;
+}
+
+.camera-test strong {
+  font-size: 14px;
+}
+
+.test-buttons button {
+  min-height: 38px;
+  padding-inline: 12px;
+  border-radius: 11px;
+}
+
+.timeline-list {
+  margin-top: 20px;
+}
+
+.timeline-event {
+  min-height: 82px;
+  border-bottom: 1px solid #f0ebe6;
+}
+
+.timeline-event:last-child {
+  border-bottom: 0;
+}
+
+.timeline-event:hover {
+  padding-left: 10px;
+}
+
+.event-copy strong {
+  font-size: 15px;
+}
+
+.event-copy > span:last-child {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.savepoint-card {
+  min-height: 124px;
+  margin-top: 20px;
+  padding: 24px 28px;
+  border-radius: 24px;
+  background: var(--card);
+}
+
+.savepoint-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 17px;
+}
+
+.subpage-intro {
+  margin-bottom: 22px;
+}
+
+.closing-hero,
+.care-summary {
+  padding: 30px 32px;
+  border-radius: 24px;
+  background: var(--card);
+}
+
+.closing-card {
+  margin-top: 20px;
+}
+
+.device-row {
+  min-height: 92px;
+}
+
+.metric-grid {
+  gap: 12px;
+}
+
+.metric-card {
+  min-height: 164px;
+  padding: 22px;
+  border-radius: 20px;
+}
+
+.demo-switcher,
+.persona-card,
+.week-observation,
+.signal-result,
+.simulation-note {
+  border-radius: 22px;
+}
+
+.persona-switcher button,
+.week-days button {
+  min-height: 52px;
+}
+
+.synthetic-library-modal,
+.replay-modal.replay-modal-premium,
+.consent-modal,
+.my-data-modal {
+  border-radius: 28px;
+}
+
+.mobile-nav {
+  background: rgba(82, 111, 134, 0.96);
+  box-shadow: 0 16px 40px rgba(49, 73, 89, 0.24);
+}
+
+@media (max-width: 1120px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 820px) {
+  .workspace {
+    padding-top: 28px;
+  }
+
+  .topbar h1 {
+    font-size: 30px;
+  }
+
+  .observation-mode-card,
+  .observation-mode-card.mode-analysis,
+  .camera-panel,
+  .timeline-panel,
+  .closing-card,
+  .care-note {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar h1 {
+    font-size: 27px;
+  }
+
+  .safety-banner,
+  .savepoint-card,
+  .closing-hero,
+  .care-summary {
+    border-radius: 20px;
+  }
+
+  .observation-mode-card,
+  .observation-mode-card.mode-analysis,
+  .camera-panel,
+  .timeline-panel,
+  .closing-card,
+  .care-note {
+    padding: 20px;
+    border-radius: 20px;
+  }
+
+  .mode-card-body {
+    margin-top: 20px;
+  }
+
+  .coordinate-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .recorder-details summary small {
+    display: none;
+  }
+}
+
+/* Keep the mobile MVP's three-item navigation after the legacy overrides. */
+@media (max-width: 820px) {
+  .mobile-nav {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Care contact card: align its inner rhythm with the rest of the record UI. */
+.care-connect-card {
+  padding: 30px;
+}
+
+.care-connect-card .panel-heading {
+  margin: 0;
+}
+
+.care-connect-card p {
+  margin: 14px 0 0;
+}
+
+.care-connect-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.care-connect-link,
+.care-connect-actions button {
+  min-height: 58px;
+  padding: 12px 16px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .care-connect-card {
+    padding: 22px 20px;
+  }
+
+  .care-connect-actions {
+    grid-template-columns: 1fr;
+    margin-top: 20px;
+  }
+}
+
+/* Keep each care insight's icon and heading visually together. */
+.insight-card {
+  min-height: 0;
+  padding: 26px 30px 28px;
+}
+
+.insight-card-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.insight-card-heading .insight-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  font-size: 22px;
+}
+
+.insight-card-heading .section-kicker {
+  padding-top: 2px;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.insight-card-heading h3 {
+  margin: 5px 0 0;
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -0.04em;
+}
+
+.insight-card > p {
+  margin: 18px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+@media (max-width: 560px) {
+  .insight-card {
+    padding: 22px 20px 24px;
+  }
+
+  .insight-card-heading .insight-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 13px;
+    font-size: 20px;
+  }
+
+  .insight-card-heading h3 {
+    font-size: 18px;
+  }
 }
