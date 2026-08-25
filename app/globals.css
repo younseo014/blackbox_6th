@@ -6858,3 +6858,244 @@ body {
     width: 100%;
   }
 }
+
+/* -- Minimal white UI with palette-blue accents ------------------------- */
+:root {
+  --ink: #20282e;
+  --muted: #737d84;
+  --green: #83aaca;
+  --green-dark: #5f87a7;
+  --green-soft: #eef4f8;
+  --mint: #dce9f1;
+  --cream: #f6f7f8;
+  --card: #ffffff;
+  --line: #e3e7ea;
+  --safe: #6f96b5;
+}
+
+html,
+body,
+.app-shell,
+.app-shell.interface-developer,
+.workspace {
+  background: #f6f7f8;
+}
+
+.app-shell .sidebar,
+.app-shell.interface-developer .sidebar {
+  border-right: 1px solid #e4e8eb;
+  background: #ffffff;
+  color: #20282e;
+}
+
+.app-shell .brand-mark {
+  background: #83aaca;
+  color: #ffffff;
+}
+
+.app-shell .brand small,
+.app-shell .profile small,
+.app-shell .sidebar-care p {
+  color: #89939a;
+}
+
+.app-shell .main-nav button {
+  color: #69757c;
+}
+
+.app-shell .main-nav button:hover {
+  background: #f1f5f7;
+  color: #3f6078;
+}
+
+.app-shell .main-nav button.active {
+  background: #83aaca;
+  color: #ffffff;
+}
+
+.app-shell .sidebar-care {
+  border-color: #e2e8ec;
+  background: #f5f8fa;
+}
+
+.app-shell .sidebar-care strong {
+  color: #354a59;
+}
+
+.app-shell .care-sprout {
+  background: #e5eef4;
+  color: #638aa8;
+}
+
+.app-shell .profile {
+  border-top-color: #e6eaed;
+}
+
+.app-shell .my-data-entry {
+  color: #64747e;
+}
+
+.app-shell .interface-mode-badge,
+.app-shell .interface-mode-badge.developer {
+  border-color: #d8e5ed;
+  background: #eef4f8;
+  color: #5c809b;
+}
+
+.app-shell .interface-mode-switch,
+.app-shell .interface-mode-switch.developer {
+  border-color: #dde5ea;
+  background: #ffffff;
+}
+
+.app-shell .interface-mode-switch > span:first-child,
+.app-shell .interface-mode-switch.developer > span:first-child,
+.app-shell .home-mode-icon,
+.app-shell .home-mode-icon.mode-analysis,
+.app-shell .welcome-mark {
+  background: #e8f0f5;
+  color: #638aa8;
+}
+
+.app-shell .eyebrow,
+.app-shell .section-kicker {
+  color: #648ca9;
+}
+
+.app-shell .home-status-card.has-notice,
+.app-shell .home-checklist-card.reminder-due,
+.app-shell .signal-result.level-watch,
+.app-shell .signal-result.level-notable {
+  border-color: #83aaca;
+}
+
+.app-shell .home-status-icon,
+.app-shell .home-status-card.has-notice .home-status-icon,
+.app-shell .notice-dot,
+.app-shell .persona-tab-avatar,
+.app-shell .insight-icon,
+.app-shell .care-summary-mark {
+  background: #83aaca;
+  color: #ffffff;
+}
+
+.app-shell .first-user-settings-head {
+  border-color: #dce7ee;
+  background: #eef4f8;
+  color: #526f84;
+}
+
+.app-shell .first-user-settings-head span,
+.app-shell .first-user-steps i,
+.app-shell .home-checklist-items label.done > span,
+.app-shell .flow-score-bands i,
+.app-shell .flow-score-bands i.watch,
+.app-shell .flow-score-bands i.notice,
+.app-shell .mini-flow-chart i,
+.app-shell .week-days i,
+.app-shell .progress-bar span {
+  border-color: #83aaca;
+  background: #83aaca;
+  color: #ffffff;
+}
+
+.app-shell .first-user-welcome > button,
+.app-shell .complete-user-setup,
+.app-shell .care-empty-state > button,
+.app-shell .brain-health-actions a,
+.app-shell .care-connect-actions > button,
+.app-shell .care-connect-actions > a,
+.app-shell .closing-button,
+.app-shell .primary-button,
+.app-shell .camera-button.primary,
+.app-shell .analysis-feedback button,
+.app-shell .demo-event-replay-button,
+.app-shell .checklist-add-form button {
+  border-color: #83aaca;
+  background: #83aaca;
+  color: #ffffff;
+}
+
+.app-shell .user-mode-toggle button.active {
+  border-color: #83aaca;
+  background: #83aaca;
+}
+
+.app-shell .user-mode-toggle button.active > span {
+  background: #ffffff;
+  color: #638aa8;
+}
+
+.app-shell .home-checklist-heading > span,
+.app-shell .checklist-reminder-copy,
+.app-shell .synthetic-baseline-chip,
+.app-shell .body-profile-chip,
+.app-shell .pattern-mode-chip,
+.app-shell .signal-pill,
+.app-shell .simulation-chip,
+.app-shell .video-tag,
+.app-shell .event-type {
+  border-color: #d8e5ed;
+  background: #edf4f8;
+  color: #587b95;
+}
+
+.app-shell .persona-switcher button.selected,
+.app-shell .week-days button.selected,
+.app-shell .demo-switcher button.active,
+.app-shell .mode-toggle button.active {
+  border-color: #83aaca;
+  background: #83aaca;
+  color: #ffffff;
+}
+
+.app-shell .safety-check,
+.app-shell .mode-status-dot,
+.app-shell .status-dot,
+.app-shell .event-node,
+.app-shell .event-node.safety,
+.app-shell .event-node.payment,
+.app-shell .event-node.door,
+.app-shell .event-node.booking {
+  background: #83aaca;
+  color: #ffffff;
+}
+
+.app-shell .secondary-button,
+.app-shell .camera-button,
+.app-shell .text-button,
+.app-shell .checklist-settings-link {
+  color: #6287a3;
+}
+
+.app-shell .mobile-nav {
+  border: 1px solid #e0e6ea;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.app-shell .mobile-nav button {
+  color: #89939a;
+}
+
+.app-shell .mobile-nav button.active {
+  background: #edf4f8;
+  color: #5f87a7;
+}
+
+.factory-reset-card button {
+  border-color: #ccd5da;
+  background: #ffffff;
+  color: #66747c;
+}
+
+.factory-reset-card button:hover {
+  border-color: #83aaca;
+  background: #83aaca;
+  color: #ffffff;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline-color: rgba(131, 170, 202, 0.55);
+}
