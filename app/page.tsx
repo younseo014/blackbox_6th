@@ -142,6 +142,12 @@ type ClosingChecklistItem = {
   done: boolean;
 };
 
+type UserInstallState = {
+  startedAt: number;
+  startDate: string;
+  careOffset: DailyLog | null;
+};
+
 const DEFAULT_CLOSING_TIME = "19:00";
 const DEFAULT_CLOSING_CHECKLIST: ClosingChecklistItem[] = [
   { id: "pos", label: "포스기 닫기", done: false },
@@ -151,12 +157,43 @@ const DEFAULT_CLOSING_CHECKLIST: ClosingChecklistItem[] = [
 
 const CHECKLIST_STORAGE_KEY = "memory-guard-closing-checklist-v1";
 const INTERFACE_MODE_STORAGE_KEY = "memory-guard-interface-mode-v1";
+const USER_INSTALL_STORAGE_KEY = "memory-guard-user-install-v1";
 
 function loadInterfaceMode(): InterfaceMode {
   if (typeof window === "undefined") return "user";
   return window.localStorage.getItem(INTERFACE_MODE_STORAGE_KEY) === "developer"
     ? "developer"
     : "user";
+}
+
+function loadUserInstallState(): UserInstallState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.localStorage.getItem(USER_INSTALL_STORAGE_KEY);
+    return stored ? JSON.parse(stored) as UserInstallState : null;
+  } catch {
+    return null;
+  }
+}
+
+function scopeCareLogsToUserInstall(
+  logs: DailyLog[],
+  install: UserInstallState | null,
+): DailyLog[] {
+  if (!install) return [];
+  return logs
+    .filter((log) => log.date >= install.startDate)
+    .map((log) => {
+      if (!install.careOffset || log.date !== install.startDate) return log;
+      return {
+        ...log,
+        safetyAlerts: Math.max(0, log.safetyAlerts - install.careOffset.safetyAlerts),
+        doubleChecks: Math.max(0, log.doubleChecks - install.careOffset.doubleChecks),
+        tasksStarted: Math.max(0, log.tasksStarted - install.careOffset.tasksStarted),
+        tasksCompleted: Math.max(0, log.tasksCompleted - install.careOffset.tasksCompleted),
+        microDelaySeconds: log.microDelaySeconds.slice(install.careOffset.microDelaySeconds.length),
+      };
+    });
 }
 
 function loadChecklistSettings() {
@@ -386,6 +423,7 @@ function TimelineList({
 export default function Home() {
   const [view, setView] = useState<View>(() => loadInterfaceMode() === "developer" ? "today" : "home");
   const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>(() => loadInterfaceMode());
+  const [userInstall, setUserInstall] = useState<UserInstallState | null>(() => loadUserInstallState());
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>("idle");
   const [cameraMessage, setCameraMessage] = useState(
     "카메라를 연결하면 오늘의 장면을 확인할 수 있어요.",
@@ -1592,7 +1630,9 @@ export default function Home() {
     ]);
     clearConsent();
     window.localStorage.removeItem(CHECKLIST_STORAGE_KEY);
+    window.localStorage.removeItem(USER_INSTALL_STORAGE_KEY);
     setConsentState(getConsent());
+    setUserInstall(null);
     setSessionCount(0);
     setLatestSession(null);
     setRecentSessions([]);
@@ -1687,10 +1727,11 @@ export default function Home() {
   const activePersona = DEMO_PERSONAS[selectedPersonaIndex] ?? DEMO_PERSONAS[0];
   const demoDay = activePersona.week[selectedDemoDay] ?? activePersona.week[0];
 
-  const recentCareLogs = careLogs.slice(0, 7);
-  const careBaseline = computeBaseline(careLogs);
+  const userCareLogs = scopeCareLogsToUserInstall(careLogs, userInstall);
+  const recentCareLogs = userCareLogs.slice(0, 7);
+  const careBaseline = computeBaseline(userCareLogs);
   const changeSignal = detectChangeSignal(recentCareLogs, careBaseline);
-  const todaySummary = careLogs[0] ? summarizeLog(careLogs[0]) : null;
+  const todaySummary = userCareLogs[0] ? summarizeLog(userCareLogs[0]) : null;
   const activeNavItems = interfaceMode === "developer" ? developerNavItems : userNavItems;
   const realChangeCount = todaySummary && careBaseline
     ? [
@@ -1764,6 +1805,33 @@ export default function Home() {
     setInterfaceMode("user");
     setView("home");
     setToast("사용자 모드로 전환했어요. 실제 사용 화면만 보여드릴게요.");
+  }
+
+  async function completeFirstUserSetup() {
+    const startedAt = nowMs();
+    const startDate = currentDateKey();
+    const install: UserInstallState = {
+      startedAt,
+      startDate,
+      careOffset: careLogs.find((log) => log.date === startDate) ?? null,
+    };
+    const nextProfile = await saveObservationProfile({
+      ...observationProfile,
+      mode: "learning",
+      learningStartedAt: startedAt,
+      baselineVersion: observationProfile.baselineVersion + 1,
+      baselineSource: "real",
+      syntheticDatasetId: null,
+      activeTestTaskId: null,
+    });
+    window.localStorage.setItem(USER_INSTALL_STORAGE_KEY, JSON.stringify(install));
+    clearConsent();
+    setConsentState(getConsent());
+    setUserInstall(install);
+    setObservationProfile(nextProfile);
+    await refreshObservationData(nextProfile);
+    setView("home");
+    setToast("초기 설정을 마쳤어요. 새로운 사용자 기준으로 학습을 시작합니다.");
   }
 
   return (
@@ -1867,12 +1935,28 @@ export default function Home() {
 
         {view === "home" && (
           <div className="mobile-home-view">
+            {!userInstall ? (
+              <section className="first-user-welcome">
+                <span className="welcome-mark" aria-hidden="true">M</span>
+                <span className="section-kicker">처음 시작하기</span>
+                <h2>사장님의 평소 업무 흐름부터 알아갈게요</h2>
+                <p>아직 연결된 기록이 없어요. 먼저 업종과 매장 구역을 확인한 뒤, 1~2주 동안 학습 모드로 평소 루틴을 익힙니다.</p>
+                <div className="first-user-steps" aria-label="초기 설정 순서">
+                  <span><i>1</i><strong>업종 선택</strong></span>
+                  <span><i>2</i><strong>매장 구역 설정</strong></span>
+                  <span><i>3</i><strong>학습 시작</strong></span>
+                </div>
+                <button type="button" onClick={() => setView("settings")}>초기 설정 시작하기</button>
+                <small>개발자 모드에서 만든 가상 데이터와 테스트 기록은 사용자 화면에 나타나지 않아요.</small>
+              </section>
+            ) : (
+              <>
             <section className={`home-status-card ${realHasNotice ? "has-notice" : ""}`}>
               <span className="home-status-icon" aria-hidden="true">{realHasNotice ? "!" : "✓"}</span>
               <div>
                 <span className="section-kicker">오늘의 상태</span>
                 <h2>
-                  {careLogs.length === 0
+                  {userCareLogs.length === 0
                     ? "첫 기록을 기다리고 있어요."
                     : realHasNotice
                       ? "평소와 다른 흐름이 조금 관찰됐어요."
@@ -1881,12 +1965,28 @@ export default function Home() {
                 <p>
                   {realHasNotice
                     ? "한 장면만으로 판단하지 않고, 같은 변화가 반복되는지 차분히 살펴볼게요."
-                    : careLogs.length === 0
+                    : userCareLogs.length === 0
                       ? "마감 체크와 동작 분석 기록이 쌓이면 개인의 평소 흐름과 비교해 드려요."
                       : "필요한 변화가 생기면 이유와 함께 알려드릴게요."}
                 </p>
               </div>
             </section>
+
+            <button className="home-observation-mode" type="button" onClick={() => setView("settings")}>
+              <span className={`home-mode-icon mode-${observationProfile.mode}`} aria-hidden="true">
+                {observationProfile.mode === "learning" ? "↻" : "⌁"}
+              </span>
+              <span>
+                <small>현재 관찰 방식</small>
+                <strong>{observationProfile.mode === "learning" ? "학습 모드" : "분석 모드"}</strong>
+                <em>
+                  {observationProfile.mode === "learning"
+                    ? "나의 평소 업무 흐름을 익히고 있어요."
+                    : "학습한 평소 흐름과 오늘의 동작을 비교해요."}
+                </em>
+              </span>
+              <i>변경하기 ›</i>
+            </button>
 
             {realHasNotice && (
               <button className="home-notice-card" type="button" onClick={() => setView("care")}>
@@ -1984,6 +2084,8 @@ export default function Home() {
             </section>
 
             <p className="home-disclaimer">이 결과는 진단이 아닌, 평소 업무 흐름의 변화를 알아차리기 위한 참고 정보예요.</p>
+              </>
+            )}
           </div>
         )}
 
@@ -2522,6 +2624,12 @@ export default function Home() {
           <div className="settings-page">
             {interfaceMode === "user" ? (
               <>
+            {!userInstall && (
+              <section className="first-user-settings-head">
+                <span>초기 설정</span>
+                <strong>아래 내용을 확인하면 새로운 학습을 시작할 수 있어요.</strong>
+              </section>
+            )}
             <section className="settings-intro-card">
               <span className="section-kicker">나의 업무 환경</span>
               <h2>{occupationTemplate.icon} {occupationTemplate.label}로 설정되어 있어요</h2>
@@ -2542,6 +2650,54 @@ export default function Home() {
                 </label>
               </div>
             </section>
+
+            <section className={`settings-observation-mode mode-${userInstall ? observationProfile.mode : "learning"}`}>
+              <div>
+                <span className="section-kicker">관찰 방식</span>
+                <h2>{!userInstall || observationProfile.mode === "learning" ? "평소 업무 흐름부터 학습해요" : "평소 흐름과 오늘의 동작을 비교하고 있어요"}</h2>
+                <p>
+                  {!userInstall || observationProfile.mode === "learning"
+                    ? "매장 설치 후 1~2주 동안 켜두는 방식이에요. 특이하거나 확정하기 어려운 동작은 평소 기준에 넣지 않아요."
+                    : "평소 업무 패턴 학습이 끝난 뒤 사용하는 방식이에요. 달라진 흐름이 반복될 때 케어 기록으로 알려드려요."}
+                </p>
+              </div>
+              <div className="user-mode-toggle" role="group" aria-label="학습 모드 또는 분석 모드 선택">
+                <button
+                  type="button"
+                  className={!userInstall || observationProfile.mode === "learning" ? "active" : ""}
+                  onClick={() => void changeObservationMode("learning")}
+                  aria-pressed={!userInstall || observationProfile.mode === "learning"}
+                  disabled={!userInstall}
+                >
+                  <span aria-hidden="true">↻</span>
+                  <strong>학습 모드</strong>
+                  <small>평소 루틴 익히기</small>
+                </button>
+                <button
+                  type="button"
+                  className={userInstall && observationProfile.mode === "analysis" ? "active" : ""}
+                  onClick={() => void changeObservationMode("analysis")}
+                  aria-pressed={Boolean(userInstall && observationProfile.mode === "analysis")}
+                  disabled={!userInstall}
+                >
+                  <span aria-hidden="true">⌁</span>
+                  <strong>분석 모드</strong>
+                  <small>평소와 비교하기</small>
+                </button>
+              </div>
+              <p className="mode-change-note">
+                {userInstall
+                  ? "모드를 바꿔도 기존에 학습한 기준선과 케어 기록은 삭제되지 않아요."
+                  : "처음 설정을 마치면 개발 테스트 기록과 분리된 새 학습 기준선이 만들어져요."}
+              </p>
+            </section>
+
+            {!userInstall && (
+              <button className="complete-user-setup" type="button" onClick={() => void completeFirstUserSetup()}>
+                설정 완료하고 학습 시작하기
+                <span>이전 개발 테스트 기록과 분리된 새 사용자 기준선이 만들어져요.</span>
+              </button>
+            )}
 
             <section className="settings-checklist-card">
               <div>
@@ -2636,7 +2792,14 @@ export default function Home() {
               </button>
             </section>}
 
-            {interfaceMode === "developer" && demoMode ? (
+            {interfaceMode === "user" && !userInstall ? (
+              <section className="care-empty-state first-install-care">
+                <span className="care-summary-mark" aria-hidden="true">♡</span>
+                <h2>아직 사용자 기록이 없어요</h2>
+                <p>초기 설정을 마치고 학습을 시작하면, 새로 쌓이는 기록만 이곳에 표시됩니다. 개발자 모드의 가상·테스트 기록은 포함되지 않아요.</p>
+                <button type="button" onClick={() => setView("settings")}>초기 설정 시작하기</button>
+              </section>
+            ) : interfaceMode === "developer" && demoMode ? (
               <>
                 <div className="persona-switcher" role="tablist" aria-label="가상 페르소나 선택">
                   {DEMO_PERSONAS.map((persona, index) => (

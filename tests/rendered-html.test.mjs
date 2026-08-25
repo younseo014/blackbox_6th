@@ -52,14 +52,15 @@ test("renders only the three user-mode navigation tabs", async () => {
   assert.ok(!html.includes("가상 학습 데이터 보기"));
 });
 
-test("renders the real user home without seeded persona events", async () => {
+test("renders the first-install user home without seeded persona events", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.ok(html.includes("첫 기록을 기다리고 있어요."));
-  assert.ok(html.includes("기준선 만드는 중"));
+  assert.ok(html.includes("처음 시작하기"));
+  assert.ok(html.includes("초기 설정 시작하기"));
+  assert.ok(html.includes("아직 연결된 기록이 없어요"));
   assert.ok(!html.includes("결제가 완료됐어요"));
-  assert.ok(!html.includes("가상 데이터"));
+  assert.ok(!html.includes("가상 학습 데이터 보기"));
 });
 
 test("renders a dedicated developer-mode switch", async () => {
