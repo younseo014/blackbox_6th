@@ -2198,6 +2198,364 @@ select:focus-visible {
   }
 }
 
+/* -- Monochrome minimal theme ------------------------------------------- */
+:root {
+  --ink: #111111;
+  --muted: #707070;
+  --green: #111111;
+  --green-dark: #000000;
+  --green-soft: #f1f1f1;
+  --mint: #dddddd;
+  --cream: #f5f5f5;
+  --card: #ffffff;
+  --line: #e2e2e2;
+  --red: #111111;
+  --red-soft: #f0f0f0;
+  --amber: #333333;
+  --amber-soft: #f3f3f3;
+  --palette-blue: #222222;
+  --palette-sky: #d9d9d9;
+  --palette-cream: #f3f3f3;
+  --palette-taupe: #bdbdbd;
+  --safe: #222222;
+  --shadow: none;
+}
+
+html,
+body {
+  background: #f5f5f5;
+}
+
+.app-shell,
+.app-shell.interface-developer {
+  background: #f5f5f5;
+}
+
+.sidebar,
+.interface-developer .sidebar {
+  background: #0b0b0b;
+  box-shadow: none;
+}
+
+.brand-mark {
+  background: #ffffff;
+  color: #000000;
+  box-shadow: none;
+}
+
+.brand small,
+.profile small,
+.sidebar-care p {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.main-nav button:hover {
+  background: #1a1a1a;
+}
+
+.main-nav button.active {
+  background: #ffffff;
+  color: #000000;
+  box-shadow: none;
+}
+
+.sidebar-care {
+  border-color: #292929;
+  background: #151515;
+}
+
+.care-sprout {
+  background: #252525;
+  color: #ffffff;
+}
+
+.workspace {
+  background: #f5f5f5;
+}
+
+.eyebrow,
+.section-kicker {
+  color: #555555;
+}
+
+.interface-mode-badge,
+.interface-mode-badge.developer {
+  border: 1px solid #d8d8d8;
+  background: #ffffff;
+  color: #222222;
+}
+
+.interface-mode-switch,
+.interface-mode-switch.developer {
+  border-color: #d8d8d8;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.interface-mode-switch > span:first-child,
+.interface-mode-switch.developer > span:first-child,
+.home-mode-icon,
+.home-mode-icon.mode-analysis,
+.welcome-mark {
+  background: #f0f0f0;
+  color: #111111;
+}
+
+.camera-pill {
+  border-color: #d8d8d8;
+  background: #ffffff;
+}
+
+.camera-pill span {
+  background: #222222;
+}
+
+.app-shell [class$="-card"],
+.app-shell [class*="-card "] {
+  border-color: #e1e1e1;
+  background-color: #ffffff;
+  box-shadow: none;
+}
+
+.home-status-card,
+.home-status-card.has-notice,
+.developer-settings-intro,
+.first-user-welcome,
+.safety-banner,
+.care-summary,
+.signal-result,
+.simulation-note,
+.demo-switcher,
+.persona-card {
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.home-status-card.has-notice,
+.home-checklist-card.reminder-due,
+.signal-result.level-watch,
+.signal-result.level-notable {
+  border-color: #111111;
+}
+
+.home-status-icon,
+.home-status-card.has-notice .home-status-icon,
+.notice-dot,
+.persona-tab-avatar,
+.insight-icon,
+.care-summary-mark {
+  background: #111111;
+  color: #ffffff;
+}
+
+.home-observation-mode,
+.settings-observation-mode,
+.settings-checklist-card,
+.first-user-settings-head {
+  border-color: #e1e1e1;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.first-user-settings-head {
+  color: #222222;
+}
+
+.first-user-settings-head span,
+.first-user-steps i {
+  background: #111111;
+  color: #ffffff;
+}
+
+.first-user-steps span,
+.home-checklist-items label,
+.flow-score-bands,
+.developer-setting-summary span,
+.brain-health-guide article,
+.care-next-steps > span {
+  background: #f4f4f4;
+}
+
+.first-user-welcome > button,
+.complete-user-setup,
+.care-empty-state > button,
+.brain-health-actions a,
+.care-connect-actions > button,
+.care-connect-actions > a {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+}
+
+.settings-inline-actions button,
+.settings-inline-actions select,
+.closing-time-field input,
+.checklist-add-form input,
+.checklist-add-form button {
+  border-color: #d8d8d8;
+  background: #ffffff;
+  color: #111111;
+}
+
+.checklist-add-form button {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+}
+
+.user-mode-toggle button,
+.user-mode-toggle button.active {
+  border-color: #d8d8d8;
+  background: #f5f5f5;
+  box-shadow: none;
+}
+
+.user-mode-toggle button.active {
+  border-color: #111111;
+  background: #111111;
+}
+
+.user-mode-toggle button.active strong,
+.user-mode-toggle button.active small {
+  color: #ffffff;
+}
+
+.user-mode-toggle button > span,
+.user-mode-toggle button.active > span {
+  background: #ffffff;
+  color: #111111;
+}
+
+.home-checklist-heading > span,
+.checklist-reminder-copy,
+.synthetic-baseline-chip,
+.body-profile-chip,
+.pattern-mode-chip,
+.signal-pill,
+.simulation-chip,
+.video-tag,
+.event-type {
+  border-color: #d4d4d4;
+  background: #eeeeee;
+  color: #222222;
+}
+
+.home-checklist-items label.done > span,
+.flow-score-bands i,
+.flow-score-bands i.watch,
+.flow-score-bands i.notice,
+.mini-flow-chart i,
+.week-days i,
+.progress-bar span {
+  border-color: #111111;
+  background: #111111;
+}
+
+.home-notice-card,
+.settings-list,
+.panel,
+.metric-card,
+.insight-card,
+.care-empty-state,
+.video-modal,
+.replay-modal,
+.synthetic-library-modal,
+.consent-modal,
+.my-data-modal,
+.brain-health-modal {
+  border-color: #e1e1e1;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.persona-switcher button,
+.week-days button,
+.settings-list button {
+  border-color: #e4e4e4;
+  background: #ffffff;
+}
+
+.persona-switcher button.selected,
+.week-days button.selected,
+.demo-switcher button.active,
+.mode-toggle button.active {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.flow-score-row > strong,
+.metric-card > strong,
+.day-signal-grid strong {
+  color: #111111;
+}
+
+.safety-check,
+.mode-status-dot,
+.status-dot,
+.event-node,
+.event-node.safety,
+.event-node.payment,
+.event-node.door,
+.event-node.booking {
+  background: #111111;
+  color: #ffffff;
+}
+
+.closing-button,
+.primary-button,
+.camera-button.primary,
+.analysis-feedback button,
+.demo-event-replay-button {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.secondary-button,
+.camera-button,
+.text-button,
+.checklist-settings-link {
+  color: #111111;
+}
+
+.mobile-nav {
+  background: #0b0b0b;
+  box-shadow: none;
+}
+
+.mobile-nav button {
+  color: #9a9a9a;
+}
+
+.mobile-nav button.active {
+  background: #ffffff;
+  color: #000000;
+}
+
+.modal-backdrop {
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.camera-frame,
+.replay-stage,
+.skeleton-stage {
+  background: #111111;
+}
+
+.skeleton-stage canvas,
+.camera-frame canvas {
+  filter: grayscale(1) contrast(1.15);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline-color: rgba(0, 0, 0, 0.45);
+}
+
 /* -- Occupation-aware learning / analysis modes ------------------------- */
 
 .observation-mode-card {
@@ -6171,5 +6529,332 @@ body {
     min-height: 58px;
     grid-template-columns: 24px 1fr;
     justify-items: start;
+  }
+}
+
+/* Final monochrome overrides: keep this block last. */
+.app-shell,
+.app-shell.interface-developer,
+.workspace {
+  background: #f5f5f5;
+}
+
+.app-shell .sidebar,
+.app-shell.interface-developer .sidebar {
+  background: #0b0b0b;
+  box-shadow: none;
+}
+
+.app-shell .brand-mark {
+  background: #ffffff;
+  color: #000000;
+}
+
+.app-shell .main-nav button:hover {
+  background: #1b1b1b;
+  color: #ffffff;
+}
+
+.app-shell .main-nav button.active {
+  background: #ffffff;
+  color: #000000;
+  box-shadow: none;
+}
+
+.app-shell .sidebar-care {
+  border-color: #2a2a2a;
+  background: #151515;
+}
+
+.app-shell .care-sprout {
+  background: #282828;
+  color: #ffffff;
+}
+
+.app-shell .interface-mode-badge,
+.app-shell .interface-mode-badge.developer,
+.app-shell .camera-pill {
+  border-color: #d8d8d8;
+  background: #ffffff;
+  color: #222222;
+}
+
+.app-shell .interface-mode-switch,
+.app-shell .interface-mode-switch.developer {
+  border-color: #d8d8d8;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.app-shell .interface-mode-switch > span:first-child,
+.app-shell .interface-mode-switch.developer > span:first-child,
+.app-shell .home-mode-icon,
+.app-shell .home-mode-icon.mode-analysis,
+.app-shell .welcome-mark {
+  background: #efefef;
+  color: #111111;
+}
+
+.app-shell .eyebrow,
+.app-shell .section-kicker {
+  color: #5e5e5e;
+}
+
+.app-shell [class$="-card"],
+.app-shell [class*="-card "],
+.app-shell .panel,
+.app-shell .metric-card,
+.app-shell .insight-card,
+.app-shell .care-empty-state,
+.app-shell .settings-list,
+.app-shell .video-modal,
+.app-shell .replay-modal,
+.app-shell .synthetic-library-modal,
+.app-shell .consent-modal,
+.app-shell .my-data-modal,
+.app-shell .brain-health-modal {
+  border-color: #e1e1e1;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.app-shell .home-status-card,
+.app-shell .home-status-card.has-notice,
+.app-shell .developer-settings-intro,
+.app-shell .first-user-welcome,
+.app-shell .safety-banner,
+.app-shell .care-summary,
+.app-shell .signal-result,
+.app-shell .simulation-note,
+.app-shell .demo-switcher,
+.app-shell .persona-card {
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.app-shell .home-status-card.has-notice,
+.app-shell .home-checklist-card.reminder-due,
+.app-shell .signal-result.level-watch,
+.app-shell .signal-result.level-notable {
+  border-color: #111111;
+}
+
+.app-shell .home-status-icon,
+.app-shell .home-status-card.has-notice .home-status-icon,
+.app-shell .notice-dot,
+.app-shell .persona-tab-avatar,
+.app-shell .insight-icon,
+.app-shell .care-summary-mark {
+  background: #111111;
+  color: #ffffff;
+}
+
+.app-shell .home-observation-mode,
+.app-shell .settings-observation-mode,
+.app-shell .settings-checklist-card,
+.app-shell .first-user-settings-head {
+  border-color: #e1e1e1;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.app-shell .first-user-steps span,
+.app-shell .home-checklist-items label,
+.app-shell .flow-score-bands,
+.app-shell .developer-setting-summary span,
+.app-shell .brain-health-guide article,
+.app-shell .care-next-steps > span,
+.app-shell .day-signal-grid article,
+.app-shell .pattern-summary-grid span {
+  background: #f3f3f3;
+}
+
+.app-shell .first-user-settings-head,
+.app-shell .checklist-reminder-copy {
+  color: #222222;
+}
+
+.app-shell .first-user-settings-head span,
+.app-shell .first-user-steps i,
+.app-shell .home-checklist-items label.done > span,
+.app-shell .flow-score-bands i,
+.app-shell .flow-score-bands i.watch,
+.app-shell .flow-score-bands i.notice,
+.app-shell .mini-flow-chart i,
+.app-shell .week-days i,
+.app-shell .progress-bar span {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+}
+
+.app-shell .first-user-welcome > button,
+.app-shell .complete-user-setup,
+.app-shell .care-empty-state > button,
+.app-shell .brain-health-actions a,
+.app-shell .care-connect-actions > button,
+.app-shell .care-connect-actions > a,
+.app-shell .closing-button,
+.app-shell .primary-button,
+.app-shell .camera-button.primary,
+.app-shell .analysis-feedback button,
+.app-shell .demo-event-replay-button,
+.app-shell .checklist-add-form button {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.app-shell .settings-inline-actions button,
+.app-shell .settings-inline-actions select,
+.app-shell .closing-time-field input,
+.app-shell .checklist-add-form input {
+  border-color: #d8d8d8;
+  background: #ffffff;
+  color: #111111;
+}
+
+.app-shell .user-mode-toggle button,
+.app-shell .user-mode-toggle button.active {
+  border-color: #d8d8d8;
+  background: #f4f4f4;
+  box-shadow: none;
+}
+
+.app-shell .user-mode-toggle button.active {
+  border-color: #111111;
+  background: #111111;
+}
+
+.app-shell .user-mode-toggle button.active strong,
+.app-shell .user-mode-toggle button.active small {
+  color: #ffffff;
+}
+
+.app-shell .user-mode-toggle button > span,
+.app-shell .user-mode-toggle button.active > span {
+  background: #ffffff;
+  color: #111111;
+}
+
+.app-shell .home-checklist-heading > span,
+.app-shell .checklist-reminder-copy,
+.app-shell .synthetic-baseline-chip,
+.app-shell .body-profile-chip,
+.app-shell .pattern-mode-chip,
+.app-shell .signal-pill,
+.app-shell .simulation-chip,
+.app-shell .video-tag,
+.app-shell .event-type {
+  border-color: #d4d4d4;
+  background: #eeeeee;
+  color: #222222;
+}
+
+.app-shell .persona-switcher button,
+.app-shell .week-days button,
+.app-shell .settings-list button {
+  border-color: #e3e3e3;
+  background: #ffffff;
+}
+
+.app-shell .persona-switcher button.selected,
+.app-shell .week-days button.selected,
+.app-shell .demo-switcher button.active,
+.app-shell .mode-toggle button.active {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.app-shell .safety-check,
+.app-shell .mode-status-dot,
+.app-shell .status-dot,
+.app-shell .event-node,
+.app-shell .event-node.safety,
+.app-shell .event-node.payment,
+.app-shell .event-node.door,
+.app-shell .event-node.booking {
+  background: #111111;
+  color: #ffffff;
+}
+
+.app-shell .mobile-nav {
+  background: #0b0b0b;
+  box-shadow: none;
+}
+
+.app-shell .mobile-nav button {
+  color: #999999;
+}
+
+.app-shell .mobile-nav button.active {
+  background: #ffffff;
+  color: #000000;
+}
+
+.app-shell .modal-backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.app-shell .camera-frame,
+.app-shell .replay-stage,
+.app-shell .skeleton-stage {
+  background: #111111;
+}
+
+.factory-reset-card {
+  margin-top: 14px;
+  padding: 20px 22px;
+  border: 1px solid #dcdcdc;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: #ffffff;
+}
+
+.factory-reset-card strong {
+  color: #111111;
+  font-size: 14px;
+}
+
+.factory-reset-card p {
+  margin: 5px 0 0;
+  color: #777777;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.factory-reset-card button {
+  min-width: 104px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid #111111;
+  border-radius: 12px;
+  flex: 0 0 auto;
+  background: #ffffff;
+  color: #111111;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.factory-reset-card button:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+@media (max-width: 560px) {
+  .factory-reset-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .factory-reset-card button {
+    width: 100%;
   }
 }

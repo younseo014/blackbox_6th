@@ -421,9 +421,10 @@ function TimelineList({
 }
 
 export default function Home() {
-  const [view, setView] = useState<View>(() => loadInterfaceMode() === "developer" ? "today" : "home");
-  const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>(() => loadInterfaceMode());
-  const [userInstall, setUserInstall] = useState<UserInstallState | null>(() => loadUserInstallState());
+  const [view, setView] = useState<View>("home");
+  const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>("user");
+  const [userInstall, setUserInstall] = useState<UserInstallState | null>(null);
+  const [clientPreferencesLoaded, setClientPreferencesLoaded] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>("idle");
   const [cameraMessage, setCameraMessage] = useState(
     "카메라를 연결하면 오늘의 장면을 확인할 수 있어요.",
@@ -579,8 +580,25 @@ export default function Home() {
   const todayEvents = useMemo(() => events, [events]);
 
   useEffect(() => {
+    const storedMode = loadInterfaceMode();
+    const storedInstall = loadUserInstallState();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setInterfaceMode(storedMode);
+      setUserInstall(storedInstall);
+      setView(storedMode === "developer" ? "today" : "home");
+      setClientPreferencesLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!clientPreferencesLoaded) return;
     window.localStorage.setItem(INTERFACE_MODE_STORAGE_KEY, interfaceMode);
-  }, [interfaceMode]);
+  }, [clientPreferencesLoaded, interfaceMode]);
 
   useEffect(() => {
     if (cameraStatus === "connected" && streamRef.current) {
@@ -1660,6 +1678,21 @@ export default function Home() {
     const usage = await estimateStorageUsage();
     setStorageUsage(usage);
     setToast("저장된 동작 좌표와 케어 기록을 모두 삭제했어요");
+  }
+
+  async function resetToFirstScreen() {
+    const confirmed = window.confirm(
+      "모든 사용자 기록, 학습 기준선, 동작 좌표와 설정을 지우고 처음 화면으로 돌아갈까요? 이 작업은 되돌릴 수 없어요.",
+    );
+    if (!confirmed) return;
+    await deleteAllMyData();
+    window.localStorage.removeItem(INTERFACE_MODE_STORAGE_KEY);
+    setInterfaceMode("user");
+    setDemoMode(true);
+    setSyntheticLibraryOpen(false);
+    setMyDataOpen(false);
+    setView("home");
+    setToast("모든 내용을 초기화하고 처음 시작 화면으로 돌아왔어요.");
   }
 
   function withdrawObservationConsent() {
@@ -2770,6 +2803,14 @@ export default function Home() {
                   ? "사용자 모드에는 실제 케어 결과와 일상 설정만 표시돼요. 카메라·가상 데이터 검증 도구는 개발자 모드에서 확인할 수 있어요."
                   : "현재는 컴퓨터 카메라 1대를 이용한 짧은 동작 테스트와 결과 확인을 지원해요. 여러 카메라·IoT·POS 연동은 단일 카메라 검증 이후 단계에서 추가합니다."}
               </p>
+            </section>
+
+            <section className="factory-reset-card">
+              <div>
+                <strong>처음 화면으로 돌아가기</strong>
+                <p>사용자 기록, 학습 기준선, 동작 좌표와 설정을 모두 지우고 처음 설치한 상태로 돌아가요.</p>
+              </div>
+              <button type="button" onClick={() => void resetToFirstScreen()}>전체 초기화</button>
             </section>
           </div>
         )}
