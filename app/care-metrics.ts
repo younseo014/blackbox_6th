@@ -140,7 +140,7 @@ export function detectChangeSignal(
   let signalCount = 0;
 
   if (recent.safetyAlerts >= baseline.safetyAlerts + 1) {
-    reasons.push("최근 안전 알림 빈도가 평소보다 늘었어요.");
+    reasons.push("정해진 시간 뒤에도 남아 있던 마감 항목이 평소보다 늘었어요.");
     signalCount += 1;
   }
   if (recent.doubleChecks >= baseline.doubleChecks + 1) {

@@ -104,6 +104,7 @@ import {
 } from "./pose-target-lock";
 
 type View = "home" | "settings" | "today" | "timeline" | "closing" | "care";
+type InterfaceMode = "user" | "developer";
 type CameraStatus = "idle" | "requesting" | "connected" | "error";
 type PoseStatus = "idle" | "loading" | "searching" | "partial" | "full" | "error";
 type ClosingStatus = "idle" | "checking" | "attention" | "done";
@@ -134,6 +135,69 @@ type HandState = {
   leftScore: number;
   rightScore: number;
 };
+
+type ClosingChecklistItem = {
+  id: string;
+  label: string;
+  done: boolean;
+};
+
+const DEFAULT_CLOSING_TIME = "19:00";
+const DEFAULT_CLOSING_CHECKLIST: ClosingChecklistItem[] = [
+  { id: "pos", label: "포스기 닫기", done: false },
+  { id: "revenue", label: "오늘 매출 정산하기", done: false },
+  { id: "door", label: "출입문 잠금 확인하기", done: false },
+];
+
+const CHECKLIST_STORAGE_KEY = "memory-guard-closing-checklist-v1";
+const INTERFACE_MODE_STORAGE_KEY = "memory-guard-interface-mode-v1";
+
+function loadInterfaceMode(): InterfaceMode {
+  if (typeof window === "undefined") return "user";
+  return window.localStorage.getItem(INTERFACE_MODE_STORAGE_KEY) === "developer"
+    ? "developer"
+    : "user";
+}
+
+function loadChecklistSettings() {
+  const fallback = {
+    time: DEFAULT_CLOSING_TIME,
+    items: DEFAULT_CLOSING_CHECKLIST,
+  };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const stored = window.localStorage.getItem(CHECKLIST_STORAGE_KEY);
+    if (!stored) return fallback;
+    const parsed = JSON.parse(stored) as {
+      date?: string;
+      time?: string;
+      items?: ClosingChecklistItem[];
+    };
+    const items = Array.isArray(parsed.items) ? parsed.items : DEFAULT_CLOSING_CHECKLIST;
+    return {
+      time: parsed.time ?? DEFAULT_CLOSING_TIME,
+      items:
+        parsed.date === currentDateKey()
+          ? items
+          : items.map((item) => ({ ...item, done: false })),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function currentDateKey() {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function minutesFromClock(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
 
 const CHUNK_FRAME_COUNT = MOTION_SAMPLE_RATE * 30;
 
@@ -168,10 +232,16 @@ const initialEvents: TimelineEvent[] = [
   },
 ];
 
-const navItems: Array<{ id: View; label: string; icon: string }> = [
+const userNavItems: Array<{ id: View; label: string; icon: string }> = [
   { id: "home", label: "홈", icon: "⌂" },
   { id: "care", label: "기록", icon: "♡" },
   { id: "settings", label: "설정", icon: "⚙" },
+];
+
+const developerNavItems: Array<{ id: View; label: string; icon: string }> = [
+  { id: "today", label: "카메라 테스트", icon: "⌁" },
+  { id: "care", label: "가상 리포트", icon: "◇" },
+  { id: "settings", label: "테스트 설정", icon: "⚙" },
 ];
 
 const eventPresets: Array<{
@@ -314,7 +384,8 @@ function TimelineList({
 }
 
 export default function Home() {
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>(() => loadInterfaceMode() === "developer" ? "today" : "home");
+  const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>(() => loadInterfaceMode());
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>("idle");
   const [cameraMessage, setCameraMessage] = useState(
     "카메라를 연결하면 오늘의 장면을 확인할 수 있어요.",
@@ -349,7 +420,7 @@ export default function Home() {
   const [heaterOn, setHeaterOn] = useState(true);
   const [closingStatus, setClosingStatus] = useState<ClosingStatus>("idle");
   const [closingStep, setClosingStep] = useState(0);
-  const [savepointOpen, setSavepointOpen] = useState(true);
+  const [savepointOpen, setSavepointOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingName, setBookingName] = useState("김하나");
   const [bookingService, setBookingService] = useState("커트");
@@ -364,6 +435,15 @@ export default function Home() {
   const [syntheticLibraryOpen, setSyntheticLibraryOpen] = useState(false);
   const [syntheticLibraryPhase, setSyntheticLibraryPhase] = useState<WorkPhase>("business");
   const [applyingSyntheticBaseline, setApplyingSyntheticBaseline] = useState(false);
+  const [closingTime, setClosingTime] = useState(
+    () => loadChecklistSettings().time,
+  );
+  const [closingChecklist, setClosingChecklist] = useState<ClosingChecklistItem[]>(
+    () => loadChecklistSettings().items,
+  );
+  const [newChecklistItem, setNewChecklistItem] = useState("");
+  const [checklistReminderDue, setChecklistReminderDue] = useState(false);
+  const [brainHealthOpen, setBrainHealthOpen] = useState(false);
 
   // --- Consent, real observation metrics, and data controls ---
   // Lazy initializer instead of an effect: getConsent() is SSR-safe (it
@@ -386,6 +466,8 @@ export default function Home() {
   } | null>(null);
   const pendingCameraStartRef = useRef(false);
   const closingDoneTodayRef = useRef(false);
+  const checklistReminderRecordedRef = useRef(false);
+  const checklistTaskStartedRef = useRef(false);
   const bookingShownAtRef = useRef<number | null>(null);
   const lastTestEventAtRef = useRef<number | null>(null);
   const savepointStartRecordedRef = useRef(false);
@@ -459,6 +541,10 @@ export default function Home() {
   const todayEvents = useMemo(() => events, [events]);
 
   useEffect(() => {
+    window.localStorage.setItem(INTERFACE_MODE_STORAGE_KEY, interfaceMode);
+  }, [interfaceMode]);
+
+  useEffect(() => {
     if (cameraStatus === "connected" && streamRef.current) {
       if (videoRef.current) {
         videoRef.current.srcObject = streamRef.current;
@@ -527,6 +613,38 @@ export default function Home() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      CHECKLIST_STORAGE_KEY,
+      JSON.stringify({
+        date: currentDateKey(),
+        time: closingTime,
+        items: closingChecklist,
+      }),
+    );
+  }, [closingChecklist, closingTime]);
+
+  useEffect(() => {
+    const checkReminder = () => {
+      const now = new Date();
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      const hasIncompleteItem = closingChecklist.some((item) => !item.done);
+      const reminderIsDue = hasIncompleteItem && nowMinutes >= minutesFromClock(closingTime);
+      setChecklistReminderDue(reminderIsDue);
+      if (
+        reminderIsDue &&
+        consent.observationConsent &&
+        !checklistReminderRecordedRef.current
+      ) {
+        checklistReminderRecordedRef.current = true;
+        void recordSafetyAlert().then(refreshCareData);
+      }
+    };
+    checkReminder();
+    const timer = window.setInterval(checkReminder, 30_000);
+    return () => window.clearInterval(timer);
+  }, [closingChecklist, closingTime, consent.observationConsent]);
 
   useEffect(() => {
     if (
@@ -1473,6 +1591,7 @@ export default function Home() {
       deleteAllObservationData(),
     ]);
     clearConsent();
+    window.localStorage.removeItem(CHECKLIST_STORAGE_KEY);
     setConsentState(getConsent());
     setSessionCount(0);
     setLatestSession(null);
@@ -1480,6 +1599,8 @@ export default function Home() {
     setReplaySessionId(null);
     setMotionSignal(null);
     setCareLogs([]);
+    setClosingTime(DEFAULT_CLOSING_TIME);
+    setClosingChecklist(DEFAULT_CLOSING_CHECKLIST);
     const resetProfile = {
       ...DEFAULT_PROFILE,
       learningStartedAt: nowMs(),
@@ -1507,30 +1628,37 @@ export default function Home() {
     setToast("관찰 참여를 철회했어요. 매장 안전 기능은 계속 사용할 수 있어요.");
   }
 
-  async function shareCareSummary() {
-    const recent = careLogs.slice(0, 7);
-    const safetyAlerts = recent.reduce((sum, log) => sum + log.safetyAlerts, 0);
-    const doubleChecks = recent.reduce((sum, log) => sum + log.doubleChecks, 0);
-    const summaryText =
-      `메모리 가드 케어 요약 (최근 ${recent.length || 0}일)\n` +
-      `안전 알림 ${safetyAlerts}회 · 마감 반복 확인 ${doubleChecks}회\n` +
-      `이 요약은 진단이 아니며 참고용 케어 정보입니다.`;
-
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: "메모리 가드 케어 요약", text: summaryText });
-        setToast("공유 창을 열었어요");
-        return;
-      }
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(summaryText);
-        setToast("케어 요약을 클립보드에 복사했어요");
-        return;
-      }
-      setToast("이 브라우저에서는 공유를 지원하지 않아요");
-    } catch {
-      setToast("공유를 취소했어요");
+  function toggleChecklistItem(itemId: string) {
+    const nextItems = closingChecklist.map((item) =>
+      item.id === itemId ? { ...item, done: !item.done } : item,
+    );
+    setClosingChecklist(nextItems);
+    if (consent.observationConsent && !checklistTaskStartedRef.current) {
+      checklistTaskStartedRef.current = true;
+      void recordTaskStarted().then(refreshCareData);
     }
+    if (
+      consent.observationConsent &&
+      nextItems.length > 0 &&
+      nextItems.every((item) => item.done)
+    ) {
+      void recordTaskCompleted().then(refreshCareData);
+    }
+  }
+
+  function addChecklistItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const label = newChecklistItem.trim();
+    if (!label) return;
+    setClosingChecklist((items) => [
+      ...items,
+      { id: crypto.randomUUID(), label, done: false },
+    ]);
+    setNewChecklistItem("");
+  }
+
+  function removeChecklistItem(itemId: string) {
+    setClosingChecklist((items) => items.filter((item) => item.id !== itemId));
   }
 
   const statusText =
@@ -1558,26 +1686,29 @@ export default function Home() {
     : 0;
   const activePersona = DEMO_PERSONAS[selectedPersonaIndex] ?? DEMO_PERSONAS[0];
   const demoDay = activePersona.week[selectedDemoDay] ?? activePersona.week[0];
-  const demoFlowScore = Math.max(
-    54,
-    96 -
-      demoDay.safetyAlerts * 5 -
-      demoDay.doubleChecks * 3 -
-      demoDay.unfinishedTasks * 6 -
-      Math.round(demoDay.microDelayRate * 0.45),
-  );
-  const demoHasNotice =
-    demoDay.doubleChecks > 0 ||
-    demoDay.unfinishedTasks > 0 ||
-    demoDay.microDelayRate >= 10;
-  const homeStatusCopy = demoHasNotice
-    ? "오늘, 평소와 다른 흐름이 한 번 관찰됐어요."
-    : "오늘은 평소와 비슷한 흐름으로 업무를 마쳤어요.";
 
   const recentCareLogs = careLogs.slice(0, 7);
   const careBaseline = computeBaseline(careLogs);
   const changeSignal = detectChangeSignal(recentCareLogs, careBaseline);
   const todaySummary = careLogs[0] ? summarizeLog(careLogs[0]) : null;
+  const activeNavItems = interfaceMode === "developer" ? developerNavItems : userNavItems;
+  const realChangeCount = todaySummary && careBaseline
+    ? [
+        todaySummary.safetyAlerts >= careBaseline.safetyAlerts + 1,
+        todaySummary.doubleChecks >= careBaseline.doubleChecks + 1,
+        todaySummary.dropRate >= careBaseline.dropRate + 0.15,
+        todaySummary.microDelayRate >= careBaseline.microDelayRate + 0.15,
+      ].filter(Boolean).length
+    : 0;
+  const realFlowScore = careBaseline ? Math.max(52, 94 - realChangeCount * 12) : null;
+  const realHasNotice = changeSignal.level !== "none";
+  const realFlowBandLabel = realFlowScore === null
+    ? "기준선 만드는 중"
+    : realFlowScore >= 85
+      ? "평소와 비슷"
+      : realFlowScore >= 70
+        ? "조금 더 살펴보기"
+        : "변화가 함께 관찰됨";
   const totalSafetyAlerts = recentCareLogs.reduce((sum, log) => sum + log.safetyAlerts, 0);
   const totalDoubleChecks = recentCareLogs.reduce((sum, log) => sum + log.doubleChecks, 0);
   const totalDroppedTasks = recentCareLogs.reduce(
@@ -1622,8 +1753,21 @@ export default function Home() {
       ((episode.durationZScore ?? 0) >= 1.5 || (episode.pauseZScore ?? 0) >= 1.5),
   );
 
+  function switchInterfaceMode() {
+    if (interfaceMode === "user") {
+      setInterfaceMode("developer");
+      setDemoMode(true);
+      setView("today");
+      setToast("개발자 모드로 전환했어요. 테스트 도구만 보여드릴게요.");
+      return;
+    }
+    setInterfaceMode("user");
+    setView("home");
+    setToast("사용자 모드로 전환했어요. 실제 사용 화면만 보여드릴게요.");
+  }
+
   return (
-    <main className="app-shell">
+    <main className={`app-shell interface-${interfaceMode}`}>
       <video
         ref={processingVideoRef}
         className="processing-video"
@@ -1643,7 +1787,7 @@ export default function Home() {
         </div>
 
         <nav className="main-nav" aria-label="주요 메뉴">
-          {navItems.map((item) => (
+          {activeNavItems.map((item) => (
             <button
               key={item.id}
               className={view === item.id ? "active" : ""}
@@ -1662,10 +1806,10 @@ export default function Home() {
 
         <div className="sidebar-care">
           <span className="care-sprout" aria-hidden="true">
-            ♡
+            {interfaceMode === "user" ? "♡" : "⌁"}
           </span>
-          <p>사장님의 하루를</p>
-          <strong>조용히 지켜드릴게요.</strong>
+          <p>{interfaceMode === "user" ? "사장님의 하루를" : "개발자 전용 공간"}</p>
+          <strong>{interfaceMode === "user" ? "조용히 지켜드릴게요." : "실험 기능을 확인해요."}</strong>
         </div>
         <button
           type="button"
@@ -1687,47 +1831,100 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <span className="eyebrow">8월 11일 화요일</span>
+            <span className={`interface-mode-badge ${interfaceMode}`}>
+              {interfaceMode === "user" ? "사용자 모드" : "개발자 모드"}
+            </span>
             <h1>
               {view === "home" && "오늘의 케어"}
-              {view === "today" && "기능 테스트"}
+              {view === "today" && "카메라 기능 테스트"}
               {view === "timeline" && "오늘의 메모리 타임라인"}
               {view === "closing" && "스마트 마감"}
-              {view === "care" && "나의 케어 기록"}
-              {view === "settings" && "설정"}
+              {view === "care" && (interfaceMode === "user" ? "나의 케어 기록" : "가상 케어 리포트")}
+              {view === "settings" && (interfaceMode === "user" ? "설정" : "테스트 설정")}
             </h1>
           </div>
-          <div className={`camera-pill ${cameraStatus}`}>
-            <span aria-hidden="true" />
-            {statusText}
+          <div className="topbar-actions">
+            {interfaceMode === "developer" && (
+              <div className={`camera-pill ${cameraStatus}`}>
+                <span aria-hidden="true" />
+                {statusText}
+              </div>
+            )}
+            <button
+              type="button"
+              className={`interface-mode-switch ${interfaceMode}`}
+              onClick={switchInterfaceMode}
+              aria-label={`${interfaceMode === "user" ? "개발자" : "사용자"} 모드로 전환`}
+            >
+              <span aria-hidden="true">{interfaceMode === "user" ? "⌁" : "♡"}</span>
+              <span>
+                <small>{interfaceMode === "user" ? "테스트 도구가 필요하신가요?" : "실제 화면으로 돌아가기"}</small>
+                <strong>{interfaceMode === "user" ? "개발자 모드" : "사용자 모드"}로 전환</strong>
+              </span>
+            </button>
           </div>
         </header>
 
         {view === "home" && (
           <div className="mobile-home-view">
-            <section className={`home-status-card ${demoHasNotice ? "has-notice" : ""}`}>
-              <span className="home-status-icon" aria-hidden="true">{demoHasNotice ? "!" : "✓"}</span>
+            <section className={`home-status-card ${realHasNotice ? "has-notice" : ""}`}>
+              <span className="home-status-icon" aria-hidden="true">{realHasNotice ? "!" : "✓"}</span>
               <div>
                 <span className="section-kicker">오늘의 상태</span>
-                <h2>{homeStatusCopy}</h2>
+                <h2>
+                  {careLogs.length === 0
+                    ? "첫 기록을 기다리고 있어요."
+                    : realHasNotice
+                      ? "평소와 다른 흐름이 조금 관찰됐어요."
+                      : "오늘은 평소와 비슷한 흐름이에요."}
+                </h2>
                 <p>
-                  {demoHasNotice
+                  {realHasNotice
                     ? "한 장면만으로 판단하지 않고, 같은 변화가 반복되는지 차분히 살펴볼게요."
-                    : "필요한 변화가 생기면 이유와 함께 알려드릴게요."}
+                    : careLogs.length === 0
+                      ? "마감 체크와 동작 분석 기록이 쌓이면 개인의 평소 흐름과 비교해 드려요."
+                      : "필요한 변화가 생기면 이유와 함께 알려드릴게요."}
                 </p>
               </div>
             </section>
 
-            {demoHasNotice && (
+            {realHasNotice && (
               <button className="home-notice-card" type="button" onClick={() => setView("care")}>
                 <span className="notice-dot" aria-hidden="true" />
                 <span>
                   <small>확인할 기록</small>
-                  <strong>{demoDay.examples[0]?.label ?? "평소와 다른 동작 흐름"}</strong>
+                  <strong>{changeSignal.reasons[0] ?? "평소와 다른 동작 흐름"}</strong>
                   <em>왜 기록됐는지 보기 ›</em>
                 </span>
               </button>
             )}
+
+            <section className={`home-checklist-card ${checklistReminderDue ? "reminder-due" : ""}`}>
+              <div className="home-checklist-heading">
+                <div>
+                  <span className="section-kicker">오늘의 마감 루틴</span>
+                  <h2>{closingTime}에 알려드릴게요</h2>
+                </div>
+                <span>{closingChecklist.filter((item) => item.done).length}/{closingChecklist.length}</span>
+              </div>
+              {checklistReminderDue && (
+                <p className="checklist-reminder-copy">마감 시간이 지났어요. 남은 항목을 천천히 확인해 보세요.</p>
+              )}
+              <div className="home-checklist-items">
+                {closingChecklist.map((item) => (
+                  <label key={item.id} className={item.done ? "done" : ""}>
+                    <input
+                      type="checkbox"
+                      checked={item.done}
+                      onChange={() => toggleChecklistItem(item.id)}
+                    />
+                    <span aria-hidden="true">{item.done ? "✓" : ""}</span>
+                    <strong>{item.label}</strong>
+                  </label>
+                ))}
+              </div>
+              <button className="checklist-settings-link" type="button" onClick={() => setView("settings")}>시간과 항목 수정하기</button>
+            </section>
 
             <section className="home-flow-card">
               <div className="home-flow-heading">
@@ -1738,33 +1935,50 @@ export default function Home() {
                 <button type="button" className="text-button" onClick={() => setView("care")}>기록 보기</button>
               </div>
               <div className="flow-score-row">
-                <strong>{demoFlowScore}<small>점</small></strong>
-                <p>오늘의 업무 흐름이 평소와 얼마나 비슷했는지 보여주는 참고 점수예요.</p>
+                <strong>{realFlowScore ?? "—"}{realFlowScore !== null && <small>점</small>}</strong>
+                <p><b>{realFlowBandLabel}</b><br />개인 기준선에서 달라진 관찰 항목 수를 같은 기준으로 환산한 참고 점수예요.</p>
+              </div>
+              <div className="flow-score-bands" aria-label="점수 상태 구간">
+                <span><i className="stable" />85–100 평소와 비슷</span>
+                <span><i className="watch" />70–84 살펴보기</span>
+                <span><i className="notice" />52–69 변화 관찰</span>
               </div>
               <div className="mini-flow-chart" aria-label="최근 7일 평소 흐름 일치도">
-                {activePersona.week.map((day, index) => {
-                  const score = Math.max(54, 96 - day.safetyAlerts * 5 - day.doubleChecks * 3 - day.unfinishedTasks * 6 - Math.round(day.microDelayRate * 0.45));
+                {[...recentCareLogs].reverse().map((day, index) => {
+                  const summary = summarizeLog(day);
+                  const changeCount = careBaseline
+                    ? [
+                        summary.safetyAlerts >= careBaseline.safetyAlerts + 1,
+                        summary.doubleChecks >= careBaseline.doubleChecks + 1,
+                        summary.dropRate >= careBaseline.dropRate + 0.15,
+                        summary.microDelayRate >= careBaseline.microDelayRate + 0.15,
+                      ].filter(Boolean).length
+                    : 0;
+                  const score = careBaseline ? Math.max(52, 94 - changeCount * 12) : 52;
+                  const date = new Date(`${day.date}T00:00:00`);
+                  const dayLabel = new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(date);
                   return (
                     <button
                       type="button"
-                      key={`${day.date}-${index}`}
-                      className={index === selectedDemoDay ? "selected" : ""}
-                      onClick={() => setSelectedDemoDay(index)}
-                      aria-label={`${day.day}요일, 평소 흐름 일치도 ${score}점`}
+                      key={day.date}
+                      className={index === recentCareLogs.length - 1 ? "selected" : ""}
+                      onClick={() => setView("care")}
+                      aria-label={`${dayLabel}, ${careBaseline ? `평소 흐름 일치도 ${score}점` : "기준선 학습 중"}`}
                     >
                       <i style={{ height: `${score}%` }} />
-                      <span>{day.day}</span>
+                      <span>{dayLabel.replace("요일", "")}</span>
                     </button>
                   );
                 })}
+                {recentCareLogs.length === 0 && <p className="mini-flow-empty">기록이 쌓이면 여기에 흐름이 표시돼요.</p>}
               </div>
             </section>
 
             <section className="home-report-card">
               <div>
                 <span className="section-kicker">최근 케어 기록</span>
-                <h2>{activePersona.name} 사장님의 이번 주 요약</h2>
-                <p>{activePersona.summary}</p>
+                <h2>김메모리 사장님의 최근 요약</h2>
+                <p>{changeSignal.reasons[0] ?? "아직 비교할 만큼의 기록이 쌓이지 않았어요."}</p>
               </div>
               <button type="button" onClick={() => setView("care")}>자세히 보기 <span aria-hidden="true">›</span></button>
             </section>
@@ -1781,7 +1995,7 @@ export default function Home() {
               </div>
               <div>
                 <strong>테스트 중인 기능이에요</strong>
-                <p>가상 기준선을 적용한 뒤 카메라 앞에서 예시 동작을 따라 해보세요.</p>
+                <p>컴퓨터 카메라 1대를 고정한 뒤, 전신이 보이는 거리에서 예시 동작을 따라 해보세요.</p>
               </div>
               <button type="button" onClick={() => setView("settings")}>
                 설정으로 <span aria-hidden="true">›</span>
@@ -1992,8 +2206,8 @@ export default function Home() {
               <section className="panel camera-panel">
                 <div className="panel-heading">
                   <div>
-                    <span className="section-kicker">기억 복원 카메라</span>
-                    <h2>지금 매장 모습</h2>
+                    <span className="section-kicker">단일 카메라 MVP</span>
+                    <h2>컴퓨터 카메라 동작 테스트</h2>
                   </div>
                   {cameraStatus === "connected" && (
                     <div className="camera-badges">
@@ -2025,7 +2239,7 @@ export default function Home() {
                       <strong>
                         {cameraStatus === "requesting"
                           ? "카메라를 연결하고 있어요"
-                          : "노트북 카메라를 연결해 주세요"}
+                          : "컴퓨터 카메라를 연결해 주세요"}
                       </strong>
                       <p>{cameraMessage}</p>
                       <button
@@ -2306,6 +2520,8 @@ export default function Home() {
 
         {view === "settings" && (
           <div className="settings-page">
+            {interfaceMode === "user" ? (
+              <>
             <section className="settings-intro-card">
               <span className="section-kicker">나의 업무 환경</span>
               <h2>{occupationTemplate.icon} {occupationTemplate.label}로 설정되어 있어요</h2>
@@ -2327,34 +2543,84 @@ export default function Home() {
               </div>
             </section>
 
+            <section className="settings-checklist-card">
+              <div>
+                <span className="section-kicker">반복 마감 체크리스트</span>
+                <h2>매일 같은 시간에 확인할 일을 알려드려요</h2>
+                <p>현재 MVP에서는 사장님이 직접 체크해요. 기기 상태 자동 확인은 향후 IoT 연동 단계에서 추가합니다.</p>
+              </div>
+              <label className="closing-time-field">
+                <span>알림 시간</span>
+                <input type="time" value={closingTime} onChange={(event) => setClosingTime(event.target.value)} />
+              </label>
+              <ul className="settings-checklist-items">
+                {closingChecklist.map((item) => (
+                  <li key={item.id}>
+                    <span>{item.label}</span>
+                    <button type="button" onClick={() => removeChecklistItem(item.id)} aria-label={`${item.label} 삭제`}>삭제</button>
+                  </li>
+                ))}
+              </ul>
+              <form className="checklist-add-form" onSubmit={addChecklistItem}>
+                <input
+                  value={newChecklistItem}
+                  onChange={(event) => setNewChecklistItem(event.target.value)}
+                  placeholder="예: 냉장고 문 확인하기"
+                  aria-label="새 체크리스트 항목"
+                />
+                <button type="submit">항목 추가</button>
+              </form>
+            </section>
+
+              </>
+            ) : (
+              <section className="settings-intro-card developer-settings-intro">
+                <span className="section-kicker">개발자 전용 설정</span>
+                <h2>카메라와 가상 기준선을 검증해요</h2>
+                <p>이 화면의 기능과 데이터는 실제 사용자가 보는 사용자 모드에는 표시되지 않아요.</p>
+                <div className="developer-setting-summary">
+                  <span><small>입력 장치</small><strong>컴퓨터 카메라 1대</strong></span>
+                  <span><small>현재 기준선</small><strong>{observationProfile.baselineSource === "synthetic" ? "가상 데이터" : "직접 학습"}</strong></span>
+                </div>
+              </section>
+            )}
+
             <section className="settings-list" aria-label="설정 목록">
               <button type="button" onClick={() => setMyDataOpen(true)}>
                 <span aria-hidden="true">◌</span>
                 <span><strong>내 데이터 관리</strong><small>저장된 테스트 기록을 확인하거나 삭제해요</small></span>
                 <i aria-hidden="true">›</i>
               </button>
-              <button type="button" onClick={() => setView("today")}>
-                <span aria-hidden="true">⌁</span>
-                <span><strong>기능 테스트</strong><small>가상 기준선, 카메라, 스켈레톤 분석을 시험해요</small></span>
-                <i aria-hidden="true">›</i>
-              </button>
-              <button type="button" onClick={() => setSyntheticLibraryOpen(true)}>
-                <span aria-hidden="true">△</span>
-                <span><strong>가상 학습 데이터 보기</strong><small>직군별 예시 동작과 라벨을 확인해요</small></span>
-                <i aria-hidden="true">›</i>
-              </button>
+              {interfaceMode === "developer" && (
+                <>
+                  <button type="button" onClick={() => setView("today")}>
+                    <span aria-hidden="true">⌁</span>
+                    <span><strong>컴퓨터 카메라 기능 테스트</strong><small>카메라 1대로 전신·손·동작 분석을 시험해요</small></span>
+                    <i aria-hidden="true">›</i>
+                  </button>
+                  <button type="button" onClick={() => setSyntheticLibraryOpen(true)}>
+                    <span aria-hidden="true">△</span>
+                    <span><strong>가상 학습 데이터 보기</strong><small>직군별 예시 동작과 라벨을 확인해요</small></span>
+                    <i aria-hidden="true">›</i>
+                  </button>
+                </>
+              )}
             </section>
 
             <section className="settings-note">
-              <strong>모바일 MVP 안내</strong>
-              <p>현재는 짧은 카메라 테스트와 결과 확인을 위한 버전이에요. 매장 상시 분석과 실제 알림 연동은 다음 단계에서 연결합니다.</p>
+              <strong>{interfaceMode === "user" ? "모바일 MVP 안내" : "개발자 모드 안내"}</strong>
+              <p>
+                {interfaceMode === "user"
+                  ? "사용자 모드에는 실제 케어 결과와 일상 설정만 표시돼요. 카메라·가상 데이터 검증 도구는 개발자 모드에서 확인할 수 있어요."
+                  : "현재는 컴퓨터 카메라 1대를 이용한 짧은 동작 테스트와 결과 확인을 지원해요. 여러 카메라·IoT·POS 연동은 단일 카메라 검증 이후 단계에서 추가합니다."}
+              </p>
             </section>
           </div>
         )}
 
         {view === "care" && (
           <div className="subpage care-page">
-            <section className="demo-switcher">
+            {interfaceMode === "developer" && <section className="demo-switcher">
               <div>
                 <span className="section-kicker">테스트용 케어 기록</span>
                 <h2>가상 기준선으로 만든 이번 주 기록</h2>
@@ -2368,9 +2634,9 @@ export default function Home() {
               >
                 <span aria-hidden="true" /> {demoMode ? "예시 기록 보는 중" : "예시 기록 보기"}
               </button>
-            </section>
+            </section>}
 
-            {demoMode ? (
+            {interfaceMode === "developer" && demoMode ? (
               <>
                 <div className="persona-switcher" role="tablist" aria-label="가상 페르소나 선택">
                   {DEMO_PERSONAS.map((persona, index) => (
@@ -2457,7 +2723,7 @@ export default function Home() {
                       <strong>{demoDay.note}</strong>
                     </div>
                     <div className="day-signal-grid">
-                      <article><span>안전 확인</span><strong>{demoDay.safetyAlerts}<small>회</small></strong></article>
+                      <article><span>마감 미확인 알림</span><strong>{demoDay.safetyAlerts}<small>회</small></strong></article>
                       <article><span>반복 확인</span><strong>{demoDay.doubleChecks}<small>회</small></strong></article>
                       <article><span>마무리 전 이탈</span><strong>{demoDay.unfinishedTasks}<small>건</small></strong></article>
                       <article><span>업무 흐름</span><strong className="word-value">{demoDay.microDelayRate >= 12 ? "변화 있음" : "평소와 비슷"}</strong></article>
@@ -2517,7 +2783,7 @@ export default function Home() {
                 <p>
                   카메라를 연결할 때 &ldquo;동의하고 카메라 켜기&rdquo;를 선택하면, 실제
                   사용 기록을 바탕으로 한 케어 리포트가 이곳에 쌓이기
-                  시작해요. 지금은 시뮬레이션 예시만 보실 수 있어요.
+                  시작해요. 개발자용 예시 기록은 개발자 모드에서만 확인할 수 있어요.
                 </p>
                 <button type="button" onClick={() => handleConsentDecision(true)}>
                   장기 관찰에 참여하기
@@ -2528,9 +2794,9 @@ export default function Home() {
                 <span className="care-summary-mark" aria-hidden="true">♡</span>
                 <h2>아직 쌓인 기록이 없어요</h2>
                 <p>
-                  스마트 마감을 확인하거나 세이브포인트를 사용하시면, 그
-                  기록을 바탕으로 케어 리포트가 만들어져요. 며칠 사용하시면
-                  평소 흐름과 비교한 리포트를 볼 수 있어요.
+                  마감 체크리스트를 사용하고 카메라 동작 테스트를 진행하면,
+                  그 기록을 바탕으로 케어 리포트가 만들어져요. 며칠 사용하시면
+                  본인의 평소 흐름과 비교한 내용을 볼 수 있어요.
                 </p>
               </section>
             ) : (
@@ -2565,7 +2831,7 @@ export default function Home() {
 
                 <div className="metric-grid">
                   <article className="metric-card">
-                    <span>안전 알림</span>
+                    <span>마감 미확인 알림</span>
                     <strong>
                       {totalSafetyAlerts}
                       <small>회</small>
@@ -2679,17 +2945,19 @@ export default function Home() {
                 </div>
               </div>
               <p>
-                이 리포트만으로 건강 상태를 판단하지 않아요. 다만 변화가
-                계속 이어져 걱정되신다면, 아래 상담 채널을 편하게
-                이용해보세요.
+                이 기록만으로 건강 상태를 판단하지 않아요. 피로·수면·스트레스처럼
+                다른 원인도 함께 살펴보고, 변화가 반복되어 걱정된다면 다음 단계 중
+                편한 것부터 선택해 보세요.
               </p>
+              <div className="care-next-steps">
+                <span><i>1</i><strong>정보 확인</strong><small>변화를 이해해요</small></span>
+                <span><i>2</i><strong>기관 찾기</strong><small>가까운 곳을 찾아요</small></span>
+                <span><i>3</i><strong>상담 준비</strong><small>기록을 정리해요</small></span>
+              </div>
               <div className="care-connect-actions">
-                <a className="care-connect-link" href="tel:1899-9988">
-                  치매상담콜센터(보건복지부) 1899-9988
-                </a>
-                <button type="button" onClick={() => void shareCareSummary()}>
-                  가족과 리포트 공유
-                </button>
+                <button type="button" onClick={() => setBrainHealthOpen(true)}>뇌 건강 정보 보기</button>
+                <a className="care-connect-link" href="https://www.nid.or.kr" target="_blank" rel="noreferrer">가까운 치매안심센터 찾기</a>
+                <a className="care-connect-link" href="tel:1899-9988">상담전화 1899-9988</a>
               </div>
             </section>
           </div>
@@ -2697,7 +2965,7 @@ export default function Home() {
       </section>
 
       <nav className="mobile-nav" aria-label="모바일 주요 메뉴">
-        {navItems.map((item) => (
+        {activeNavItems.map((item) => (
           <button
             key={item.id}
             className={view === item.id ? "active" : ""}
@@ -2750,6 +3018,27 @@ export default function Home() {
               </button>
             )}
             <button className="modal-confirm" type="button" onClick={() => setSelectedEvent(null)}>확인했어요</button>
+          </section>
+        </div>
+      )}
+
+      {brainHealthOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setBrainHealthOpen(false)}>
+          <section className="brain-health-modal" role="dialog" aria-modal="true" aria-labelledby="brain-health-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" onClick={() => setBrainHealthOpen(false)} aria-label="닫기">×</button>
+            <span className="section-kicker">뇌 건강 정보</span>
+            <h2 id="brain-health-title">한 번의 실수보다 반복되는 변화가 중요해요</h2>
+            <p>익숙한 업무가 평소보다 오래 걸리거나 확인 행동이 반복되는 데에는 피로, 수면 부족, 스트레스, 신체 컨디션 등 여러 이유가 있을 수 있어요. 메모리 가드는 원인을 진단하지 않고, 본인의 평소 흐름과 달라진 장면을 정리해 드립니다.</p>
+            <div className="brain-health-guide">
+              <article><strong>먼저 돌아보기</strong><span>최근 수면, 피로, 매장 혼잡도와 함께 확인해 보세요.</span></article>
+              <article><strong>며칠 더 살펴보기</strong><span>같은 변화가 여러 날 이어지는지 기록을 확인해 보세요.</span></article>
+              <article><strong>걱정되면 상담하기</strong><span>상담할 때 언제부터 어떤 업무가 달라졌는지 이 기록을 보여주세요.</span></article>
+            </div>
+            <div className="brain-health-actions">
+              <a href="https://www.nid.or.kr" target="_blank" rel="noreferrer">공식 정보와 센터 찾기</a>
+              <a href="tel:1899-9988">치매상담콜센터 연결</a>
+            </div>
+            <small>이 정보와 앱의 기록은 의료 진단을 대신하지 않습니다.</small>
           </section>
         </div>
       )}

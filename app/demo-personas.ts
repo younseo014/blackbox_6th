@@ -143,17 +143,17 @@ const PERSONA_DEFINITIONS: DemoPersonaDefinition[] = [
     summary: "평소에는 혼자 카페를 안정적으로 운영합니다. 이번 주 후반에는 깜빡함, 마감 반복 확인, 업무 중단, 미세 지연이 함께 늘어나는 패턴을 가정했습니다.",
     weekRange: "8월 4일–10일",
     week: [
-      { day: "월", date: "8/4", safetyAlerts: 0, doubleChecks: 0, unfinishedTasks: 0, microDelayRate: 8, busy: false, note: "평소와 비슷한 월요일 오픈·마감 흐름", examples: [{ label: "08:41 매장 오픈", motionType: "normal_task" }, { label: "12:15 원두 재고 정리", motionType: "high_reach" }, { label: "19:07 스마트 마감 1회 완료", motionType: "normal_task" }] },
+      { day: "월", date: "8/4", safetyAlerts: 0, doubleChecks: 0, unfinishedTasks: 0, microDelayRate: 8, busy: false, note: "평소와 비슷한 월요일 오픈·마감 흐름", examples: [{ label: "08:41 매장 오픈", motionType: "normal_task" }, { label: "12:15 원두 재고 정리", motionType: "high_reach" }, { label: "19:07 마감 체크리스트 한 번에 완료", motionType: "normal_task" }] },
       { day: "화", date: "8/5", safetyAlerts: 0, doubleChecks: 1, unfinishedTasks: 0, microDelayRate: 9, busy: false, note: "마감 뒤 출입문 상태를 한 번 더 확인", examples: [{ label: "19:12 출입문 잠김 확인", motionType: "normal_task" }, { label: "19:14 출입문 상태 재확인", motionType: "double_check" }] },
       { day: "수", date: "8/6", safetyAlerts: 0, doubleChecks: 0, unfinishedTasks: 0, microDelayRate: 10, busy: false, note: "무리 없이 하루 마감", examples: [{ label: "15:20 원두 포장 정리", motionType: "high_reach" }, { label: "19:03 마감 확인 1회", motionType: "normal_task" }] },
-      { day: "목", date: "8/7", safetyAlerts: 1, doubleChecks: 1, unfinishedTasks: 0, microDelayRate: 9, busy: false, note: "온열기 차단 알림 1회, 곧바로 정상 마감", examples: [{ label: "14:10 손님 대기열 증가", motionType: "queue_shift" }, { label: "19:09 온열기 차단 권고 → 즉시 조치", motionType: "safety_alert" }] },
+      { day: "목", date: "8/7", safetyAlerts: 1, doubleChecks: 1, unfinishedTasks: 0, microDelayRate: 9, busy: false, note: "마감 항목 미확인 알림 1회, 곧바로 완료", examples: [{ label: "14:10 손님 대기열 증가", motionType: "queue_shift" }, { label: "19:09 출입문 확인 알림 → 즉시 완료", motionType: "safety_alert" }] },
       { day: "금", date: "8/8", safetyAlerts: 0, doubleChecks: 1, unfinishedTasks: 0, microDelayRate: 11, busy: false, note: "평소와 비슷한 금요일", examples: [{ label: "13:00 주문 대기열 증가", motionType: "queue_shift" }, { label: "19:06 출입문 상태 재확인", motionType: "double_check" }] },
-      { day: "토", date: "8/9", safetyAlerts: 2, doubleChecks: 2, unfinishedTasks: 2, microDelayRate: 45, busy: false, note: "마감 반복 확인과 미완료 주문이 크게 늘어난 토요일", examples: [{ label: "15:02 주문 입력 후 9분 지연", motionType: "micro_delay" }, { label: "16:20 카드 결제 재입력", motionType: "register_tap" }, { label: "17:52 재고 박스 하단 확인", motionType: "low_bend" }, { label: "19:28 스마트 플러그 차단 권고 후 재확인", motionType: "safety_alert" }] },
+      { day: "토", date: "8/9", safetyAlerts: 2, doubleChecks: 2, unfinishedTasks: 2, microDelayRate: 45, busy: false, note: "마감 반복 확인과 미완료 업무가 크게 늘어난 토요일", examples: [{ label: "15:02 주문 입력 후 9분 지연", motionType: "micro_delay" }, { label: "16:20 결제 업무 재시도", motionType: "register_tap" }, { label: "17:52 재고 박스 하단 확인", motionType: "low_bend" }, { label: "19:28 마감 미완료 알림 후 재확인", motionType: "safety_alert" }] },
       { day: "일", date: "8/10", safetyAlerts: 1, doubleChecks: 2, unfinishedTasks: 1, microDelayRate: 40, busy: false, note: "쉬는 날 없이 비슷한 흐름이 이어짐", examples: [{ label: "11:47 카드 결제 재입력", motionType: "register_tap" }, { label: "14:30 대기 손님 늘어남", motionType: "queue_shift" }, { label: "20:11 마감 항목 2회 재확인", motionType: "double_check" }] },
     ],
     insights: [
-      { icon: "↗", kicker: "1. 평소 대비 변화", title: "주 후반에 신호가 겹쳐요", body: "토·일 이틀 동안 안전 알림, 반복 확인, 미완료 업무, 미세 지연이 함께 늘었습니다. 한 가지 실수보다 여러 지표가 같은 기간에 함께 움직이는지를 봅니다." },
-      { icon: "⌁", kicker: "2. 시간축 연결", title: "바쁜 시간대의 흐름을 확인해요", body: "토요일 오후에는 주문 입력 중단과 스마트 플러그 차단 권고가 가까운 시간대에 기록됩니다. 타임라인은 '언제 일이 끊겼는지'를 되짚게 해줘요." },
+      { icon: "↗", kicker: "1. 평소 대비 변화", title: "주 후반에 신호가 겹쳐요", body: "토·일 이틀 동안 마감 미확인, 반복 확인, 미완료 업무, 처리 지연이 함께 늘었습니다. 한 가지 실수보다 여러 지표가 같은 기간에 함께 움직이는지를 봅니다." },
+      { icon: "⌁", kicker: "2. 시간 흐름 확인", title: "업무가 끊긴 시점을 확인해요", body: "토요일 오후에는 주문 입력 중단과 마감 체크리스트 재확인이 가까운 시간대에 기록됩니다. 기록은 '언제 일이 끊겼는지'를 되짚게 해줘요." },
       { icon: "♡", kicker: "3. 케어로 연결", title: "진단 대신 휴식과 점검을 권해요", body: "이 예시만으로 건강 상태를 판단하지 않습니다. 다만 변화가 며칠 더 이어진다면, 휴식이나 점검 루틴, 필요하다면 전문 상담을 조심스럽게 권할 수 있어요." },
     ],
     note: "이수진 사장님의 데이터는 설명을 위한 가상 시나리오입니다. 메모리 가드는 질환을 진단하거나 단정하지 않으며, 실제 서비스에서는 장기간의 개인 기준선과 안전·업무 변화 패턴을 함께 살펴 케어 대화를 돕는 용도로 사용합니다.",
@@ -256,7 +256,7 @@ const RULE_BY_CATEGORY: Record<"doubleChecks" | "safetyAlerts" | "microDelay", s
   doubleChecks:
     "같은 날 마감 확인을 다시 실행하거나, 카메라 동작에서 시작 위치로 돌아왔다가 다시 접근하는 패턴이 반복되면 '마감 반복 확인'으로 집계돼요.",
   safetyAlerts:
-    "마감 점검 때 온열기 같은 위험 요소가 켜진 상태로 확인되거나, 카메라 동작에서 급격하고 반응적인 움직임이 감지되면 '안전 알림'으로 집계돼요.",
+    "사장님이 정한 마감 시간이 지났는데 체크리스트 항목이 남아 있으면 '마감 미확인 알림'으로 집계돼요. MVP에서는 카메라로 기기 상태를 판단하지 않아요.",
   microDelay: `업무 완료까지 ${SLOW_DELAY_SECONDS}초(2분) 이상 걸리거나, 카메라 동작에서 손이 멈춘 채 오래 머무는 구간이 감지되면 '미세 지연'으로 집계돼요.`,
 };
 
@@ -313,7 +313,7 @@ export function explainDemoEvent(
     : category === "doubleChecks"
       ? `이 날 마감 반복 확인 ${day.doubleChecks}회 (평소 하루 평균 ${baseline.doubleChecks.toFixed(1)}회)`
       : category === "safetyAlerts"
-        ? `이 날 안전 알림 ${day.safetyAlerts}회 (평소 하루 평균 ${baseline.safetyAlerts.toFixed(1)}회)`
+        ? `이 날 마감 미확인 알림 ${day.safetyAlerts}회 (평소 하루 평균 ${baseline.safetyAlerts.toFixed(1)}회)`
         : `이 날 미세 지연 비율 ${day.microDelayRate}% (평소 평균 ${Math.round(baseline.microDelayRate * 100)}%)`;
 
   // The week's signal.reasons come from averaging the recent (non-baseline)
