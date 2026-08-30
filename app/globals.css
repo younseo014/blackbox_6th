@@ -2545,9 +2545,37 @@ body {
   background: #111111;
 }
 
-.skeleton-stage canvas,
-.camera-frame canvas {
+.skeleton-stage canvas {
   filter: grayscale(1) contrast(1.15);
+}
+
+/* Developer camera diagnostics keep hand colors intact: left is blue,
+   right is violet, while the body remains green/amber. */
+.camera-frame .pose-overlay {
+  filter: none;
+}
+
+.tracking-readout .hand-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tracking-readout .hand-status b {
+  font: inherit;
+  font-weight: 800;
+}
+
+.tracking-readout .hand-status b.detected:first-of-type {
+  color: #74d9ff;
+}
+
+.tracking-readout .hand-status b.detected:last-of-type {
+  color: #d9a0ff;
+}
+
+.tracking-readout .hand-status b.missing {
+  color: rgba(255, 255, 255, 0.58);
 }
 
 button:focus-visible,
@@ -3200,6 +3228,22 @@ select:focus-visible {
   color: #68736d;
   font-size: 10.5px;
   line-height: 1.45;
+}
+
+.classification-details {
+  border-top: 1px solid #dfe8e1;
+}
+
+.classification-details > summary {
+  padding: 11px 0;
+  color: #416b52;
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.classification-details > * + * {
+  margin-top: 12px;
 }
 
 .classification-evidence {
@@ -4801,7 +4845,8 @@ select:focus-visible {
 
 .motion-candidates strong,
 .motion-slice-summary strong,
-.classification-evidence summary {
+.classification-evidence summary,
+.classification-details > summary {
   color: #4d718a;
 }
 

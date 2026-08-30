@@ -1,13 +1,15 @@
-import {
-  isFullBodyVisible,
-  type NormalizedLandmarkLike,
-} from "./motion-analysis";
+import type { NormalizedLandmarkLike } from "./motion-analysis";
 
 const CORE_LANDMARKS = [11, 12, 23, 24] as const;
-const BODY_LANDMARKS = [7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28] as const;
+// Head and face landmarks are intentionally excluded from target identity.
+// Tracking is based on torso, arm, and leg continuity only.
+const BODY_LANDMARKS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28] as const;
 const MAX_CENTER_STEP = 0.72;
-const MAX_SCALE_LOG_CHANGE = 0.52;
-const MAX_SHAPE_DISTANCE = 0.5;
+const MAX_SCALE_LOG_CHANGE = 0.75;
+// Shoulder width can change sharply when the user turns their upper body
+// during a head-direction test. Keep it as supporting evidence, not a hard
+// identity break by itself.
+const MAX_SHAPE_DISTANCE = 0.85;
 const MAX_CONTINUITY_SCORE = 0.68;
 
 type TargetDescriptor = {
@@ -35,8 +37,34 @@ export type PoseTargetSelection<T extends NormalizedLandmarkLike> = {
   state: "searching" | "acquired" | "tracking" | "missing";
 };
 
-function distance(a: NormalizedLandmarkLike, b: NormalizedLandmarkLike): number {
-  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+function imageDistance(a: NormalizedLandmarkLike, b: NormalizedLandmarkLike): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function landmarkVisibility(point: NormalizedLandmarkLike): number {
+  return Math.max(0, Math.min(1, point.visibility ?? 0));
+}
+
+function visibilityWeightedCenter(
+  first: NormalizedLandmarkLike,
+  second: NormalizedLandmarkLike,
+) {
+  const firstWeight = Math.max(0.05, landmarkVisibility(first));
+  const secondWeight = Math.max(0.05, landmarkVisibility(second));
+  const weight = firstWeight + secondWeight;
+  return {
+    x: (first.x * firstWeight + second.x * secondWeight) / weight,
+    y: (first.y * firstWeight + second.y * secondWeight) / weight,
+    z: (first.z * firstWeight + second.z * secondWeight) / weight,
+  };
+}
+
+function pairIsVisible(
+  first: NormalizedLandmarkLike,
+  second: NormalizedLandmarkLike,
+  threshold = 0.25,
+): boolean {
+  return landmarkVisibility(first) >= threshold && landmarkVisibility(second) >= threshold;
 }
 
 function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | null {
@@ -45,25 +73,17 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
 
   const visiblePoints = BODY_LANDMARKS
     .map((index) => landmarks[index])
-    .filter((point) => point && (point.visibility ?? 0) >= 0.35);
-  if (visiblePoints.length < 8) return null;
+    .filter((point) => point && landmarkVisibility(point) >= 0.25);
+  if (visiblePoints.length < 4) return null;
 
   const leftShoulder = landmarks[11];
   const rightShoulder = landmarks[12];
   const leftHip = landmarks[23];
   const rightHip = landmarks[24];
-  const shoulderCenter = {
-    x: (leftShoulder.x + rightShoulder.x) / 2,
-    y: (leftShoulder.y + rightShoulder.y) / 2,
-    z: (leftShoulder.z + rightShoulder.z) / 2,
-  };
-  const hipCenter = {
-    x: (leftHip.x + rightHip.x) / 2,
-    y: (leftHip.y + rightHip.y) / 2,
-    z: (leftHip.z + rightHip.z) / 2,
-  };
-  const torsoLength = distance(shoulderCenter, hipCenter);
-  if (torsoLength < 0.08) return null;
+  const shoulderCenter = visibilityWeightedCenter(leftShoulder, rightShoulder);
+  const hipCenter = visibilityWeightedCenter(leftHip, rightHip);
+  const torsoLength = imageDistance(shoulderCenter, hipCenter);
+  if (torsoLength < 0.045) return null;
 
   const xs = visiblePoints.map((point) => point.x);
   const ys = visiblePoints.map((point) => point.y);
@@ -71,16 +91,22 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
-  const height = Math.max(0.12, maxY - minY);
+  // Torso scale stays comparable when legs or arms move outside the frame.
+  const height = Math.max(0.12, torsoLength * 2.8, Math.min(torsoLength * 3.6, maxY - minY));
   const width = Math.max(0.08, maxX - minX);
-  const shoulderWidth = distance(leftShoulder, rightShoulder);
-  const hipWidth = distance(leftHip, rightHip);
-  const leftLeg = landmarks[25] && landmarks[27]
-    ? distance(leftHip, landmarks[25]) + distance(landmarks[25], landmarks[27])
-    : torsoLength * 2;
-  const rightLeg = landmarks[26] && landmarks[28]
-    ? distance(rightHip, landmarks[26]) + distance(landmarks[26], landmarks[28])
-    : torsoLength * 2;
+  const shoulderWidth = pairIsVisible(leftShoulder, rightShoulder)
+    ? imageDistance(leftShoulder, rightShoulder)
+    : Number.NaN;
+  const hipWidth = pairIsVisible(leftHip, rightHip)
+    ? imageDistance(leftHip, rightHip)
+    : Number.NaN;
+  const leftLeg = pairIsVisible(landmarks[25], landmarks[27])
+    ? imageDistance(leftHip, landmarks[25]) + imageDistance(landmarks[25], landmarks[27])
+    : Number.NaN;
+  const rightLeg = pairIsVisible(landmarks[26], landmarks[28])
+    ? imageDistance(rightHip, landmarks[26]) + imageDistance(landmarks[26], landmarks[28])
+    : Number.NaN;
+  const visibleLegs = [leftLeg, rightLeg].filter(Number.isFinite);
 
   return {
     centerX: (shoulderCenter.x + hipCenter.x) / 2,
@@ -90,7 +116,9 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
     torsoLength,
     shoulderRatio: shoulderWidth / torsoLength,
     hipRatio: hipWidth / torsoLength,
-    legRatio: (leftLeg + rightLeg) / (2 * torsoLength),
+    legRatio: visibleLegs.length
+      ? visibleLegs.reduce((sum, value) => sum + value, 0) / (visibleLegs.length * torsoLength)
+      : Number.NaN,
     quality:
       visiblePoints.reduce((sum, point) => sum + (point.visibility ?? 0), 0) /
       visiblePoints.length,
@@ -98,11 +126,14 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
 }
 
 function shapeDistance(a: TargetDescriptor, b: TargetDescriptor): number {
-  const ratios: Array<[number, number]> = [
+  const ratios = ([
     [a.shoulderRatio, b.shoulderRatio],
     [a.hipRatio, b.hipRatio],
     [a.legRatio, b.legRatio],
-  ];
+  ] as Array<[number, number]>).filter(([left, right]) =>
+    Number.isFinite(left) && Number.isFinite(right),
+  );
+  if (ratios.length === 0) return 0;
   return ratios.reduce(
     (sum, [left, right]) => sum + Math.abs(Math.log(Math.max(0.01, left) / Math.max(0.01, right))),
     0,
@@ -133,10 +164,11 @@ function continuityScore(lock: PoseTargetLock, candidate: TargetDescriptor): num
 }
 
 /**
- * Locks onto one full-body pose and only accepts spatially/anatomically
- * continuous candidates afterwards. A rejected frame is reported as missing
- * instead of silently switching to another person or a person-shaped object.
- * The lock intentionally lives until the camera session ends.
+ * Locks onto the strongest usable upper-body or full-body pose immediately,
+ * then accepts only spatially/anatomically continuous body candidates. Head
+ * landmarks are never part of the identity descriptor. A rejected frame is
+ * reported as missing without releasing the lock, so temporary cropping does
+ * not silently switch tracking to another person or a pose-like object.
  */
 export function selectLockedPose<T extends NormalizedLandmarkLike>(
   candidates: T[][],
@@ -150,10 +182,9 @@ export function selectLockedPose<T extends NormalizedLandmarkLike>(
     );
 
   if (!currentLock) {
-    const acquisitionCandidates = described
-      .filter((candidate) => isFullBodyVisible(candidate.landmarks))
+    const rankedCandidates = described
       .sort((a, b) => acquisitionScore(b.descriptor) - acquisitionScore(a.descriptor));
-    const selected = acquisitionCandidates[0];
+    const selected = rankedCandidates[0];
     if (!selected) {
       return { landmarks: null, lock: null, state: "searching" };
     }
@@ -189,15 +220,30 @@ export function selectLockedPose<T extends NormalizedLandmarkLike>(
   };
 }
 
-/** Only attach hand landmarks that are spatially close to the locked body. */
+/**
+ * Associates a separately detected hand with the closest pose wrist.
+ * PoseLandmarker and HandLandmarker do not share the same z-coordinate scale,
+ * so cross-model association must use normalized image x/y coordinates only.
+ */
+export function matchHandToPose(
+  hand: NormalizedLandmarkLike[],
+  pose: NormalizedLandmarkLike[] | null,
+): "left" | "right" | null {
+  if (!pose || !hand[0] || !pose[15] || !pose[16]) return null;
+  const descriptor = descriptorFor(pose);
+  if (!descriptor) return null;
+  const wrist = hand[0];
+  const leftDistance = imageDistance(wrist, pose[15]);
+  const rightDistance = imageDistance(wrist, pose[16]);
+  const threshold = Math.max(0.14, descriptor.height * 0.32);
+  if (Math.min(leftDistance, rightDistance) > threshold) return null;
+  return leftDistance <= rightDistance ? "left" : "right";
+}
+
+/** Only attach hand landmarks that are spatially close to the tracked body. */
 export function handBelongsToPose(
   hand: NormalizedLandmarkLike[],
   pose: NormalizedLandmarkLike[] | null,
 ): boolean {
-  if (!pose || !hand[0] || !pose[15] || !pose[16]) return false;
-  const descriptor = descriptorFor(pose);
-  if (!descriptor) return false;
-  const wrist = hand[0];
-  const wristDistance = Math.min(distance(wrist, pose[15]), distance(wrist, pose[16]));
-  return wristDistance <= Math.max(0.11, descriptor.height * 0.28);
+  return matchHandToPose(hand, pose) !== null;
 }
