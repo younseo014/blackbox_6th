@@ -2000,6 +2000,7 @@ export default function Home() {
         <header className="topbar">
           <div>
             <span className={`interface-mode-badge ${interfaceMode}`}>
+              <span className="interface-mode-badge-dot" aria-hidden="true" />
               {interfaceMode === "user" ? "사용자 모드" : "개발자 모드"}
             </span>
             <h1>
