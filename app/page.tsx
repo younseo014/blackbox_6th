@@ -1,6 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Toaster, toast } from "sonner";
+import NumberFlow from "@number-flow/react";
+import { Dialog } from "@base-ui-components/react/dialog";
 import type {
   HandLandmarker,
   NormalizedLandmark,
@@ -142,6 +145,12 @@ type ClosingChecklistItem = {
   done: boolean;
 };
 
+type DailyScheduleItem = {
+  id: string;
+  time: string;
+  label: string;
+};
+
 type UserInstallState = {
   startedAt: number;
   startDate: string;
@@ -156,6 +165,7 @@ const DEFAULT_CLOSING_CHECKLIST: ClosingChecklistItem[] = [
 ];
 
 const CHECKLIST_STORAGE_KEY = "memory-guard-closing-checklist-v1";
+const DAILY_SCHEDULE_STORAGE_KEY = "memory-guard-daily-schedule-v1";
 const INTERFACE_MODE_STORAGE_KEY = "memory-guard-interface-mode-v1";
 const USER_INSTALL_STORAGE_KEY = "memory-guard-user-install-v1";
 const POSE_DISPLAY_HOLD_MS = 450;
@@ -221,6 +231,17 @@ function loadChecklistSettings() {
     };
   } catch {
     return fallback;
+  }
+}
+
+function loadDailySchedule(): DailyScheduleItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = window.localStorage.getItem(DAILY_SCHEDULE_STORAGE_KEY);
+    const items = stored ? (JSON.parse(stored) as DailyScheduleItem[]) : [];
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
   }
 }
 
@@ -378,6 +399,35 @@ function PoseSnapshot({ snapshot }: { snapshot: MotionSnapshot }) {
   return <canvas ref={canvasRef} width={640} height={360} aria-label="기록된 스켈레톤 좌표" />;
 }
 
+function Modal({
+  open,
+  onClose,
+  labelledBy,
+  className,
+  disableDismiss = false,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  labelledBy: string;
+  className: string;
+  disableDismiss?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={(next) => !next && !disableDismiss && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="modal-backdrop" />
+        <Dialog.Viewport className="modal-viewport">
+          <Dialog.Popup className={className} aria-labelledby={labelledBy}>
+            {children}
+          </Dialog.Popup>
+        </Dialog.Viewport>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 function TimelineList({
   events,
   onSelect,
@@ -460,7 +510,6 @@ export default function Home() {
   } | null>(null);
   const [events, setEvents] = useState<TimelineEvent[]>(initialEvents);
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
-  const [toast, setToast] = useState("");
   const [heaterOn, setHeaterOn] = useState(true);
   const [closingStatus, setClosingStatus] = useState<ClosingStatus>("idle");
   const [closingStep, setClosingStep] = useState(0);
@@ -487,6 +536,9 @@ export default function Home() {
   );
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [checklistReminderDue, setChecklistReminderDue] = useState(false);
+  const [dailySchedule, setDailySchedule] = useState<DailyScheduleItem[]>(loadDailySchedule);
+  const [newScheduleTime, setNewScheduleTime] = useState("08:30");
+  const [newScheduleLabel, setNewScheduleLabel] = useState("");
   const [brainHealthOpen, setBrainHealthOpen] = useState(false);
 
   // --- Consent, real observation metrics, and data controls ---
@@ -669,7 +721,7 @@ export default function Home() {
     estimateStorageUsage().then((usage) => {
       setStorageUsage(usage);
       if (usage && usage.quotaBytes > 0 && usage.usageBytes / usage.quotaBytes > 0.9) {
-        setToast(
+        toast.success(
           "브라우저 저장 공간이 거의 찼어요. 내 데이터 관리에서 오래된 기록을 정리해 주세요.",
         );
       }
@@ -686,6 +738,10 @@ export default function Home() {
       }),
     );
   }, [closingChecklist, closingTime]);
+
+  useEffect(() => {
+    window.localStorage.setItem(DAILY_SCHEDULE_STORAGE_KEY, JSON.stringify(dailySchedule));
+  }, [dailySchedule]);
 
   useEffect(() => {
     const checkReminder = () => {
@@ -764,12 +820,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(""), 3200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  useEffect(() => {
     return () => {
       trackingActiveRef.current = false;
       if (poseAnimationRef.current !== null) {
@@ -812,7 +862,7 @@ export default function Home() {
         await cameraFrame.requestFullscreen();
       }
     } catch {
-      setToast("이 브라우저에서는 카메라 전체화면을 열 수 없어요");
+      toast.success("이 브라우저에서는 카메라 전체화면을 열 수 없어요");
     }
   }
 
@@ -1249,16 +1299,16 @@ export default function Home() {
       trackingActiveRef.current = true;
       if (handLandmarkerRef.current) {
         setCameraMessage("얼굴은 제외하고 몸·머리 방향·손가락 좌표를 기록하고 있어요.");
-        setToast("몸과 손가락 좌표 상시 기록을 시작했어요");
+        toast.success("몸과 손가락 좌표 상시 기록을 시작했어요");
       } else {
         setCameraMessage("몸·머리 방향 좌표를 기록 중이에요. 손가락 추적은 이 기기에서 준비하지 못했어요.");
-        setToast("몸 스켈레톤 좌표 기록을 시작했어요");
+        toast.success("몸 스켈레톤 좌표 기록을 시작했어요");
       }
       poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
     } catch {
       updatePoseStatus("error");
       setCameraMessage("몸·손 추적 모델을 불러오지 못했어요. 다시 연결해 주세요.");
-      setToast("동작 추적 모델을 준비하지 못했어요");
+      toast.success("동작 추적 모델을 준비하지 못했어요");
     }
   }
 
@@ -1327,7 +1377,7 @@ export default function Home() {
       });
       await saveObservationEpisode(episode);
       await refreshObservationData(observationProfile);
-      setToast(
+      toast.success(
         episode.disposition === "quarantined"
           ? "평소 흐름으로 확정하기 어려운 동작은 학습에서 잠시 보류했어요"
           : observationProfile.mode === "learning"
@@ -1397,7 +1447,7 @@ export default function Home() {
     setTargetLocked(false);
     setElapsedSeconds(0);
     setCameraMessage("카메라 연결을 멈췄어요.");
-    setToast("좌표 기록을 안전하게 저장하고 카메라를 종료했어요");
+    toast.success("좌표 기록을 안전하게 저장하고 카메라를 종료했어요");
   }
 
   function markTestEvent(preset: (typeof eventPresets)[number]) {
@@ -1406,11 +1456,11 @@ export default function Home() {
     const head = lastHeadDirectionRef.current;
     const hands = lastHandsRef.current;
     if (!session || cameraStatus !== "connected") {
-      setToast("먼저 카메라를 연결해 주세요");
+      toast.success("먼저 카메라를 연결해 주세요");
       return;
     }
     if (!landmarks || !head) {
-      setToast("스켈레톤이 인식된 뒤 이벤트를 표시해 주세요");
+      toast.success("스켈레톤이 인식된 뒤 이벤트를 표시해 주세요");
       return;
     }
     const event: TimelineEvent = {
@@ -1437,7 +1487,7 @@ export default function Home() {
       },
     };
     setEvents((previous) => [event, ...previous]);
-    setToast("이벤트 시점을 좌표 기록에 표시했어요");
+    toast.success("이벤트 시점을 좌표 기록에 표시했어요");
 
     // Gap between consecutive logged moments is used as a rough proxy for
     // the "미세 지연" (micro-delay) observation metric from the PRD. This is
@@ -1459,13 +1509,13 @@ export default function Home() {
       await poseWriteQueueRef.current;
       const session = poseSessionRef.current ?? latestSession;
       if (!session || session.frameCount === 0) {
-        setToast("내보낼 좌표 기록이 아직 없어요");
+        toast.success("내보낼 좌표 기록이 아직 없어요");
         return;
       }
       await downloadMotionSession(session);
-      setToast("학습용 좌표 데이터를 내려받았어요");
+      toast.success("학습용 좌표 데이터를 내려받았어요");
     } catch {
-      setToast("좌표 데이터를 내보내지 못했어요");
+      toast.success("좌표 데이터를 내보내지 못했어요");
     }
   }
 
@@ -1512,13 +1562,13 @@ export default function Home() {
         ...previous,
       ];
     });
-    setToast("모든 항목이 안전해요. 편안히 퇴근하세요");
+    toast.success("모든 항목이 안전해요. 편안히 퇴근하세요");
   }
 
   function turnOffHeater() {
     setHeaterOn(false);
     setClosingStatus("idle");
-    setToast("온열기 전원을 차단했어요");
+    toast.success("온열기 전원을 차단했어요");
   }
 
   function openDemoEventReplay(
@@ -1563,7 +1613,7 @@ export default function Home() {
     setObservationProfile(next);
     setSelectedZoneId(template.zones[0]?.id ?? "");
     await refreshObservationData(next);
-    setToast(`${template.label} 기본 업무 맥락으로 새 학습을 시작했어요`);
+    toast.success(`${template.label} 기본 업무 맥락으로 새 학습을 시작했어요`);
   }
 
   async function changeObservationMode(mode: ObservationMode) {
@@ -1583,7 +1633,7 @@ export default function Home() {
     });
     setObservationProfile(next);
     await refreshObservationData(next);
-    setToast(
+    toast.success(
       mode === "learning"
         ? "기존 기준선은 보관하고 새로운 평소 흐름을 학습해요"
         : observationBaseline.confidence < 70
@@ -1626,7 +1676,7 @@ export default function Home() {
       });
       setObservationProfile(next);
       await refreshObservationData(next);
-      setToast(
+      toast.success(
         bodyProportionProfile
           ? `최근 촬영 전신 비율로 ${getOccupationTemplate(next.occupation).label} 가상 기준선을 적용했어요`
           : `촬영 비율이 없어 개선된 표준 인체 비율로 ${getOccupationTemplate(next.occupation).label} 기준선을 적용했어요`,
@@ -1652,7 +1702,7 @@ export default function Home() {
     });
     setObservationProfile(next);
     setSyntheticLibraryOpen(false);
-    setToast(`${clip.taskLabel} 테스트 준비 완료 · 카메라 앞에서 동작 후 기록을 종료해 주세요`);
+    toast.success(`${clip.taskLabel} 테스트 준비 완료 · 카메라 앞에서 동작 후 기록을 종료해 주세요`);
   }
 
   async function clearPerformanceTestTask() {
@@ -1661,7 +1711,7 @@ export default function Home() {
       activeTestTaskId: null,
     });
     setObservationProfile(next);
-    setToast("지정 동작 테스트를 종료했어요");
+    toast.success("지정 동작 테스트를 종료했어요");
   }
 
   function saveBooking(event: FormEvent<HTMLFormElement>) {
@@ -1678,7 +1728,7 @@ export default function Home() {
     ]);
     setSavepointOpen(false);
     setBookingOpen(false);
-    setToast("하던 업무를 이어서 완료했어요");
+    toast.success("하던 업무를 이어서 완료했어요");
     if (consent.observationConsent) {
       void recordTaskCompleted().then(refreshCareData);
       if (bookingShownAtRef.current !== null) {
@@ -1689,7 +1739,7 @@ export default function Home() {
 
   function dismissSavepoint() {
     setSavepointOpen(false);
-    setToast("나중에 다시 확인할 수 있어요. 세이브포인트는 그대로 남아있어요.");
+    toast.success("나중에 다시 확인할 수 있어요. 세이브포인트는 그대로 남아있어요.");
     // Left uncompleted on purpose: this is what "업무 누락율 (Drop Rate)"
     // is meant to observe - a started task that never got finished.
   }
@@ -1742,7 +1792,7 @@ export default function Home() {
     });
     const usage = await estimateStorageUsage();
     setStorageUsage(usage);
-    setToast("저장된 동작 좌표와 케어 기록을 모두 삭제했어요");
+    toast.success("저장된 동작 좌표와 케어 기록을 모두 삭제했어요");
   }
 
   async function resetToFirstScreen() {
@@ -1757,13 +1807,13 @@ export default function Home() {
     setSyntheticLibraryOpen(false);
     setMyDataOpen(false);
     setView("home");
-    setToast("모든 내용을 초기화하고 처음 시작 화면으로 돌아왔어요.");
+    toast.success("모든 내용을 초기화하고 처음 시작 화면으로 돌아왔어요.");
   }
 
   function withdrawObservationConsent() {
     const next = setConsent(false);
     setConsentState(next);
-    setToast("관찰 참여를 철회했어요. 매장 안전 기능은 계속 사용할 수 있어요.");
+    toast.success("관찰 참여를 철회했어요. 매장 안전 기능은 계속 사용할 수 있어요.");
   }
 
   function toggleChecklistItem(itemId: string) {
@@ -1797,6 +1847,22 @@ export default function Home() {
 
   function removeChecklistItem(itemId: string) {
     setClosingChecklist((items) => items.filter((item) => item.id !== itemId));
+  }
+
+  function addScheduleItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const label = newScheduleLabel.trim();
+    if (!label || !newScheduleTime) return;
+    setDailySchedule((items) =>
+      [...items, { id: crypto.randomUUID(), time: newScheduleTime, label }].sort((a, b) =>
+        a.time.localeCompare(b.time),
+      ),
+    );
+    setNewScheduleLabel("");
+  }
+
+  function removeScheduleItem(itemId: string) {
+    setDailySchedule((items) => items.filter((item) => item.id !== itemId));
   }
 
   const statusText =
@@ -1899,12 +1965,12 @@ export default function Home() {
       setInterfaceMode("developer");
       setDemoMode(true);
       setView("today");
-      setToast("개발자 모드로 전환했어요. 테스트 도구만 보여드릴게요.");
+      toast.success("개발자 모드로 전환했어요. 테스트 도구만 보여드릴게요.");
       return;
     }
     setInterfaceMode("user");
     setView("home");
-    setToast("사용자 모드로 전환했어요. 실제 사용 화면만 보여드릴게요.");
+    toast.success("사용자 모드로 전환했어요. 실제 사용 화면만 보여드릴게요.");
   }
 
   async function completeFirstUserSetup() {
@@ -1931,7 +1997,7 @@ export default function Home() {
     setObservationProfile(nextProfile);
     await refreshObservationData(nextProfile);
     setView("home");
-    setToast("초기 설정을 마쳤어요. 새로운 사용자 기준으로 학습을 시작합니다.");
+    toast.success("초기 설정을 마쳤어요. 새로운 사용자 기준으로 학습을 시작합니다.");
   }
 
   return (
@@ -2264,8 +2330,8 @@ export default function Home() {
                   )}
                 </div>
                 <div className="learning-progress" aria-label={`기준선 완성도 ${observationBaseline.confidence}%`}>
-                  <div><span>개인 기준선 완성도</span><strong>{observationBaseline.confidence}%</strong></div>
-                  <i><span style={{ width: `${observationBaseline.confidence}%` }} /></i>
+                  <div><span>개인 기준선 완성도</span><strong><NumberFlow value={observationBaseline.confidence} suffix="%" /></strong></div>
+                  <i><span style={{ transform: `scaleX(${observationBaseline.confidence / 100})` }} /></i>
                 </div>
                 <div className="mode-stats">
                   <span><small>학습 포함</small><strong>{acceptedObservationCount}건</strong></span>
@@ -2322,7 +2388,7 @@ export default function Home() {
                       </div>
                       {latestPerformanceTest.motionClassification && (
                         <span className={`classification-confidence status-${latestPerformanceTest.motionClassification.status}`}>
-                          일치 신뢰도 {Math.round(latestPerformanceTest.motionClassification.confidence * 100)}%
+                          일치 신뢰도 <NumberFlow value={Math.round(latestPerformanceTest.motionClassification.confidence * 100)} suffix="%" />
                         </span>
                       )}
                     </div>
@@ -2359,7 +2425,7 @@ export default function Home() {
                           <div>
                             {latestPerformanceTest.motionClassification!.candidates.slice(1).map((candidate) => (
                               <span key={candidate.taskType}>
-                                {candidate.taskLabel} <strong>{Math.round(candidate.confidence * 100)}%</strong>
+                                {candidate.taskLabel} <strong><NumberFlow value={Math.round(candidate.confidence * 100)} suffix="%" /></strong>
                               </span>
                             ))}
                           </div>
@@ -2810,6 +2876,37 @@ export default function Home() {
 
             <section className="settings-checklist-card">
               <div>
+                <span className="section-kicker">나의 하루 일과</span>
+                <h2>평소 업무 시간표를 알려주세요</h2>
+                <p>직군 기본값 대신, 사장님 매장에서 실제로 반복되는 시간과 업무를 등록하면 더 정확하게 비교할 수 있어요.</p>
+              </div>
+              <ul className="settings-checklist-items">
+                {dailySchedule.map((item) => (
+                  <li key={item.id}>
+                    <span>{item.time} · {item.label}</span>
+                    <button type="button" onClick={() => removeScheduleItem(item.id)} aria-label={`${item.label} 삭제`}>삭제</button>
+                  </li>
+                ))}
+              </ul>
+              <form className="checklist-add-form" onSubmit={addScheduleItem}>
+                <input
+                  type="time"
+                  value={newScheduleTime}
+                  onChange={(event) => setNewScheduleTime(event.target.value)}
+                  aria-label="일과 시간"
+                />
+                <input
+                  value={newScheduleLabel}
+                  onChange={(event) => setNewScheduleLabel(event.target.value)}
+                  placeholder="예: 홀 청소"
+                  aria-label="일과 내용"
+                />
+                <button type="submit">일과 추가</button>
+              </form>
+            </section>
+
+            <section className="settings-checklist-card">
+              <div>
                 <span className="section-kicker">반복 마감 체크리스트</span>
                 <h2>매일 같은 시간에 확인할 일을 알려드려요</h2>
                 <p>현재 MVP에서는 사장님이 직접 체크해요. 기기 상태 자동 확인은 향후 IoT 연동 단계에서 추가합니다.</p>
@@ -3168,7 +3265,7 @@ export default function Home() {
                       : `업무별 평균과 표준편차를 따로 비교했습니다. 최근 변화 후보 ${analysisObservationSignals.length}건을 기록했어요.`}
                   </p>
                   <div className="pattern-summary-grid">
-                    <span><small>기준선 완성도</small><strong>{observationBaseline.confidence}%</strong></span>
+                    <span><small>기준선 완성도</small><strong><NumberFlow value={observationBaseline.confidence} suffix="%" /></strong></span>
                     <span><small>학습된 업무</small><strong>{observationBaseline.tasks.length}개</strong></span>
                     <span><small>유효 학습일</small><strong>{observationBaseline.eligibleDays}일</strong></span>
                     <span><small>변화 후보</small><strong>{analysisObservationSignals.length}건</strong></span>
@@ -3258,15 +3355,9 @@ export default function Home() {
         ))}
       </nav>
 
-      {selectedEvent && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelectedEvent(null)}>
-          <section
-            className="video-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="video-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+      <Modal open={selectedEvent !== null} onClose={() => setSelectedEvent(null)} labelledBy="video-title" className="video-modal">
+        {selectedEvent && (
+          <>
             <button className="modal-close" type="button" onClick={() => setSelectedEvent(null)} aria-label="닫기">×</button>
             <div className="modal-heading">
               <span className={`event-type ${selectedEvent.kind}`}>{kindLabel[selectedEvent.kind]}</span>
@@ -3298,15 +3389,13 @@ export default function Home() {
               </button>
             )}
             <button className="modal-confirm" type="button" onClick={() => setSelectedEvent(null)}>확인했어요</button>
-          </section>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
 
-      {brainHealthOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setBrainHealthOpen(false)}>
-          <section className="brain-health-modal" role="dialog" aria-modal="true" aria-labelledby="brain-health-title" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="modal-close" type="button" onClick={() => setBrainHealthOpen(false)} aria-label="닫기">×</button>
-            <span className="section-kicker">뇌 건강 정보</span>
+      <Modal open={brainHealthOpen} onClose={() => setBrainHealthOpen(false)} labelledBy="brain-health-title" className="brain-health-modal">
+        <button className="modal-close" type="button" onClick={() => setBrainHealthOpen(false)} aria-label="닫기">×</button>
+        <span className="section-kicker">뇌 건강 정보</span>
             <h2 id="brain-health-title">한 번의 실수보다 반복되는 변화가 중요해요</h2>
             <p>익숙한 업무가 평소보다 오래 걸리거나 확인 행동이 반복되는 데에는 피로, 수면 부족, 스트레스, 신체 컨디션 등 여러 이유가 있을 수 있어요. 메모리 가드는 원인을 진단하지 않고, 본인의 평소 흐름과 달라진 장면을 정리해 드립니다.</p>
             <div className="brain-health-guide">
@@ -3319,19 +3408,9 @@ export default function Home() {
               <a href="tel:1899-9988">치매상담콜센터 연결</a>
             </div>
             <small>이 정보와 앱의 기록은 의료 진단을 대신하지 않습니다.</small>
-          </section>
-        </div>
-      )}
+      </Modal>
 
-      {bookingOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setBookingOpen(false)}>
-          <section
-            className="booking-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="booking-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+      <Modal open={bookingOpen} onClose={() => setBookingOpen(false)} labelledBy="booking-title" className="booking-modal">
             <button className="modal-close" type="button" onClick={() => setBookingOpen(false)} aria-label="닫기">×</button>
             <span className="section-kicker">아까 하던 업무</span>
             <h2 id="booking-title">예약 입력을 마무리할까요?</h2>
@@ -3355,18 +3434,9 @@ export default function Home() {
               </label>
               <button type="submit">예약 입력 완료</button>
             </form>
-          </section>
-        </div>
-      )}
+      </Modal>
 
-      {showConsentModal && (
-        <div className="modal-backdrop" role="presentation">
-          <section
-            className="consent-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="consent-title"
-          >
+      <Modal open={showConsentModal} onClose={() => {}} disableDismiss labelledBy="consent-title" className="consent-modal">
             <span className="section-kicker">카메라를 켜기 전에 알려드려요</span>
             <h2 id="consent-title">이 카메라는 두 가지 목적으로 쓰일 수 있어요</h2>
             <ul className="consent-list">
@@ -3404,23 +3474,9 @@ export default function Home() {
                 동의하고 카메라 켜기
               </button>
             </div>
-          </section>
-        </div>
-      )}
+      </Modal>
 
-      {myDataOpen && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={() => setMyDataOpen(false)}
-        >
-          <section
-            className="my-data-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="my-data-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+      <Modal open={myDataOpen} onClose={() => setMyDataOpen(false)} labelledBy="my-data-title" className="my-data-modal">
             <button
               className="modal-close"
               type="button"
@@ -3511,13 +3567,9 @@ export default function Home() {
                 내 데이터 전체 삭제
               </button>
             </div>
-          </section>
-        </div>
-      )}
+      </Modal>
 
-      {syntheticLibraryOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSyntheticLibraryOpen(false)}>
-          <section className="synthetic-library-modal" role="dialog" aria-modal="true" aria-labelledby="synthetic-library-title" onMouseDown={(event) => event.stopPropagation()}>
+      <Modal open={syntheticLibraryOpen} onClose={() => setSyntheticLibraryOpen(false)} labelledBy="synthetic-library-title" className="synthetic-library-modal">
             <button className="modal-close" type="button" onClick={() => setSyntheticLibraryOpen(false)} aria-label="닫기">×</button>
             <header className="synthetic-library-header">
               <div>
@@ -3575,13 +3627,9 @@ export default function Home() {
               <span>가상 데이터는 실제 케어 리포트와 분리되며 이 기기에만 저장됩니다.</span>
               <button type="button" onClick={() => setSyntheticLibraryOpen(false)}>닫기</button>
             </footer>
-          </section>
-        </div>
-      )}
+      </Modal>
 
-      {zoneSetupOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setZoneSetupOpen(false)}>
-          <section className="zone-setup-modal" role="dialog" aria-modal="true" aria-labelledby="zone-setup-title" onMouseDown={(event) => event.stopPropagation()}>
+      <Modal open={zoneSetupOpen} onClose={() => setZoneSetupOpen(false)} labelledBy="zone-setup-title" className="zone-setup-modal">
             <button className="modal-close" type="button" onClick={() => setZoneSetupOpen(false)} aria-label="닫기">×</button>
             <span className="section-kicker">{occupationTemplate.icon} {occupationTemplate.label} 관찰 맥락</span>
             <h2 id="zone-setup-title">카메라 화면에 매장 구역을 표시해 주세요</h2>
@@ -3607,9 +3655,7 @@ export default function Home() {
               <span>{mappedZoneCount}개 구역 설정됨 · 정밀 거리 대신 화면상 위치를 사용해요.</span>
               <button type="button" onClick={() => setZoneSetupOpen(false)}>설정 완료</button>
             </div>
-          </section>
-        </div>
-      )}
+      </Modal>
 
       {replaySessionId && (
         <SessionReplayPanel
@@ -3644,11 +3690,14 @@ export default function Home() {
         />
       )}
 
-      {toast && (
-        <div className="toast" role="status">
-          <span aria-hidden="true">✓</span> {toast}
-        </div>
-      )}
+      <Toaster
+        position="bottom-center"
+        icons={{ success: <span aria-hidden="true">✓</span> }}
+        toastOptions={{
+          unstyled: true,
+          classNames: { toast: "toast", icon: "toast-icon" },
+        }}
+      />
     </main>
   );
 }
