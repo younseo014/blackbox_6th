@@ -27,7 +27,7 @@ Drizzle support.
   마감·세이브포인트 등 실제 사용자 조작에서 쌓인 기록으로 계산됩니다. 기록이
   부족하면 가짜 숫자 대신 빈 상태 안내를 보여줍니다.
 - 카메라 세션의 손 좌표에서 "동작 변동성/매끄러움" 참고 지표를 계산합니다
-  (`app/motion-analysis.ts`). 5FPS 샘플링 특성상 실제 임상적 손 떨림(4~12Hz)은
+  (`app/motion-analysis.ts`). `MOTION_SAMPLE_RATE`(10FPS) 샘플링 특성상 실제 임상적 손 떨림(4~12Hz)은
   측정할 수 없어 검증되지 않은 참고용임을 UI에 명시합니다.
 - `app/motion-detection.ts`: 스켈레톤 좌표 궤적 자체에서 마감 반복
   확인(`double_check`)·미세 지연(`micro_delay`)·안전 알림(`safety_alert`)

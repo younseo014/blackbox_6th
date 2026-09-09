@@ -122,11 +122,7 @@ export async function listRecentLogs(days = 28): Promise<DailyLog[]> {
 }
 
 export async function deleteAllCareLogs(): Promise<void> {
-  const database = await openCareDatabase();
-  const transaction = database.transaction(LOG_STORE, "readwrite");
-  transaction.objectStore(LOG_STORE).clear();
-  await transactionDone(transaction);
-  database.close();
+  await requestResult(indexedDB.deleteDatabase(DB_NAME));
 }
 
 // --- Consent -----------------------------------------------------------
@@ -177,23 +173,5 @@ export function setConsent(observationConsent: boolean): ConsentState {
 export function clearConsent(): void {
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(CONSENT_KEY);
-  }
-}
-
-export async function estimateStorageUsage(): Promise<{
-  usageBytes: number;
-  quotaBytes: number;
-} | null> {
-  if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
-    return null;
-  }
-  try {
-    const estimate = await navigator.storage.estimate();
-    return {
-      usageBytes: estimate.usage ?? 0,
-      quotaBytes: estimate.quota ?? 0,
-    };
-  } catch {
-    return null;
   }
 }

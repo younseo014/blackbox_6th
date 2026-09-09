@@ -1,16 +1,20 @@
 import type { NormalizedLandmarkLike } from "./motion-analysis";
 
-const CORE_LANDMARKS = [11, 12, 23, 24] as const;
+const CORE_LANDMARKS = [11, 12] as const;
 // Head and face landmarks are intentionally excluded from target identity.
 // Tracking is based on torso, arm, and leg continuity only.
 const BODY_LANDMARKS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28] as const;
-const MAX_CENTER_STEP = 0.72;
-const MAX_SCALE_LOG_CHANGE = 0.75;
-// Shoulder width can change sharply when the user turns their upper body
-// during a head-direction test. Keep it as supporting evidence, not a hard
-// identity break by itself.
-const MAX_SHAPE_DISTANCE = 0.85;
-const MAX_CONTINUITY_SCORE = 0.68;
+const MAX_CENTER_STEP = 0.55;
+const MAX_SCALE_LOG_CHANGE = 0.65;
+// Shape (shoulder/hip/leg ratios) is the only real identity signal this
+// single 2D camera has - position and scale alone can't tell the locked
+// person apart from a similarly-sized stranger who steps into roughly the
+// same spot. Weighted and gated harder than before for that reason (a body
+// that appears in the general area with a clearly different build must not
+// be picked up as a continuity match).
+const MAX_SHAPE_DISTANCE = 0.5;
+const MAX_CONTINUITY_SCORE = 0.4;
+const REACQUIRE_AFTER_MS = 650;
 
 type TargetDescriptor = {
   centerX: number;
@@ -81,8 +85,16 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
   const leftHip = landmarks[23];
   const rightHip = landmarks[24];
   const shoulderCenter = visibilityWeightedCenter(leftShoulder, rightShoulder);
-  const hipCenter = visibilityWeightedCenter(leftHip, rightHip);
-  const torsoLength = imageDistance(shoulderCenter, hipCenter);
+  const shoulderWidth = pairIsVisible(leftShoulder, rightShoulder, 0.15)
+    ? imageDistance(leftShoulder, rightShoulder)
+    : 0;
+  const hipsVisible = pairIsVisible(leftHip, rightHip);
+  const hipCenter = hipsVisible
+    ? visibilityWeightedCenter(leftHip, rightHip)
+    : { x: shoulderCenter.x, y: shoulderCenter.y + shoulderWidth / 0.6, z: shoulderCenter.z };
+  const torsoLength = hipsVisible
+    ? imageDistance(shoulderCenter, hipCenter)
+    : shoulderWidth / 0.6;
   if (torsoLength < 0.045) return null;
 
   const xs = visiblePoints.map((point) => point.x);
@@ -94,10 +106,7 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
   // Torso scale stays comparable when legs or arms move outside the frame.
   const height = Math.max(0.12, torsoLength * 2.8, Math.min(torsoLength * 3.6, maxY - minY));
   const width = Math.max(0.08, maxX - minX);
-  const shoulderWidth = pairIsVisible(leftShoulder, rightShoulder)
-    ? imageDistance(leftShoulder, rightShoulder)
-    : Number.NaN;
-  const hipWidth = pairIsVisible(leftHip, rightHip)
+  const hipWidth = hipsVisible
     ? imageDistance(leftHip, rightHip)
     : Number.NaN;
   const leftLeg = pairIsVisible(landmarks[25], landmarks[27])
@@ -160,7 +169,7 @@ function continuityScore(lock: PoseTargetLock, candidate: TargetDescriptor): num
   ) {
     return Number.POSITIVE_INFINITY;
   }
-  return centerStep * 0.58 + scaleChange * 0.24 + currentShapeDistance * 0.18;
+  return centerStep * 0.4 + scaleChange * 0.2 + currentShapeDistance * 0.4;
 }
 
 /**
@@ -206,6 +215,21 @@ export function selectLockedPose<T extends NormalizedLandmarkLike>(
     .sort((a, b) => a.score - b.score);
   const selected = matches[0];
   if (!selected) {
+    const reacquired = timestamp - currentLock.lastSeenAt >= REACQUIRE_AFTER_MS
+      ? described.sort((a, b) => acquisitionScore(b.descriptor) - acquisitionScore(a.descriptor))[0]
+      : null;
+    if (reacquired) {
+      return {
+        landmarks: reacquired.landmarks,
+        lock: {
+          acquiredAt: timestamp,
+          lastSeenAt: timestamp,
+          initial: reacquired.descriptor,
+          latest: reacquired.descriptor,
+        },
+        state: "acquired",
+      };
+    }
     return { landmarks: null, lock: currentLock, state: "missing" };
   }
 

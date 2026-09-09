@@ -1,6 +1,8 @@
+import { mergeCameraFrameStreams } from "./multi-camera";
+
 export const BODY_LANDMARK_COUNT = 22;
 export const HAND_LANDMARK_COUNT = 21;
-export const MOTION_SAMPLE_RATE = 5;
+export const MOTION_SAMPLE_RATE = 10;
 
 // time, body/full-body flags, head yaw/pitch/roll,
 // left/right hand flags and confidence, 22 body points × 4, 42 hand points × 3.
@@ -72,6 +74,10 @@ export type MotionSessionRecord = {
   mirroredPreview: boolean;
   source: "local_camera";
   faceLandmarksStored: false;
+  globalSessionId?: string;
+  cameraId?: string;
+  cameraSlot?: 1 | 2;
+  timelineOriginMs?: number;
 };
 
 export type MotionChunkRecord = {
@@ -123,7 +129,11 @@ export function openMotionDatabase() {
   });
 }
 
-export async function createMotionSession(id: string, startedAt: number) {
+export async function createMotionSession(
+  id: string,
+  startedAt: number,
+  multiCamera?: Pick<MotionSessionRecord, "globalSessionId" | "cameraId" | "cameraSlot" | "timelineOriginMs">,
+) {
   const database = await openMotionDatabase();
   const transaction = database.transaction(SESSION_STORE, "readwrite");
   const record: MotionSessionRecord = {
@@ -142,6 +152,7 @@ export async function createMotionSession(id: string, startedAt: number) {
     mirroredPreview: true,
     source: "local_camera",
     faceLandmarksStored: false,
+    ...multiCamera,
   };
   transaction.objectStore(SESSION_STORE).put(record);
   await transactionDone(transaction);
@@ -234,6 +245,22 @@ export async function getSessionFrames(sessionId: string): Promise<number[][]> {
     }
   }
   return frames;
+}
+
+export async function getGlobalSessionCameraFrames(globalSessionId: string) {
+  const sessions = (await listMotionSessions()).filter(
+    (session) => session.globalSessionId === globalSessionId,
+  );
+  return Promise.all(sessions.map(async (session) => ({
+    sessionId: session.id,
+    cameraSlot: session.cameraSlot ?? 1,
+    frames: await getSessionFrames(session.id),
+  })));
+}
+
+/** Reads every camera in one capture session as a single-owner timeline. */
+export async function getGlobalSessionFrames(globalSessionId: string): Promise<number[][]> {
+  return mergeCameraFrameStreams(await getGlobalSessionCameraFrames(globalSessionId));
 }
 
 export type ParsedMotionFrame = {
@@ -430,15 +457,7 @@ export function extractHandPointTrajectory(
 
 /** Deletes every locally stored motion session and chunk. Irreversible. */
 export async function deleteAllMotionSessions(): Promise<void> {
-  const database = await openMotionDatabase();
-  const transaction = database.transaction(
-    [SESSION_STORE, CHUNK_STORE],
-    "readwrite",
-  );
-  transaction.objectStore(SESSION_STORE).clear();
-  transaction.objectStore(CHUNK_STORE).clear();
-  await transactionDone(transaction);
-  database.close();
+  await requestResult(indexedDB.deleteDatabase(DB_NAME));
 }
 
 export async function downloadMotionSession(session: MotionSessionRecord) {

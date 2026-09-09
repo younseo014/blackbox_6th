@@ -1356,6 +1356,25 @@ select:focus-visible {
   backdrop-filter: blur(7px);
 }
 
+/* The actual popup lives in Dialog.Viewport, not Dialog.Backdrop - without
+   this rule it renders in normal document flow (wherever the portal mounts)
+   instead of centered over the screen, so it ends up off-screen below the
+   rest of the page. */
+.modal-viewport {
+  position: fixed;
+  z-index: 51;
+  inset: 0;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.modal-viewport > * {
+  pointer-events: auto;
+}
+
 .video-modal,
 .booking-modal {
   position: relative;
@@ -2965,6 +2984,131 @@ select:focus-visible {
   }
 }
 
+.camera-panel.quick-motion-hidden {
+  display: none;
+}
+
+.quick-motion-camera-modal {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+  padding: 28px;
+  overflow: auto;
+  border: 1px solid #e1e1e1;
+  border-radius: 25px;
+  background: #fff;
+  box-shadow: 0 35px 90px rgba(0, 0, 0, 0.28);
+}
+
+.quick-motion-camera-heading {
+  padding-right: 44px;
+}
+
+.quick-motion-camera-heading h2 {
+  margin: 8px 0 5px;
+  font-size: 24px;
+}
+
+.quick-motion-camera-heading p {
+  margin: 0 0 18px;
+  color: #76838a;
+  font-size: 13px;
+}
+
+.quick-motion-camera-preview {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  background: #15191b;
+}
+
+.quick-motion-camera-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.quick-motion-camera-waiting {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 7px;
+  padding: 24px;
+  color: #fff;
+  text-align: center;
+}
+
+.quick-motion-camera-waiting span {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+}
+
+.quick-motion-camera-status {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+
+.quick-motion-camera-status .recording {
+  color: #ffaaa2;
+}
+
+.quick-motion-modal-progress {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 14px;
+  color: #667780;
+  font-size: 13px;
+}
+
+.quick-motion-camera-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.quick-motion-camera-actions button {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #d5dfe4;
+  border-radius: 12px;
+  font-weight: 800;
+}
+
+.quick-motion-camera-actions button:first-child {
+  flex: 1;
+}
+
+.quick-motion-camera-actions > button:last-child {
+  background: #fff;
+  color: #526772;
+}
+
+.quick-motion-camera-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (max-width: 720px) {
+  .quick-motion-camera-modal {
+    padding: 20px;
+  }
+
+  .quick-motion-camera-actions {
+    flex-direction: column;
+  }
+}
+
 /* Synthetic baseline and occupation performance lab */
 .synthetic-baseline-chip {
   flex: 0 0 auto;
@@ -4162,6 +4306,148 @@ select:focus-visible {
 .replay-source-chip.synthetic {
   background: #f3ead8;
   color: #7b6237;
+}
+
+.replay-camera-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.replay-camera-tabs button {
+  min-width: 132px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid #dce5df;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--muted);
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.replay-camera-tabs button small {
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.replay-camera-tabs button[aria-selected="true"] {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green-dark);
+}
+
+.replay-camera-tabs button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.continuity-check {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border: 1px solid #dce5df;
+  border-radius: 16px;
+  background: #f8faf7;
+}
+
+.continuity-check.pass { border-color: #bdd9c5; }
+.continuity-check.warning { border-color: #e8c58f; background: #fffaf1; }
+
+.continuity-check-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.continuity-check-heading span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.continuity-check-heading h3 {
+  margin: 4px 0 0;
+  color: var(--green-dark);
+  font-size: 15px;
+}
+
+.continuity-check-heading > strong {
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: #e8f3e9;
+  color: #316446;
+  font-size: 10px;
+}
+
+.continuity-check.waiting .continuity-check-heading > strong,
+.continuity-check.warning .continuity-check-heading > strong {
+  background: #fff0d8;
+  color: #93601f;
+}
+
+.continuity-check > p,
+.continuity-note {
+  display: block;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.continuity-facts {
+  margin: 13px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.continuity-facts div {
+  display: flex;
+  gap: 6px;
+  font-size: 10.5px;
+}
+
+.continuity-facts dt { color: var(--muted); }
+.continuity-facts dd { margin: 0; color: var(--green-dark); font-weight: 850; }
+
+.continuity-tracks {
+  margin-top: 13px;
+  display: grid;
+  gap: 7px;
+}
+
+.continuity-track-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  align-items: center;
+  gap: 9px;
+}
+
+.continuity-track-row > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.continuity-track-row > div {
+  position: relative;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e3e9e4;
+}
+
+.continuity-track-row i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: inherit;
+  background: var(--green);
 }
 
 .replay-main-grid {
@@ -6850,6 +7136,182 @@ body {
   background: #111111;
 }
 
+/* Two-camera setup keeps the tracked source visually primary while the
+   auxiliary feed remains available for framing checks. */
+.app-shell .camera-source-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.app-shell .camera-source-controls label {
+  min-width: min(100%, 220px);
+  display: grid;
+  gap: 5px;
+  color: #66747c;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.app-shell .camera-source-controls select {
+  min-height: 42px;
+  padding: 0 34px 0 11px;
+  border: 1px solid #ccd9e1;
+  border-radius: 10px;
+  appearance: auto;
+  background: #ffffff;
+  color: #26343d;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.app-shell .camera-source-controls select:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.app-shell .camera-connect-action {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.app-shell .camera-connect-action p {
+  margin: 0;
+  color: #71808a;
+  font-size: 13px;
+}
+
+.app-shell .camera-feed-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.app-shell .camera-feed-layout .camera-frame {
+  margin-top: 0;
+}
+
+.app-shell .camera-feed-layout:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 16px;
+  background: #07110f;
+}
+
+.app-shell .camera-feed-layout:fullscreen .camera-frame,
+.app-shell .camera-feed-layout:fullscreen .secondary-camera-frame {
+  width: 100%;
+  height: auto;
+  max-height: calc(100vh - 48px);
+  margin: 0;
+  aspect-ratio: 16 / 9;
+}
+
+.app-shell .camera-main-view,
+.app-shell .camera-secondary-view {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background: #111111;
+}
+
+.app-shell .camera-main-view video,
+.app-shell .camera-secondary-view video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.app-shell .camera-main-view .pose-overlay {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.app-shell .camera-source-label {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  left: 10px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgba(17, 17, 17, 0.72);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.app-shell .secondary-camera-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #111111;
+}
+
+.app-shell .secondary-camera-heading {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgba(17, 17, 17, 0.72);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.app-shell .secondary-camera-heading small {
+  color: rgba(255, 255, 255, 0.66);
+  font-size: inherit;
+  font-weight: 650;
+}
+
+.app-shell .secondary-pose-state {
+  position: absolute;
+  z-index: 3;
+  right: 10px;
+  bottom: 10px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgba(17, 17, 17, 0.72);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+@media (max-width: 640px) {
+  .app-shell .camera-source-controls label {
+    width: 100%;
+  }
+
+  .app-shell .camera-feed-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell .camera-connect-action {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .factory-reset-card {
   margin-top: 14px;
   padding: 20px 22px;
@@ -7143,4 +7605,222 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible {
   outline-color: rgba(131, 170, 202, 0.55);
+}
+
+/* Developer-only, short custom-motion verification flow. */
+.quick-motion-lab {
+  margin: 18px 0;
+  padding: 22px 24px;
+  border: 1px solid #c9d9df;
+  border-radius: 23px;
+  background: #fffdf9;
+}
+
+.quick-motion-heading,
+.quick-motion-step,
+.quick-motion-controls,
+.quick-motion-label-form > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.quick-motion-heading > div:first-child,
+.quick-motion-test-copy,
+.quick-motion-label-form {
+  display: grid;
+  gap: 5px;
+}
+
+.quick-motion-heading span,
+.quick-motion-step span,
+.quick-motion-test-copy span,
+.quick-motion-label-form > label,
+.learned-motion-result > span {
+  color: #6287a3;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.quick-motion-heading h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.quick-motion-heading p,
+.learned-motion-list p,
+.quick-motion-step small,
+.quick-motion-test-copy small,
+.quick-motion-label-form small,
+.quick-motion-controls span,
+.learned-motion-result small {
+  margin: 0;
+  color: #76838a;
+  font-size: 12px;
+}
+
+.quick-motion-actions,
+.sample-count-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.quick-motion-actions button,
+.sample-count-toggle button,
+.quick-motion-cancel,
+.capture-stop-button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #d5dfe4;
+  border-radius: 12px;
+  background: #fff;
+  color: #526772;
+  font-weight: 800;
+}
+
+.quick-motion-actions button:disabled,
+.quick-motion-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.learned-motion-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.learned-motion-list > span {
+  display: flex;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid #d8e5ed;
+  border-radius: 10px;
+  background: #edf4f8;
+  color: #6d808b;
+  font-size: 12px;
+}
+
+.learned-motion-list > span strong {
+  color: #405968;
+}
+
+.quick-motion-workspace {
+  position: relative;
+  margin-top: 16px;
+  padding: 18px;
+  border-top: 1px solid #e2e8eb;
+  background: #f7fafb;
+}
+
+.sample-count-toggle button.active {
+  border-color: #83aaca;
+  background: #83aaca;
+  color: #fff;
+}
+
+.quick-motion-progress {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(8px, 1fr));
+  gap: 5px;
+  max-width: 440px;
+  margin-top: 14px;
+}
+
+.quick-motion-progress i {
+  height: 6px;
+  border-radius: 3px;
+  background: #dce5e9;
+}
+
+.quick-motion-progress i.done,
+.quick-motion-progress i.current {
+  background: #83aaca;
+}
+
+.quick-motion-progress i.current {
+  opacity: 0.55;
+}
+
+.quick-motion-controls {
+  justify-content: flex-start;
+  margin-top: 16px;
+}
+
+.capture-stop-button {
+  border-color: #bf7373;
+  background: #fff7f5;
+  color: #9b4f4f;
+}
+
+.quick-motion-label-form input {
+  width: min(360px, 100%);
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #ccd9df;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+}
+
+.quick-motion-label-form > div {
+  justify-content: flex-start;
+}
+
+.learned-motion-result {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 20px;
+  margin-top: 16px;
+  padding: 16px;
+  border-left: 4px solid #83aaca;
+  background: #fff;
+}
+
+.learned-motion-result > strong {
+  grid-column: 1;
+  font-size: 24px;
+}
+
+.learned-motion-result > b {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  color: #587b95;
+}
+
+.learned-motion-result.status-uncertain {
+  border-left-color: #c4a35c;
+}
+
+.learned-motion-result.status-insufficient {
+  border-left-color: #a3abb0;
+}
+
+.quick-motion-cancel {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  min-height: 34px;
+}
+
+@media (max-width: 720px) {
+  .quick-motion-heading,
+  .quick-motion-step,
+  .quick-motion-label-form > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .quick-motion-actions button,
+  .quick-motion-label-form input {
+    width: 100%;
+  }
+
+  .quick-motion-cancel {
+    position: static;
+    margin-top: 16px;
+  }
 }

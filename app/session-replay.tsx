@@ -9,6 +9,7 @@ import {
 } from "./motion-analysis";
 import {
   MOTION_SAMPLE_RATE,
+  getGlobalSessionCameraFrames,
   getSessionFrames,
   parseSessionFrame,
   type ParsedMotionFrame,
@@ -18,6 +19,13 @@ import type { DemoDetectionExplanation } from "./demo-personas";
 import { detectMotionEvents, type DetectedMotionEvent } from "./motion-detection";
 import type { ObservationMode } from "./observation-engine";
 import { saveAnalysisFeedback } from "./observation-store";
+import {
+  analyzeCameraContinuity,
+  cameraPresenceSegments,
+  type CameraContinuityReport,
+  type CameraFrameStream,
+  type CameraSlot,
+} from "./multi-camera";
 
 const ROLLING_WINDOW = 10;
 const CANVAS_WIDTH = 640;
@@ -68,7 +76,7 @@ function humanizeDetection(event: DetectedMotionEvent) {
 }
 
 export type SessionReplaySource =
-  | { kind: "recorded"; sessionId: string }
+  | { kind: "recorded"; sessionId: string; globalSessionId?: string }
   | { kind: "synthetic"; frames: number[][] };
 
 export function SessionReplayPanel({
@@ -78,6 +86,7 @@ export function SessionReplayPanel({
   feedbackEventId,
   observationMode = "analysis",
   baselineVersion = 1,
+  showMultiCameraDiagnostics = false,
   onClose,
 }: {
   source: SessionReplaySource;
@@ -86,6 +95,7 @@ export function SessionReplayPanel({
   feedbackEventId?: string;
   observationMode?: ObservationMode;
   baselineVersion?: number;
+  showMultiCameraDiagnostics?: boolean;
   onClose: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -94,20 +104,51 @@ export function SessionReplayPanel({
     source.kind === "synthetic" ? source.frames.map(parseSessionFrame) : null,
   );
   const [loadFailed, setLoadFailed] = useState(false);
+  const [cameraStreams, setCameraStreams] = useState<CameraFrameStream[]>([]);
+  const [selectedCameraSlot, setSelectedCameraSlot] = useState<CameraSlot>(1);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [feedback, setFeedback] = useState<"accurate" | "false_positive" | null>(null);
   const [showFeedbackReasons, setShowFeedbackReasons] = useState(false);
+  const recordedSessionId = source.kind === "recorded" ? source.sessionId : null;
+  const recordedGlobalSessionId = source.kind === "recorded" ? source.globalSessionId : undefined;
 
   useEffect(() => {
-    if (source.kind !== "recorded") return;
+    if (!recordedSessionId) return;
     let cancelled = false;
-    getSessionFrames(source.sessionId)
-      .then((rawFrames) => { if (!cancelled) setFrames(rawFrames.map(parseSessionFrame)); })
+    (recordedGlobalSessionId
+      ? getGlobalSessionCameraFrames(recordedGlobalSessionId)
+      : getSessionFrames(recordedSessionId).then((frames) => [{ cameraSlot: 1 as const, frames }]))
+      .then((streams) => {
+        if (cancelled) return;
+        const sorted = streams.sort((a, b) => a.cameraSlot - b.cameraSlot);
+        const first = sorted[0];
+        setCameraStreams(sorted);
+        setSelectedCameraSlot(first?.cameraSlot ?? 1);
+        setFrames((first?.frames ?? []).map(parseSessionFrame));
+      })
       .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
-  }, [source]);
+  }, [recordedGlobalSessionId, recordedSessionId]);
+
+  const continuityReport = useMemo<CameraContinuityReport | null>(
+    () => cameraStreams.length > 1 ? analyzeCameraContinuity(cameraStreams) : null,
+    [cameraStreams],
+  );
+  const continuityDurationMs = useMemo(() => Math.max(
+    1,
+    ...cameraStreams.flatMap((stream) => stream.frames.map((frame) => frame[0] ?? 0)),
+  ), [cameraStreams]);
+
+  function selectCamera(slot: CameraSlot) {
+    const stream = cameraStreams.find((item) => item.cameraSlot === slot);
+    if (!stream) return;
+    setSelectedCameraSlot(slot);
+    setFrames(stream.frames.map(parseSessionFrame));
+    setFrameIndex(0);
+    setPlaying(false);
+  }
 
   const primaryPoints = useMemo(() => (frames ? frames.map(primaryHandPoint) : []), [frames]);
   const variabilitySeries = useMemo(() => primaryPoints.map((_, index) => {
@@ -237,6 +278,61 @@ export function SessionReplayPanel({
           <p>{source.kind === "synthetic" ? "설명을 위해 만든 예시 동작입니다." : "영상·음성 없이 저장된 몸과 손 좌표를 재생합니다."}</p>
         </header>
 
+        {cameraStreams.length > 1 && (
+          <div className="replay-camera-tabs" role="tablist" aria-label="재생할 카메라">
+            {cameraStreams.map((stream) => (
+              <button
+                key={stream.cameraSlot}
+                type="button"
+                role="tab"
+                aria-selected={selectedCameraSlot === stream.cameraSlot}
+                onClick={() => selectCamera(stream.cameraSlot)}
+              >
+                카메라 {stream.cameraSlot}
+                <small>{stream.frames.filter((frame) => frame[1] === 1).length}프레임 인식</small>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {showMultiCameraDiagnostics && continuityReport && (
+          <section className={`continuity-check ${continuityReport.status}`} aria-labelledby="continuity-check-title">
+            <div className="continuity-check-heading">
+              <div>
+                <span>개발자 검증</span>
+                <h3 id="continuity-check-title">
+                  {continuityReport.status === "pass" ? "카메라 전환이 연속적으로 연결됐어요" : continuityReport.status === "warning" ? "카메라 사이 관측 공백을 확인해 주세요" : "카메라 사이로 이동해 인계를 테스트해 주세요"}
+                </h3>
+              </div>
+              <strong>{continuityReport.status === "pass" ? "통과" : continuityReport.status === "warning" ? "주의" : "대기"}</strong>
+            </div>
+            <p>각 카메라 리플레이는 섞지 않고 분리했습니다. 실제 동작 분석에만 공통 시간축·방향·이동 보정을 적용합니다.</p>
+            <dl className="continuity-facts">
+              <div><dt>공통 시간축</dt><dd>동일 기준</dd></div>
+              <div><dt>카메라 인계</dt><dd>{continuityReport.handoffs.length}회</dd></div>
+              <div><dt>동시 관측</dt><dd>{continuityReport.overlapSamples}프레임</dd></div>
+              <div><dt>가장 긴 관측 공백</dt><dd>{(continuityReport.longestBlindGapMs / 1000).toFixed(1)}초</dd></div>
+              <div><dt>시점 방향 보정</dt><dd>{continuityReport.facingCorrectedFrames}프레임</dd></div>
+            </dl>
+            <div className="continuity-tracks" aria-label="카메라별 작업자 인식 시간축">
+              {cameraStreams.map((stream) => (
+                <div className="continuity-track-row" key={stream.cameraSlot}>
+                  <span>카메라 {stream.cameraSlot}</span>
+                  <div>
+                    {cameraPresenceSegments(stream.frames).map((segment, index) => (
+                      <i key={index} style={{
+                        left: `${segment.startMs / continuityDurationMs * 100}%`,
+                        width: `${Math.max(1, (segment.endMs - segment.startMs + 100) / continuityDurationMs * 100)}%`,
+                      }} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <small className="continuity-note">두 줄이 겹치면 동시 관측, 한 줄에서 다른 줄로 이어지면 카메라 인계입니다. 8초가 넘는 공백은 주의로 표시합니다.</small>
+          </section>
+        )}
+
         {loadFailed && <p className="replay-empty">이 세션의 좌표 기록을 불러오지 못했어요.</p>}
         {!loadFailed && frames && frames.length === 0 && <p className="replay-empty">이 세션에는 저장된 좌표 프레임이 없어요.</p>}
         {!loadFailed && frames === null && <p className="replay-empty">좌표 기록을 불러오는 중...</p>}
@@ -246,8 +342,9 @@ export function SessionReplayPanel({
             <div className="replay-main-grid">
               <div className="replay-visual-column">
                 <div className="replay-canvas-wrap">
-                  <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} aria-label="리플레이 스켈레톤" />
+                  <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} aria-label={`카메라 ${selectedCameraSlot} 리플레이 스켈레톤`} />
                   <div className="replay-flags">
+                    {cameraStreams.length > 1 && <span className="on">카메라 {selectedCameraSlot}</span>}
                     <span className={currentFrame.bodyDetected ? "on" : ""}>몸 인식</span>
                     <span className={currentFrame.fullBodyVisible ? "on" : ""}>전신</span>
                     <span className={currentFrame.leftHandDetected || currentFrame.rightHandDetected ? "on" : ""}>손 관절</span>

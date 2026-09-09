@@ -83,30 +83,34 @@ function frameSignature(rawFrame: number[]): { frame: SignatureFrame; center: { 
   if (!parsed.bodyDetected) return null;
   const leftShoulder = point(parsed.body, 0);
   const rightShoulder = point(parsed.body, 1);
-  const leftHip = point(parsed.body, 12);
-  const rightHip = point(parsed.body, 13);
-  if ([leftShoulder, rightShoulder, leftHip, rightHip].some((item) => item.visibility < 0.25)) {
+  if ([leftShoulder, rightShoulder].some((item) => item.visibility < 0.15)) {
     return null;
   }
   const shoulderCenter = midpoint(leftShoulder, rightShoulder);
-  const hipCenter = midpoint(leftHip, rightHip);
-  const torso = Math.max(0.08, Math.hypot(shoulderCenter.x - hipCenter.x, shoulderCenter.y - hipCenter.y));
+  const shoulderSpan = Math.hypot(
+    leftShoulder.x - rightShoulder.x,
+    leftShoulder.y - rightShoulder.y,
+  );
+  const upperBodyScale = Math.max(0.08, shoulderSpan / 0.64);
   const values: number[] = [];
   const mask: number[] = [];
   BODY_JOINTS.forEach((index) => {
     const joint = point(parsed.body, index);
     const visible = joint.visibility >= 0.25 ? 1 : 0;
-    values.push((joint.x - hipCenter.x) / torso, (joint.y - hipCenter.y) / torso);
+    values.push(
+      (joint.x - shoulderCenter.x) / upperBodyScale,
+      (joint.y - shoulderCenter.y) / upperBodyScale,
+    );
     mask.push(visible, visible);
   });
   values.push(parsed.head?.yaw ?? 0, parsed.head?.pitch ?? 0, parsed.head?.roll ?? 0);
   mask.push(parsed.head ? 0.35 : 0, parsed.head ? 0.35 : 0, parsed.head ? 0.25 : 0);
-  const leftHand = appendHandShape(values, mask, parsed.leftHand, torso);
-  const rightHand = appendHandShape(values, mask, parsed.rightHand, torso);
+  const leftHand = appendHandShape(values, mask, parsed.leftHand, upperBodyScale);
+  const rightHand = appendHandShape(values, mask, parsed.rightHand, upperBodyScale);
   return {
     frame: { values, mask },
-    center: hipCenter,
-    scale: torso,
+    center: shoulderCenter,
+    scale: upperBodyScale,
     hasHand: leftHand || rightHand,
   };
 }
@@ -130,10 +134,9 @@ function resample(frames: SignatureFrame[], count: number): SignatureFrame[] {
 
 /**
  * Builds a translation-, scale-, and duration-normalized skeleton signature.
- * The body is expressed relative to the hips and torso length, while the hip
- * travel from the first frame is retained so walking/zone-transition motions
- * do not collapse into a stationary pose. Finger tips are compared relative
- * to their wrist and simply masked out when the real camera did not see them.
+ * The body is expressed relative to the shoulders so a cropped upper body is
+ * enough for short developer tests. Lower-body joints still contribute when
+ * visible, and missing joints are masked out instead of rejecting the frame.
  */
 export function buildMotionSignature(rawFrames: number[][]): MotionSignature | null {
   const usable = rawFrames.map(frameSignature).filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -166,7 +169,49 @@ function frameDistance(a: SignatureFrame, b: SignatureFrame) {
 }
 
 function signatureDistance(a: MotionSignature, b: MotionSignature) {
-  return a.frames.reduce((sum, frame, index) => sum + frameDistance(frame, b.frames[index]), 0) / a.frames.length;
+  let previous = Array(b.frames.length + 1).fill(Number.POSITIVE_INFINITY);
+  previous[0] = 0;
+  for (const observed of a.frames) {
+    const current = Array(b.frames.length + 1).fill(Number.POSITIVE_INFINITY);
+    for (let index = 1; index <= b.frames.length; index += 1) {
+      current[index] = frameDistance(observed, b.frames[index - 1]) + Math.min(
+        previous[index],
+        current[index - 1],
+        previous[index - 1],
+      );
+    }
+    previous = current;
+  }
+  return previous[b.frames.length] / Math.max(a.frames.length, b.frames.length);
+}
+
+function mirrorSignature(signature: MotionSignature): MotionSignature {
+  return {
+    ...signature,
+    frames: signature.frames.map((frame) => ({
+      mask: frame.mask,
+      values: frame.values.map((value, index) => {
+        const bodyX = index < 24 && index % 2 === 0;
+        const headYaw = index === 24;
+        const handX = index >= 27 && index < 47 && (index - 27) % 2 === 0;
+        const travelX = index === 47;
+        return bodyX || headYaw || handX || travelX ? -value : value;
+      }),
+    })),
+  };
+}
+
+function viewInvariantDistance(observed: MotionSignature, reference: MotionSignature) {
+  return Math.min(
+    signatureDistance(observed, reference),
+    signatureDistance(mirrorSignature(observed), reference),
+  );
+}
+
+export function compareSkeletonMotions(observedFrames: number[][], referenceFrames: number[][]) {
+  const observed = buildMotionSignature(observedFrames);
+  const reference = buildMotionSignature(referenceFrames);
+  return observed && reference ? viewInvariantDistance(observed, reference) : null;
 }
 
 function confidenceFor(distance: number, runnerUpDistance: number) {
@@ -190,7 +235,7 @@ export function classifySkeletonMotion(
       confidence: 0,
       candidates: [],
       primitiveLabels: [],
-      evidence: ["전신 좌표가 충분하지 않아 동작을 확정하지 못했어요."],
+      evidence: ["상반신 좌표가 충분하지 않아 동작을 확정하지 못했어요."],
     };
   }
 
@@ -199,7 +244,7 @@ export function classifySkeletonMotion(
       const reference = buildMotionSignature(clip.frames);
       return {
         clip,
-        distance: reference ? signatureDistance(observed, reference) : 10,
+        distance: reference ? viewInvariantDistance(observed, reference) : 10,
       };
     })
     .sort((a, b) => a.distance - b.distance);
@@ -224,10 +269,11 @@ export function classifySkeletonMotion(
     candidates,
     primitiveLabels: best.clip.primitiveLabels,
     evidence: [
-      `${observed.usableFrames}개 전신 좌표 프레임의 관절 궤적을 비교했어요.`,
+      `${observed.usableFrames}개 스켈레톤 좌표 프레임의 관절 궤적을 비교했어요.`,
+      "카메라의 정면·후면 차이를 줄이기 위해 좌우 반전된 스켈레톤도 함께 비교했어요.",
       observed.handCoverage >= 0.5
         ? "손가락 좌표가 충분해 손 모양 변화도 함께 비교했어요."
-        : "손가락 인식이 적어 전신·팔 궤적을 중심으로 비교했어요.",
+        : "손가락 인식이 적어 상반신·팔 궤적을 중심으로 비교했어요.",
       matched
         ? `${best.clip.taskLabel} 예시와 움직임의 방향·범위·순서가 가장 가까웠어요.`
         : "후보 간 차이가 작아 동작을 확정하지 않고 가능성이 높은 순서로 보여드려요.",

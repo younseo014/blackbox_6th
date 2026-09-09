@@ -38,17 +38,17 @@ export type DemoMotionType =
 
 type Point2D = { x: number; y: number };
 
-// Real camera capture samples at MOTION_SAMPLE_RATE (5Hz, pose-store.ts) -
-// these synthetic clips deliberately do NOT reuse that rate. At 5Hz, a
-// genuinely fast (short, human-paced) motion only gets 2-3 frames to work
-// with, which plays back as a jarring teleport rather than a fast, fluid
-// movement - the sampling was too coarse to represent real speed, not the
-// clip itself being too slow. Sampling finer here (still deterministic, no
-// Math.random()/Date.now()) makes a short, fast motion look like fast
+// Real camera capture samples at MOTION_SAMPLE_RATE (pose-store.ts) - these
+// synthetic clips deliberately do NOT reuse that rate. At that rate, a
+// genuinely fast (short, human-paced) motion only gets a couple of frames to
+// work with, which plays back as a jarring teleport rather than a fast,
+// fluid movement - the sampling was too coarse to represent real speed, not
+// the clip itself being too slow. Sampling finer here (still deterministic,
+// no Math.random()/Date.now()) makes a short, fast motion look like fast
 // motion instead of a slideshow. This has no effect on detection accuracy:
 // motion-detection.ts measures speed/jerk per unit of real TIME (seconds),
-// not per sample, so it reads identically whether a clip is sampled at 5Hz
-// or here.
+// not per sample, so it reads identically whether a clip is sampled at
+// MOTION_SAMPLE_RATE or here.
 export const DEMO_SAMPLE_RATE = 20; // Hz; occupation previews are interpolated to 30fps separately
 const FRAME_INTERVAL_MS = 1000 / DEMO_SAMPLE_RATE;
 

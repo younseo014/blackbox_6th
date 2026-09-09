@@ -20,6 +20,7 @@ import {
   downloadMotionSession,
   extractHandPointTrajectory,
   finishMotionSession,
+  getGlobalSessionFrames,
   getSessionFrames,
   getLatestBodyProportionProfile,
   listMotionSessions,
@@ -46,7 +47,6 @@ import {
 import {
   deleteAllCareLogs,
   clearConsent,
-  estimateStorageUsage,
   getConsent,
   listRecentLogs,
   recordDoubleCheck,
@@ -99,7 +99,17 @@ import {
   type SyntheticTrainingClip,
 } from "./synthetic-training";
 import { classifySkeletonMotion } from "./motion-classifier";
+import {
+  classifyLearnedMotion,
+  clearLearnedMotionActions,
+  loadLearnedMotionActions,
+  saveLearnedMotionActions,
+  type LearnedMotionAction,
+  type LearnedMotionResult,
+  type LearnedMotionSample,
+} from "./custom-motion-training";
 import { sliceTargetMotion } from "./motion-segmentation";
+import { createGlobalCaptureSession, type GlobalCaptureSession } from "./multi-camera";
 import {
   matchHandToPose,
   selectLockedPose,
@@ -112,6 +122,7 @@ type CameraStatus = "idle" | "requesting" | "connected" | "error";
 type PoseStatus = "idle" | "loading" | "searching" | "holding" | "partial" | "full" | "error";
 type ClosingStatus = "idle" | "checking" | "attention" | "done";
 type EventKind = "payment" | "door" | "safety" | "booking";
+type QuickMotionMode = "idle" | "training" | "labeling" | "testing";
 
 type TimelineEvent = {
   id: string;
@@ -138,6 +149,14 @@ type HandState = {
   leftScore: number;
   rightScore: number;
 };
+
+function cameraDisplayName(camera: MediaDeviceInfo, index: number) {
+  return camera.label || `카메라 ${index + 1}`;
+}
+
+function isBuiltInCamera(camera: MediaDeviceInfo) {
+  return /built-in|facetime|integrated|internal|내장/i.test(camera.label);
+}
 
 type ClosingChecklistItem = {
   id: string;
@@ -481,6 +500,7 @@ export default function Home() {
     "카메라를 연결하면 오늘의 장면을 확인할 수 있어요.",
   );
   const [poseStatus, setPoseStatus] = useState<PoseStatus>("idle");
+  const [secondaryPoseStatus, setSecondaryPoseStatus] = useState<PoseStatus>("idle");
   const [poseStats, setPoseStats] = useState<PoseStats>({
     frames: 0,
     detectedFrames: 0,
@@ -497,6 +517,10 @@ export default function Home() {
   const [headDirectionLabel, setHeadDirectionLabel] = useState("대기");
   const [targetLocked, setTargetLocked] = useState(false);
   const [cameraFullscreen, setCameraFullscreen] = useState(false);
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
+  const [primaryCameraId, setPrimaryCameraId] = useState("");
+  const [secondaryCameraId, setSecondaryCameraId] = useState("");
+  const [secondaryCameraConnected, setSecondaryCameraConnected] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionCount, setSessionCount] = useState(0);
   const [latestSession, setLatestSession] = useState<MotionSessionRecord | null>(null);
@@ -540,6 +564,15 @@ export default function Home() {
   const [newScheduleTime, setNewScheduleTime] = useState("08:30");
   const [newScheduleLabel, setNewScheduleLabel] = useState("");
   const [brainHealthOpen, setBrainHealthOpen] = useState(false);
+  const [learnedMotions, setLearnedMotions] = useState<LearnedMotionAction[]>([]);
+  const [quickMotionMode, setQuickMotionMode] = useState<QuickMotionMode>("idle");
+  const [trainingTargetCount, setTrainingTargetCount] = useState<5 | 10>(5);
+  const [draftMotionSamples, setDraftMotionSamples] = useState<LearnedMotionSample[]>([]);
+  const [customMotionLabel, setCustomMotionLabel] = useState("");
+  const [motionCapture, setMotionCapture] = useState<Omit<LearnedMotionSample, "endMs"> | null>(null);
+  const [learnedMotionResult, setLearnedMotionResult] = useState<LearnedMotionResult | null>(null);
+  const [quickMotionBusy, setQuickMotionBusy] = useState(false);
+  const [quickMotionCameraOpen, setQuickMotionCameraOpen] = useState(false);
 
   // --- Consent, real observation metrics, and data controls ---
   // Lazy initializer instead of an effect: getConsent() is SSR-safe (it
@@ -552,15 +585,13 @@ export default function Home() {
     "normal",
   );
   const [myDataOpen, setMyDataOpen] = useState(false);
-  const [storageUsage, setStorageUsage] = useState<{
-    usageBytes: number;
-    quotaBytes: number;
-  } | null>(null);
+  const [storedMotionBytes, setStoredMotionBytes] = useState(0);
   const [motionSignal, setMotionSignal] = useState<{
     variability: number | null;
     smoothness: number | null;
   } | null>(null);
   const pendingCameraStartRef = useRef(false);
+  const quickMotionCameraRequestedRef = useRef(false);
   const closingDoneTodayRef = useRef(false);
   const checklistReminderRecordedRef = useRef(false);
   const checklistTaskStartedRef = useRef(false);
@@ -595,11 +626,18 @@ export default function Home() {
   }
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const quickMotionVideoRef = useRef<HTMLVideoElement>(null);
+  const secondaryVideoRef = useRef<HTMLVideoElement>(null);
+  const secondaryOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const processingVideoRef = useRef<HTMLVideoElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const cameraFrameRef = useRef<HTMLDivElement>(null);
+  const cameraFeedLayoutRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const secondaryStreamRef = useRef<MediaStream | null>(null);
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  const secondaryPoseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  const secondaryHandLandmarkerRef = useRef<HandLandmarker | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const poseAnimationRef = useRef<number | null>(null);
   const trackingActiveRef = useRef(false);
@@ -609,6 +647,7 @@ export default function Home() {
   const lastPoseRef = useRef<NormalizedLandmark[] | null>(null);
   const lastPoseSeenAtRef = useRef(0);
   const poseTargetLockRef = useRef<PoseTargetLock | null>(null);
+  const secondaryPoseTargetLockRef = useRef<PoseTargetLock | null>(null);
   const lastHandsRef = useRef<HandState>({
     left: null,
     right: null,
@@ -621,10 +660,22 @@ export default function Home() {
   const chunkFullBodyFramesRef = useRef(0);
   const chunkHandFramesRef = useRef(0);
   const poseSessionRef = useRef<MotionSessionRecord | null>(null);
+  const secondaryPoseSessionRef = useRef<MotionSessionRecord | null>(null);
+  const globalCaptureSessionRef = useRef<GlobalCaptureSession | null>(null);
   const poseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const secondaryPoseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sessionPerformanceStartRef = useRef(0);
   const lastStatsUpdateRef = useRef(0);
   const lastVideoTimeRef = useRef(-1);
+  const lastSecondaryVideoTimeRef = useRef(-1);
+  const lastSecondaryDetectionTimeRef = useRef(0);
+  const lastSecondaryHandDetectionTimeRef = useRef(0);
+  const lastSecondarySampleTimeRef = useRef(0);
+  const secondaryHandsRef = useRef<HandState>({ left: null, right: null, leftScore: 0, rightScore: 0 });
+  const secondaryPoseBufferRef = useRef<number[]>([]);
+  const secondaryChunkDetectedFramesRef = useRef(0);
+  const secondaryChunkFullBodyFramesRef = useRef(0);
+  const secondaryChunkHandFramesRef = useRef(0);
   const poseStatusRef = useRef<PoseStatus>("idle");
   const poseStatsRef = useRef<PoseStats>({
     frames: 0,
@@ -668,15 +719,29 @@ export default function Home() {
         processingVideoRef.current.srcObject = streamRef.current;
         processingVideoRef.current.play().catch(() => undefined);
       }
+      if (quickMotionVideoRef.current) {
+        quickMotionVideoRef.current.srcObject = streamRef.current;
+        quickMotionVideoRef.current.play().catch(() => undefined);
+      }
+      if (secondaryVideoRef.current) {
+        secondaryVideoRef.current.srcObject = secondaryStreamRef.current;
+        secondaryVideoRef.current.play().catch(() => undefined);
+      }
     }
-  }, [cameraStatus, view]);
+  }, [cameraStatus, view, quickMotionCameraOpen]);
+
+  useEffect(() => {
+    queueMicrotask(() => setLearnedMotions(loadLearnedMotionActions()));
+  }, []);
 
   useEffect(() => {
     listMotionSessions()
       .then((sessions) => {
-        setSessionCount(sessions.length);
-        setLatestSession(sessions[0] ?? null);
-        setRecentSessions(sessions.slice(0, 5));
+        const captureSessions = sessions.filter((session) => session.cameraSlot !== 2);
+        setSessionCount(captureSessions.length);
+        setLatestSession(captureSessions[0] ?? null);
+        setRecentSessions(captureSessions.slice(0, 5));
+        setStoredMotionBytes(sessions.reduce((sum, session) => sum + session.storageBytes, 0));
       })
       .catch(() => undefined);
   }, []);
@@ -718,14 +783,6 @@ export default function Home() {
         if (today) setTodayBusyLevel(today.busyLevel);
       })
       .catch(() => undefined);
-    estimateStorageUsage().then((usage) => {
-      setStorageUsage(usage);
-      if (usage && usage.quotaBytes > 0 && usage.usageBytes / usage.quotaBytes > 0.9) {
-        toast.success(
-          "브라우저 저장 공간이 거의 찼어요. 내 데이터 관리에서 오래된 기록을 정리해 주세요.",
-        );
-      }
-    });
   }, []);
 
   useEffect(() => {
@@ -781,7 +838,9 @@ export default function Home() {
       return;
     }
     let cancelled = false;
-    getSessionFrames(latestSession.id)
+    (latestSession.globalSessionId
+      ? getGlobalSessionFrames(latestSession.globalSessionId)
+      : getSessionFrames(latestSession.id))
       .then((frames) => {
         if (cancelled) return;
         const rightHandTrajectory = extractHandPointTrajectory(
@@ -813,7 +872,7 @@ export default function Home() {
 
   useEffect(() => {
     const syncFullscreenState = () => {
-      setCameraFullscreen(document.fullscreenElement === cameraFrameRef.current);
+      setCameraFullscreen(document.fullscreenElement === cameraFeedLayoutRef.current);
     };
     document.addEventListener("fullscreenchange", syncFullscreenState);
     return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
@@ -827,6 +886,8 @@ export default function Home() {
       }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       poseLandmarkerRef.current?.close();
+      secondaryPoseLandmarkerRef.current?.close();
+      secondaryHandLandmarkerRef.current?.close();
       handLandmarkerRef.current?.close();
     };
   }, []);
@@ -843,6 +904,7 @@ export default function Home() {
   }, []);
 
   function requestCameraStart() {
+    quickMotionCameraRequestedRef.current = false;
     if (!consent.decided) {
       pendingCameraStartRef.current = true;
       setShowConsentModal(true);
@@ -852,14 +914,14 @@ export default function Home() {
   }
 
   async function toggleCameraFullscreen() {
-    const cameraFrame = cameraFrameRef.current;
-    if (!cameraFrame) return;
+    const cameraFeedLayout = cameraFeedLayoutRef.current;
+    if (!cameraFeedLayout) return;
 
     try {
-      if (document.fullscreenElement === cameraFrame) {
+      if (document.fullscreenElement === cameraFeedLayout) {
         await document.exitFullscreen();
       } else {
-        await cameraFrame.requestFullscreen();
+        await cameraFeedLayout.requestFullscreen();
       }
     } catch {
       toast.success("이 브라우저에서는 카메라 전체화면을 열 수 없어요");
@@ -871,12 +933,16 @@ export default function Home() {
     setConsentState(next);
     setShowConsentModal(false);
     if (observationConsent && pendingCameraStartRef.current) {
-      void startCamera();
+      void startCamera(undefined, undefined, quickMotionCameraRequestedRef.current);
     }
     pendingCameraStartRef.current = false;
   }
 
-  async function startCamera() {
+  async function startCamera(
+    requestedPrimaryCameraId?: string,
+    requestedSecondaryCameraId?: string,
+    primaryOnly = false,
+  ) {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraStatus("error");
       setCameraMessage("이 브라우저에서는 카메라를 사용할 수 없어요.");
@@ -887,17 +953,72 @@ export default function Home() {
     setCameraMessage("카메라 연결을 기다리고 있어요…");
 
     try {
+      // Ask once before enumerating devices so Safari exposes useful camera names.
+      const permissionStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+      permissionStream.getTracks().forEach((track) => track.stop());
+
+      const cameras = (await navigator.mediaDevices.enumerateDevices())
+        .filter((device) => device.kind === "videoinput");
+      if (cameras.length === 0) throw new Error("No video input devices found");
+
+      const savedPrimary = requestedPrimaryCameraId ?? primaryCameraId;
+      const savedSecondary = requestedSecondaryCameraId ?? secondaryCameraId;
+      const preferredPrimary = primaryOnly
+        ? cameras.find(isBuiltInCamera) ?? cameras[0]
+        : cameras.find((camera) => camera.deviceId === savedPrimary)
+          ?? cameras.find(isBuiltInCamera)
+          ?? cameras[0];
+      const preferredSecondary = primaryOnly
+        ? undefined
+        : cameras.find(
+            (camera) => camera.deviceId === savedSecondary && camera.deviceId !== preferredPrimary.deviceId,
+          ) ?? cameras.find((camera) => camera.deviceId !== preferredPrimary.deviceId);
+
+      setAvailableCameras(cameras);
+      setPrimaryCameraId(preferredPrimary.deviceId);
+      setSecondaryCameraId(preferredSecondary?.deviceId ?? "");
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: "user",
+          deviceId: { exact: preferredPrimary.deviceId },
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
         audio: false,
       });
 
+      let secondaryStream: MediaStream | null = null;
+      if (preferredSecondary) {
+        try {
+          secondaryStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: preferredSecondary.deviceId },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          });
+        } catch {
+          // Keep the primary camera usable if a second camera is busy or unavailable.
+          secondaryStream = null;
+        }
+      }
+
+      if (primaryOnly && !quickMotionCameraRequestedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        secondaryStream?.getTracks().forEach((track) => track.stop());
+        setCameraStatus("idle");
+        return;
+      }
+
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      secondaryStreamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = stream;
+      secondaryStreamRef.current = secondaryStream;
+      setSecondaryCameraConnected(Boolean(secondaryStream));
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
@@ -906,9 +1027,24 @@ export default function Home() {
         processingVideoRef.current.srcObject = stream;
         await processingVideoRef.current.play();
       }
+      if (quickMotionVideoRef.current) {
+        quickMotionVideoRef.current.srcObject = stream;
+        await quickMotionVideoRef.current.play();
+      }
+      if (secondaryVideoRef.current && secondaryStream) {
+        secondaryVideoRef.current.srcObject = secondaryStream;
+        await secondaryVideoRef.current.play();
+      }
       setCameraStatus("connected");
-      setCameraMessage("몸·머리 방향·손가락 추적 모델을 준비하고 있어요…");
-      await startPoseTracking();
+      setCameraMessage(
+        secondaryStream
+          ? "두 카메라를 연결했어요. 한 명의 작업 흐름으로 통합해요."
+          : "카메라 1은 연결됐어요. 카메라 2는 다른 앱에서 사용 중인지 확인해 주세요.",
+      );
+      await startPoseTracking(
+        preferredPrimary.deviceId,
+        secondaryStream ? preferredSecondary?.deviceId : undefined,
+      );
     } catch {
       setCameraStatus("error");
       setCameraMessage(
@@ -924,7 +1060,7 @@ export default function Home() {
   }
 
   async function ensureMotionLandmarkers() {
-    if (poseLandmarkerRef.current && handLandmarkerRef.current) return;
+    if (poseLandmarkerRef.current && handLandmarkerRef.current && (!secondaryStreamRef.current || secondaryPoseLandmarkerRef.current)) return;
     updatePoseStatus("loading");
     const {
       FilesetResolver,
@@ -933,7 +1069,7 @@ export default function Home() {
     } = await import("@mediapipe/tasks-vision");
     const vision = await FilesetResolver.forVisionTasks("/mediapipe-wasm");
     const poseBaseOptions = {
-      modelAssetPath: "/models/pose_landmarker_lite.task",
+      modelAssetPath: "/models/pose_landmarker_heavy.task",
     };
     const handBaseOptions = {
       modelAssetPath: "/models/hand_landmarker.task",
@@ -965,6 +1101,20 @@ export default function Home() {
             minTrackingConfidence: 0.35,
             outputSegmentationMasks: false,
           },
+        );
+      }
+    }
+
+    if (secondaryStreamRef.current && !secondaryPoseLandmarkerRef.current) {
+      try {
+        secondaryPoseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
+          vision,
+          { baseOptions: { ...poseBaseOptions, delegate: "GPU" }, runningMode: "VIDEO", numPoses: 3, minPoseDetectionConfidence: 0.4, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.35, outputSegmentationMasks: false },
+        );
+      } catch {
+        secondaryPoseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
+          vision,
+          { baseOptions: poseBaseOptions, runningMode: "VIDEO", numPoses: 3, minPoseDetectionConfidence: 0.4, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.35, outputSegmentationMasks: false },
         );
       }
     }
@@ -1002,24 +1152,46 @@ export default function Home() {
         }
       }
     }
+
+    if (secondaryStreamRef.current && !secondaryHandLandmarkerRef.current) {
+      try {
+        secondaryHandLandmarkerRef.current = await HandLandmarkerClass.createFromOptions(
+          vision,
+          { baseOptions: { ...handBaseOptions, delegate: "GPU" }, runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.45, minHandPresenceConfidence: 0.45, minTrackingConfidence: 0.45 },
+        );
+      } catch {
+        try {
+          secondaryHandLandmarkerRef.current = await HandLandmarkerClass.createFromOptions(
+            vision,
+            { baseOptions: handBaseOptions, runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.45, minHandPresenceConfidence: 0.45, minTrackingConfidence: 0.45 },
+          );
+        } catch {
+          secondaryHandLandmarkerRef.current = null;
+        }
+      }
+    }
   }
 
-  function flushPoseFrames() {
-    if (poseBufferRef.current.length === 0 || !poseSessionRef.current) {
-      return poseWriteQueueRef.current;
-    }
-    const values = new Float32Array(poseBufferRef.current);
-    const detectedFrames = chunkDetectedFramesRef.current;
-    const fullBodyFrames = chunkFullBodyFramesRef.current;
-    const handDetectedFrames = chunkHandFramesRef.current;
-    const sessionId = poseSessionRef.current.id;
-    poseBufferRef.current = [];
-    chunkDetectedFramesRef.current = 0;
-    chunkFullBodyFramesRef.current = 0;
-    chunkHandFramesRef.current = 0;
+  function flushPoseFrames(cameraSlot: 1 | 2 = 1) {
+    const bufferRef = cameraSlot === 1 ? poseBufferRef : secondaryPoseBufferRef;
+    const sessionRef = cameraSlot === 1 ? poseSessionRef : secondaryPoseSessionRef;
+    const writeQueueRef = cameraSlot === 1 ? poseWriteQueueRef : secondaryPoseWriteQueueRef;
+    const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : secondaryChunkDetectedFramesRef;
+    const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : secondaryChunkFullBodyFramesRef;
+    const handRef = cameraSlot === 1 ? chunkHandFramesRef : secondaryChunkHandFramesRef;
+    if (bufferRef.current.length === 0 || !sessionRef.current) return writeQueueRef.current;
+    const values = new Float32Array(bufferRef.current);
+    const detectedFrames = detectedRef.current;
+    const fullBodyFrames = fullBodyRef.current;
+    const handDetectedFrames = handRef.current;
+    const sessionId = sessionRef.current.id;
+    bufferRef.current = [];
+    detectedRef.current = 0;
+    fullBodyRef.current = 0;
+    handRef.current = 0;
 
-    poseWriteQueueRef.current = poseWriteQueueRef.current.then(async () => {
-      const session = poseSessionRef.current;
+    writeQueueRef.current = writeQueueRef.current.then(async () => {
+      const session = sessionRef.current;
       if (!session || session.id !== sessionId) return;
       const updated = await appendMotionChunk(
         session,
@@ -1029,10 +1201,11 @@ export default function Home() {
         fullBodyFrames,
         handDetectedFrames,
       );
-      poseSessionRef.current = updated;
-      setLatestSession(updated);
+      setStoredMotionBytes((current) => current + updated.storageBytes - session.storageBytes);
+      sessionRef.current = updated;
+      if (cameraSlot === 1) setLatestSession(updated);
     });
-    return poseWriteQueueRef.current;
+    return writeQueueRef.current;
   }
 
   function recordPoseFrame(
@@ -1041,8 +1214,13 @@ export default function Home() {
     fullBody: boolean,
     head: HeadDirection | null,
     hands: HandState,
+    cameraSlot: 1 | 2 = 1,
   ) {
-    const buffer = poseBufferRef.current;
+    const bufferRef = cameraSlot === 1 ? poseBufferRef : secondaryPoseBufferRef;
+    const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : secondaryChunkDetectedFramesRef;
+    const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : secondaryChunkFullBodyFramesRef;
+    const handRef = cameraSlot === 1 ? chunkHandFramesRef : secondaryChunkHandFramesRef;
+    const buffer = bufferRef.current;
     buffer.push(timestamp - sessionPerformanceStartRef.current);
     buffer.push(landmarks ? 1 : 0);
     buffer.push(fullBody ? 1 : 0);
@@ -1059,7 +1237,7 @@ export default function Home() {
         const point = landmarks[index];
         buffer.push(point.x, point.y, point.z, point.visibility);
       }
-      chunkDetectedFramesRef.current += 1;
+      detectedRef.current += 1;
     } else {
       for (let index = 0; index < BODY_LANDMARK_COUNT * 4; index += 1) {
         buffer.push(Number.NaN);
@@ -1081,8 +1259,8 @@ export default function Home() {
     pushHand(hands.left);
     pushHand(hands.right);
 
-    if (fullBody) chunkFullBodyFramesRef.current += 1;
-    if (hands.left || hands.right) chunkHandFramesRef.current += 1;
+    if (fullBody) fullBodyRef.current += 1;
+    if (hands.left || hands.right) handRef.current += 1;
 
     const previous = poseStatsRef.current;
     const next: PoseStats = {
@@ -1101,7 +1279,7 @@ export default function Home() {
     }
 
     if (buffer.length / MOTION_FRAME_STRIDE >= CHUNK_FRAME_COUNT) {
-      void flushPoseFrames();
+      void flushPoseFrames(cameraSlot);
     }
   }
 
@@ -1141,7 +1319,7 @@ export default function Home() {
           timestamp - lastPoseSeenAtRef.current <= POSE_DISPLAY_HOLD_MS,
         );
         const displayLandmarks = liveLandmarks ?? (holdingLastPose ? lastPoseRef.current : null);
-        const nextTargetLocked = Boolean(targetSelection.lock);
+        const nextTargetLocked = Boolean(liveLandmarks);
         setTargetLocked((current) => current === nextTargetLocked ? current : nextTargetLocked);
         const fullBody = liveLandmarks ? isFullBodyVisible(liveLandmarks) : false;
         const displayFullBody = displayLandmarks ? isFullBodyVisible(displayLandmarks) : false;
@@ -1233,14 +1411,14 @@ export default function Home() {
 
         if (timestamp - lastSampleTimeRef.current >= 1000 / MOTION_SAMPLE_RATE) {
           lastSampleTimeRef.current = timestamp;
-          const recordingHands = liveLandmarks
+          const recordingHands = displayLandmarks
             ? lastHandsRef.current
             : { left: null, right: null, leftScore: 0, rightScore: 0 };
           recordPoseFrame(
             timestamp,
-            liveLandmarks,
-            fullBody,
-            head,
+            displayLandmarks,
+            displayFullBody,
+            displayHead,
             recordingHands,
           );
         }
@@ -1248,26 +1426,101 @@ export default function Home() {
         updatePoseStatus("error");
       }
     }
+    trackSecondaryPose(timestamp);
     poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
   }
 
-  async function startPoseTracking() {
+  function trackSecondaryPose(timestamp: number) {
+    const video = secondaryVideoRef.current;
+    const landmarker = secondaryPoseLandmarkerRef.current;
+    if (!video || !landmarker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.currentTime === lastSecondaryVideoTimeRef.current || timestamp - lastSecondaryDetectionTimeRef.current < 100) return;
+    lastSecondaryVideoTimeRef.current = video.currentTime;
+    lastSecondaryDetectionTimeRef.current = timestamp;
+    try {
+      const result = landmarker.detectForVideo(video, timestamp);
+      const targetSelection = selectLockedPose(
+        result.landmarks,
+        secondaryPoseTargetLockRef.current,
+        timestamp,
+      );
+      secondaryPoseTargetLockRef.current = targetSelection.lock;
+      const landmarks = targetSelection.landmarks;
+      if (landmarks && secondaryHandLandmarkerRef.current && timestamp - lastSecondaryHandDetectionTimeRef.current >= 100) {
+        lastSecondaryHandDetectionTimeRef.current = timestamp;
+        const hands: HandState = { left: null, right: null, leftScore: 0, rightScore: 0 };
+        const handResult = secondaryHandLandmarkerRef.current.detectForVideo(video, timestamp + 1);
+        handResult.landmarks.forEach((hand, index) => {
+          const side = matchHandToPose(hand, landmarks);
+          if (!side) return;
+          const score = handResult.handedness[index]?.[0]?.score ?? 0;
+          if (side === "left") { hands.left = hand; hands.leftScore = score; }
+          else { hands.right = hand; hands.rightScore = score; }
+        });
+        secondaryHandsRef.current = hands;
+      }
+      if (!landmarks) secondaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
+      const fullBody = landmarks ? isFullBodyVisible(landmarks) : false;
+      const head = landmarks ? getHeadDirection(landmarks) : null;
+      const canvas = secondaryOverlayCanvasRef.current;
+      if (canvas) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        }
+        const context = canvas.getContext("2d");
+        context?.clearRect(0, 0, canvas.width, canvas.height);
+        if (landmarks) drawMotionSkeleton(canvas, landmarks, secondaryHandsRef.current.left, secondaryHandsRef.current.right, head, fullBody);
+      }
+      if (timestamp - lastSecondarySampleTimeRef.current >= 1000 / MOTION_SAMPLE_RATE) {
+        lastSecondarySampleTimeRef.current = timestamp;
+        recordPoseFrame(timestamp, landmarks, fullBody, head, secondaryHandsRef.current, 2);
+      }
+      setSecondaryPoseStatus(landmarks ? (fullBody ? "full" : "partial") : "searching");
+    } catch {
+      setSecondaryPoseStatus("error");
+    }
+  }
+
+  async function startPoseTracking(primaryId = primaryCameraId, secondaryId = secondaryCameraId) {
     try {
       await ensureMotionLandmarkers();
       const startedAt = currentEpochTime();
+      const connectedCameras = [
+        { cameraId: primaryId, slot: 1 as const, label: availableCameras.find((camera) => camera.deviceId === primaryId)?.label || "카메라 1" },
+        ...(secondaryStreamRef.current ? [{ cameraId: secondaryId, slot: 2 as const, label: availableCameras.find((camera) => camera.deviceId === secondaryId)?.label || "카메라 2" }] : []),
+      ];
+      globalCaptureSessionRef.current = createGlobalCaptureSession(connectedCameras);
+      const sharedSession = {
+          globalSessionId: globalCaptureSessionRef.current.id,
+          timelineOriginMs: globalCaptureSessionRef.current.timelineOriginMs,
+      };
       const session = await createMotionSession(
         `motion-${crypto.randomUUID()}`,
         startedAt,
+        { ...sharedSession, cameraId: primaryId, cameraSlot: 1 },
       );
       poseSessionRef.current = session;
-      sessionPerformanceStartRef.current = currentMonotonicTime();
+      secondaryPoseSessionRef.current = secondaryStreamRef.current
+        ? await createMotionSession(
+            `motion-${crypto.randomUUID()}`,
+            startedAt,
+            { ...sharedSession, cameraId: secondaryId, cameraSlot: 2 },
+          )
+        : null;
+      sessionPerformanceStartRef.current = globalCaptureSessionRef.current.timelineOriginMs;
       lastDetectionTimeRef.current = 0;
       lastHandDetectionTimeRef.current = 0;
       lastSampleTimeRef.current = 0;
       lastVideoTimeRef.current = -1;
+      lastSecondaryVideoTimeRef.current = -1;
+      lastSecondaryDetectionTimeRef.current = 0;
+      lastSecondaryHandDetectionTimeRef.current = 0;
+      lastSecondarySampleTimeRef.current = 0;
+      secondaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
       lastPoseRef.current = null;
       lastPoseSeenAtRef.current = 0;
       poseTargetLockRef.current = null;
+      secondaryPoseTargetLockRef.current = null;
       lastHandsRef.current = {
         left: null,
         right: null,
@@ -1279,6 +1532,10 @@ export default function Home() {
       chunkDetectedFramesRef.current = 0;
       chunkFullBodyFramesRef.current = 0;
       chunkHandFramesRef.current = 0;
+      secondaryPoseBufferRef.current = [];
+      secondaryChunkDetectedFramesRef.current = 0;
+      secondaryChunkFullBodyFramesRef.current = 0;
+      secondaryChunkHandFramesRef.current = 0;
       const emptyStats: PoseStats = {
         frames: 0,
         detectedFrames: 0,
@@ -1296,10 +1553,13 @@ export default function Home() {
       setHeadDirectionLabel("머리 방향 미확인");
       setSessionCount((count) => count + 1);
       updatePoseStatus("searching");
+      setSecondaryPoseStatus(secondaryStreamRef.current ? "searching" : "idle");
       trackingActiveRef.current = true;
       if (handLandmarkerRef.current) {
-        setCameraMessage("얼굴은 제외하고 몸·머리 방향·손가락 좌표를 기록하고 있어요.");
-        toast.success("몸과 손가락 좌표 상시 기록을 시작했어요");
+        setCameraMessage(secondaryStreamRef.current
+          ? "두 카메라의 몸·손 좌표를 한 명의 공통 시간축에 기록하고 있어요."
+          : "얼굴은 제외하고 몸·머리 방향·손가락 좌표를 기록하고 있어요.");
+        toast.success(secondaryStreamRef.current ? "두 카메라 통합 좌표 기록을 시작했어요" : "몸과 손가락 좌표 상시 기록을 시작했어요");
       } else {
         setCameraMessage("몸·머리 방향 좌표를 기록 중이에요. 손가락 추적은 이 기기에서 준비하지 못했어요.");
         toast.success("몸 스켈레톤 좌표 기록을 시작했어요");
@@ -1318,9 +1578,11 @@ export default function Home() {
   // existing button/timer signals (recordDoubleCheck/recordSafetyAlert
   // elsewhere in this file), not instead of them. Best-effort: a failed
   // analysis shouldn't block ending the camera session.
-  async function recordMotionDetections(sessionId: string) {
+  async function recordMotionDetections(sessionId: string, globalSessionId?: string) {
     try {
-      const rawFrames = await getSessionFrames(sessionId);
+      const rawFrames = globalSessionId
+        ? await getGlobalSessionFrames(globalSessionId)
+        : await getSessionFrames(sessionId);
       const samples = motionSamplesFromRawFrames(rawFrames);
       const detections = detectMotionEvents(samples);
       for (const detection of detections) {
@@ -1337,9 +1599,15 @@ export default function Home() {
     }
   }
 
-  async function recordObservationSession(sessionId: string, recordedAt: number) {
+  async function recordObservationSession(
+    sessionId: string,
+    recordedAt: number,
+    globalSessionId?: string,
+  ) {
     try {
-      const rawFrames = await getSessionFrames(sessionId);
+      const rawFrames = globalSessionId
+        ? await getGlobalSessionFrames(globalSessionId)
+        : await getSessionFrames(sessionId);
       const testTargetTask = observationProfile.activeTestTaskId
         ? getOccupationTemplate(observationProfile.occupation).tasks.find(
             (task) => task.id === observationProfile.activeTestTaskId,
@@ -1399,18 +1667,25 @@ export default function Home() {
       cancelAnimationFrame(poseAnimationRef.current);
       poseAnimationRef.current = null;
     }
-    await flushPoseFrames();
-    await poseWriteQueueRef.current;
+    await Promise.all([flushPoseFrames(1), flushPoseFrames(2)]);
+    await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current]);
     const session = poseSessionRef.current;
+    const secondarySession = secondaryPoseSessionRef.current;
+    const endedAt = currentEpochTime();
+    let secondaryFrameCount = 0;
+    if (secondarySession) {
+      const completedSecondary = await finishMotionSession(secondarySession, endedAt);
+      secondaryFrameCount = completedSecondary.frameCount;
+      secondaryPoseSessionRef.current = null;
+    }
     if (session) {
-      const endedAt = currentEpochTime();
       const completed = await finishMotionSession(session, endedAt);
       setLatestSession(completed);
       setRecentSessions((previous) => [completed, ...previous.filter((s) => s.id !== completed.id)].slice(0, 5));
       poseSessionRef.current = null;
-      if (consent.observationConsent && completed.frameCount >= 20) {
-        void recordMotionDetections(completed.id).then(refreshCareData);
-        void recordObservationSession(completed.id, endedAt);
+      if (consent.observationConsent && completed.frameCount + secondaryFrameCount >= 20) {
+        void recordMotionDetections(completed.id, completed.globalSessionId).then(refreshCareData);
+        void recordObservationSession(completed.id, endedAt, completed.globalSessionId);
       }
       void getLatestBodyProportionProfile().then(async (bodyProportionProfile) => {
         if (!bodyProportionProfile) return;
@@ -1430,17 +1705,23 @@ export default function Home() {
         overlayCanvasRef.current.width,
         overlayCanvasRef.current.height,
       );
+    secondaryOverlayCanvasRef.current?.getContext("2d")?.clearRect(0, 0, secondaryOverlayCanvasRef.current.width, secondaryOverlayCanvasRef.current.height);
     updatePoseStatus("idle");
+    setSecondaryPoseStatus("idle");
   }
 
   async function stopCamera() {
-    if (document.fullscreenElement === cameraFrameRef.current) {
+    if (document.fullscreenElement === cameraFeedLayoutRef.current) {
       await document.exitFullscreen().catch(() => undefined);
     }
     await stopPoseTracking();
     streamRef.current?.getTracks().forEach((track) => track.stop());
+    secondaryStreamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    secondaryStreamRef.current = null;
+    setSecondaryCameraConnected(false);
     if (videoRef.current) videoRef.current.srcObject = null;
+    if (secondaryVideoRef.current) secondaryVideoRef.current.srcObject = null;
     if (processingVideoRef.current) processingVideoRef.current.srcObject = null;
     setCameraStatus("idle");
     poseTargetLockRef.current = null;
@@ -1448,6 +1729,21 @@ export default function Home() {
     setElapsedSeconds(0);
     setCameraMessage("카메라 연결을 멈췄어요.");
     toast.success("좌표 기록을 안전하게 저장하고 카메라를 종료했어요");
+  }
+
+  async function changeCameraSource(kind: "primary" | "secondary", deviceId: string) {
+    const nextPrimary = kind === "primary" ? deviceId : primaryCameraId;
+    let nextSecondary = kind === "secondary" ? deviceId : secondaryCameraId;
+    if (kind === "primary" && deviceId === secondaryCameraId) {
+      nextSecondary = primaryCameraId;
+    }
+    if (!nextPrimary || nextPrimary === nextSecondary) return;
+    setPrimaryCameraId(nextPrimary);
+    setSecondaryCameraId(nextSecondary);
+    if (cameraStatus === "connected") {
+      await stopCamera();
+      await startCamera(nextPrimary, nextSecondary);
+    }
   }
 
   function markTestEvent(preset: (typeof eventPresets)[number]) {
@@ -1748,6 +2044,125 @@ export default function Home() {
     setSelectedEvent(event);
   }
 
+  function openQuickMotionMode(mode: "training" | "testing") {
+    setQuickMotionMode(mode);
+    setDraftMotionSamples([]);
+    setCustomMotionLabel("");
+    setMotionCapture(null);
+    setLearnedMotionResult(null);
+  }
+
+  async function connectQuickMotionCamera() {
+    setQuickMotionCameraOpen(true);
+    quickMotionCameraRequestedRef.current = true;
+    if (!consent.decided) {
+      pendingCameraStartRef.current = true;
+      setShowConsentModal(true);
+      return;
+    }
+    if (cameraStatus === "connected") await stopCamera();
+    await startCamera(undefined, undefined, true);
+  }
+
+  async function closeQuickMotionCamera() {
+    setQuickMotionCameraOpen(false);
+    setMotionCapture(null);
+    quickMotionCameraRequestedRef.current = false;
+    if (cameraStatus === "connected") await stopCamera();
+  }
+
+  function startQuickMotionCapture() {
+    const session = poseSessionRef.current;
+    if (cameraStatus !== "connected" || !session) {
+      toast.success("카메라 연결이 끝난 뒤 다시 눌러 주세요");
+      return;
+    }
+    setLearnedMotionResult(null);
+    setMotionCapture({
+      sessionId: session.id,
+      globalSessionId: session.globalSessionId,
+      startMs: currentMonotonicTime() - sessionPerformanceStartRef.current,
+    });
+  }
+
+  async function framesForMotionSample(sample: LearnedMotionSample) {
+    const frames = sample.globalSessionId
+      ? await getGlobalSessionFrames(sample.globalSessionId)
+      : await getSessionFrames(sample.sessionId);
+    return frames.filter((frame) => frame[0] >= sample.startMs && frame[0] <= sample.endMs);
+  }
+
+  async function finishQuickMotionCapture() {
+    if (!motionCapture || quickMotionBusy) return;
+    const endMs = currentMonotonicTime() - sessionPerformanceStartRef.current;
+    if (endMs - motionCapture.startMs < 700) {
+      toast.success("동작을 1초 정도 보여준 뒤 완료해 주세요");
+      return;
+    }
+
+    const sample: LearnedMotionSample = { ...motionCapture, endMs };
+    setQuickMotionBusy(true);
+    try {
+      await Promise.all([flushPoseFrames(1), flushPoseFrames(2)]);
+      await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current]);
+      setMotionCapture(null);
+
+      if (quickMotionMode === "training") {
+        const frames = await framesForMotionSample(sample);
+        if (frames.length < 6) {
+          toast.success("상반신 좌표가 부족해요. 얼굴·어깨·양팔이 보이도록 다시 해주세요");
+          return;
+        }
+        const nextSamples = [...draftMotionSamples, sample];
+        setDraftMotionSamples(nextSamples);
+        if (nextSamples.length >= trainingTargetCount) {
+          setQuickMotionMode("labeling");
+          await closeQuickMotionCamera();
+        }
+        return;
+      }
+
+      const observedFrames = await framesForMotionSample(sample);
+      const loadedActions = await Promise.all(learnedMotions.map(async (action) => ({
+        id: action.id,
+        label: action.label,
+        samples: (await Promise.all(action.samples.map(framesForMotionSample))).filter(
+          (frames) => frames.length >= 6,
+        ),
+      })));
+      setLearnedMotionResult(classifyLearnedMotion(observedFrames, loadedActions));
+    } catch {
+      toast.success("좌표를 불러오지 못했어요. 다시 시도해 주세요");
+    } finally {
+      setQuickMotionBusy(false);
+    }
+  }
+
+  function saveQuickMotion() {
+    const label = customMotionLabel.trim();
+    if (!label) {
+      toast.success("동작 이름을 입력해 주세요");
+      return;
+    }
+    if (learnedMotions.some((motion) => motion.label.toLocaleLowerCase() === label.toLocaleLowerCase())) {
+      toast.success("이미 같은 이름의 동작이 있어요");
+      return;
+    }
+    const next = [...learnedMotions, {
+      id: `learned-${crypto.randomUUID()}`,
+      label,
+      samples: draftMotionSamples,
+      createdAt: nowMs(),
+    }];
+    saveLearnedMotionActions(next);
+    setLearnedMotions(next);
+    setQuickMotionMode("idle");
+    setDraftMotionSamples([]);
+    setCustomMotionLabel("");
+    setQuickMotionCameraOpen(false);
+    toast.success(`${label} 동작을 ${trainingTargetCount}회 표본으로 저장했어요`);
+  }
+
   async function deleteAllMyData() {
     // Stop any in-flight recording first and let its queued writes settle.
     // Deleting while a session is still actively being written would let
@@ -1764,6 +2179,7 @@ export default function Home() {
     clearConsent();
     window.localStorage.removeItem(CHECKLIST_STORAGE_KEY);
     window.localStorage.removeItem(USER_INSTALL_STORAGE_KEY);
+    clearLearnedMotionActions();
     setConsentState(getConsent());
     setUserInstall(null);
     setSessionCount(0);
@@ -1772,6 +2188,8 @@ export default function Home() {
     setReplaySessionId(null);
     setMotionSignal(null);
     setCareLogs([]);
+    setLearnedMotions([]);
+    setQuickMotionMode("idle");
     setClosingTime(DEFAULT_CLOSING_TIME);
     setClosingChecklist(DEFAULT_CLOSING_CHECKLIST);
     const resetProfile = {
@@ -1790,8 +2208,7 @@ export default function Home() {
       storageBytes: 0,
       startedAt: null,
     });
-    const usage = await estimateStorageUsage();
-    setStorageUsage(usage);
+    setStoredMotionBytes(0);
     toast.success("저장된 동작 좌표와 케어 기록을 모두 삭제했어요");
   }
 
@@ -2264,11 +2681,135 @@ export default function Home() {
               </div>
               <div>
                 <strong>테스트 중인 기능이에요</strong>
-                <p>컴퓨터 카메라 1대를 고정한 뒤, 전신이 보이는 거리에서 예시 동작을 따라 해보세요.</p>
+                <p>내장 카메라와 웹캠을 고정한 뒤, 두 화면 사이로 이동하며 예시 동작을 따라 해보세요.</p>
               </div>
               <button type="button" onClick={() => setView("settings")}>
                 설정으로 <span aria-hidden="true">›</span>
               </button>
+            </section>
+
+            <section className="quick-motion-lab" aria-labelledby="quick-motion-title">
+              <div className="quick-motion-heading">
+                <div>
+                  <span>직접 학습 판별</span>
+                  <h2 id="quick-motion-title">짧게 가르치고 바로 맞혀보기</h2>
+                  <p>같은 동작을 여러 번 저장한 뒤, 새 촬영을 어떤 동작으로 판단하는지 확인합니다.</p>
+                </div>
+                <div className="quick-motion-actions">
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => openQuickMotionMode("training")}
+                  >
+                    새 동작 추가
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openQuickMotionMode("testing")}
+                    disabled={learnedMotions.length === 0}
+                  >
+                    판별 테스트
+                  </button>
+                </div>
+              </div>
+
+              <div className="learned-motion-list" aria-label="학습된 동작">
+                {learnedMotions.length > 0 ? learnedMotions.map((motion) => (
+                  <span key={motion.id}><strong>{motion.label}</strong>{motion.samples.length}회</span>
+                )) : <p>아직 직접 학습한 동작이 없습니다.</p>}
+              </div>
+
+              {quickMotionMode !== "idle" && (
+                <div className="quick-motion-workspace">
+                  {quickMotionMode === "training" && (
+                    <>
+                      <div className="quick-motion-step">
+                        <div>
+                          <span>학습 촬영</span>
+                          <strong>{draftMotionSamples.length + 1}번째 동작을 보여주세요</strong>
+                          <small>매번 같은 동작을 처음부터 끝까지 한 번씩 수행합니다.</small>
+                        </div>
+                        <div className="sample-count-toggle" role="group" aria-label="반복 횟수">
+                          {[5, 10].map((count) => (
+                            <button
+                              key={count}
+                              type="button"
+                              className={trainingTargetCount === count ? "active" : ""}
+                              onClick={() => setTrainingTargetCount(count as 5 | 10)}
+                              disabled={draftMotionSamples.length > 0}
+                            >
+                              {count}회
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="quick-motion-progress" aria-label={`${trainingTargetCount}회 중 ${draftMotionSamples.length}회 완료`}>
+                        {Array.from({ length: trainingTargetCount }, (_, index) => (
+                          <i key={index} className={index < draftMotionSamples.length ? "done" : index === draftMotionSamples.length ? "current" : ""} />
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {quickMotionMode === "labeling" && (
+                    <form className="quick-motion-label-form" onSubmit={(event) => { event.preventDefault(); saveQuickMotion(); }}>
+                      <label htmlFor="custom-motion-label">이 동작의 이름</label>
+                      <div>
+                        <input
+                          id="custom-motion-label"
+                          value={customMotionLabel}
+                          onChange={(event) => setCustomMotionLabel(event.target.value)}
+                          placeholder="예: 서빙, 설거지"
+                          autoFocus
+                        />
+                        <button className="primary-button" type="submit">학습 동작 저장</button>
+                      </div>
+                      <small>{draftMotionSamples.length}회 촬영한 스켈레톤 구간을 이 이름으로 묶습니다.</small>
+                    </form>
+                  )}
+
+                  {quickMotionMode === "testing" && (
+                    <div className="quick-motion-test-copy">
+                      <span>임시 분석 모드</span>
+                      <strong>{motionCapture ? "판별할 동작을 수행하고 있어요" : "학습시킨 동작 중 하나를 보여주세요"}</strong>
+                      <small>정면이나 후면 어느 쪽에서 수행해도 좌우 반전 좌표를 함께 비교합니다.</small>
+                    </div>
+                  )}
+
+                  {(quickMotionMode === "training" || quickMotionMode === "testing") && (
+                    <div className="quick-motion-controls">
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => void connectQuickMotionCamera()}
+                        disabled={quickMotionBusy}
+                      >
+                        동작 촬영 시작
+                      </button>
+                      <span>내장 카메라 촬영 창이 별도로 열립니다.</span>
+                    </div>
+                  )}
+
+                  {learnedMotionResult && (
+                    <div className={`learned-motion-result status-${learnedMotionResult.status}`} aria-live="polite">
+                      <span>{learnedMotionResult.status === "matched" ? "판별 결과" : learnedMotionResult.status === "uncertain" ? "가장 가까운 후보" : "판별 보류"}</span>
+                      <strong>{learnedMotionResult.label ?? "상반신 좌표가 부족합니다"}</strong>
+                      <b>신뢰도 <NumberFlow value={Math.round(learnedMotionResult.confidence * 100)} suffix="%" /></b>
+                      {learnedMotionResult.candidates.length > 1 && (
+                        <small>다음 후보 · {learnedMotionResult.candidates[1].label}</small>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    className="quick-motion-cancel"
+                    type="button"
+                    onClick={() => { setQuickMotionMode("idle"); setMotionCapture(null); }}
+                  >
+                    닫기
+                  </button>
+                </div>
+              )}
             </section>
 
             <section className={`observation-mode-card mode-${observationProfile.mode}`}>
@@ -2476,11 +3017,11 @@ export default function Home() {
             </section>
 
             <div className="dashboard-grid">
-              <section className="panel camera-panel">
+              <section className={`panel camera-panel ${quickMotionMode !== "idle" ? "quick-motion-hidden" : ""}`}>
                 <div className="panel-heading">
                   <div>
-                    <span className="section-kicker">단일 카메라 MVP</span>
-                    <h2>컴퓨터 카메라 동작 테스트</h2>
+                    <span className="section-kicker">두 카메라 테스트</span>
+                    <h2>내장 카메라와 웹캠 확인</h2>
                   </div>
                   {cameraStatus === "connected" && (
                     <div className="camera-badges">
@@ -2494,16 +3035,68 @@ export default function Home() {
                   )}
                 </div>
 
-                <div
-                  ref={cameraFrameRef}
-                  className={`camera-frame ${cameraStatus}`}
-                >
-                  <video ref={videoRef} muted playsInline aria-label="실시간 카메라 영상" />
-                  <canvas
-                    ref={overlayCanvasRef}
-                    className="pose-overlay"
-                    aria-label="실시간 전신 스켈레톤"
-                  />
+                {availableCameras.length > 0 && (
+                  <div className="camera-source-controls" aria-label="카메라 선택">
+                    <label>
+                      <span>카메라 1</span>
+                      <select
+                        value={primaryCameraId}
+                        onChange={(event) => void changeCameraSource("primary", event.target.value)}
+                        disabled={cameraStatus === "requesting"}
+                      >
+                        {availableCameras.map((camera, index) => (
+                          <option key={camera.deviceId} value={camera.deviceId}>
+                            {cameraDisplayName(camera, index)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {availableCameras.length > 1 && (
+                      <label>
+                          <span>카메라 2</span>
+                        <select
+                          value={secondaryCameraId}
+                          onChange={(event) => void changeCameraSource("secondary", event.target.value)}
+                          disabled={cameraStatus === "requesting"}
+                        >
+                          {availableCameras
+                            .filter((camera) => camera.deviceId !== primaryCameraId)
+                            .map((camera, index) => (
+                              <option key={camera.deviceId} value={camera.deviceId}>
+                                {cameraDisplayName(camera, index)}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )}
+
+                {cameraStatus !== "connected" && (
+                  <div className="camera-connect-action" aria-live="polite">
+                    <p>{cameraMessage}</p>
+                    <button className="primary-button" type="button" onClick={requestCameraStart} disabled={cameraStatus === "requesting"}>
+                      {cameraStatus === "requesting" ? "연결 중…" : "카메라 연결"}
+                    </button>
+                  </div>
+                )}
+
+                {cameraStatus === "connected" && <div ref={cameraFeedLayoutRef} className="camera-feed-layout">
+                  <div
+                    ref={cameraFrameRef}
+                    className={`camera-frame ${cameraStatus}`}
+                  >
+                    <div className="camera-main-view">
+                      <video ref={videoRef} muted playsInline aria-label="카메라 1 영상" />
+                      <canvas
+                        ref={overlayCanvasRef}
+                        className="pose-overlay"
+                        aria-label="실시간 전신 스켈레톤"
+                      />
+                      {cameraStatus === "connected" && (
+                        <span className="camera-source-label">카메라 1</span>
+                      )}
+                    </div>
                   {cameraStatus !== "connected" && (
                     <div className="camera-empty">
                       <span className="camera-symbol" aria-hidden="true">
@@ -2561,7 +3154,22 @@ export default function Home() {
                       </button>
                     </div>
                   )}
-                </div>
+                  </div>
+
+                  {cameraStatus === "connected" && secondaryCameraConnected && (
+                    <section className="secondary-camera-frame" aria-label="카메라 2 화면">
+                      <div className="secondary-camera-heading">
+                        <span>카메라 2</span>
+                        <small>공통 대상 · 좌표 기록</small>
+                      </div>
+                      <div className="camera-secondary-view">
+                        <video ref={secondaryVideoRef} muted playsInline aria-label="카메라 2 영상" />
+                        <canvas ref={secondaryOverlayCanvasRef} className="pose-overlay" aria-label="카메라 2 전신 스켈레톤" />
+                        <span className={`secondary-pose-state ${secondaryPoseStatus}`}>좌표 · {secondaryPoseStatus === "full" ? "전신 인식" : secondaryPoseStatus === "partial" ? "일부 인식" : secondaryPoseStatus === "error" ? "추적 오류" : "찾는 중"}</span>
+                      </div>
+                    </section>
+                  )}
+                </div>}
 
                 <div className="coordinate-recorder">
                   <div className="recorder-heading">
@@ -2581,7 +3189,7 @@ export default function Home() {
                     <div className="coordinate-stats">
                       <span><small>몸 관절</small><strong>22개</strong></span>
                       <span><small>손 관절</small><strong>최대 42개</strong></span>
-                      <span><small>기록 속도</small><strong>{MOTION_SAMPLE_RATE} FPS</strong></span>
+                      <span><small>기록 속도</small><strong>카메라당 {MOTION_SAMPLE_RATE} FPS</strong></span>
                       <span><small>누적 프레임</small><strong>{poseStats.frames.toLocaleString()}</strong></span>
                       <span><small>전신 인식률</small><strong>{fullBodyRatio}%</strong></span>
                       <span><small>예상 용량</small><strong>{formatBytes(poseStats.storageBytes)}</strong></span>
@@ -2941,7 +3549,7 @@ export default function Home() {
                 <h2>카메라와 가상 기준선을 검증해요</h2>
                 <p>이 화면의 기능과 데이터는 실제 사용자가 보는 사용자 모드에는 표시되지 않아요.</p>
                 <div className="developer-setting-summary">
-                  <span><small>입력 장치</small><strong>컴퓨터 카메라 1대</strong></span>
+                  <span><small>입력 장치</small><strong>내장 카메라 + 웹캠</strong></span>
                   <span><small>현재 기준선</small><strong>{observationProfile.baselineSource === "synthetic" ? "가상 데이터" : "직접 학습"}</strong></span>
                 </div>
               </section>
@@ -2957,7 +3565,7 @@ export default function Home() {
                 <>
                   <button type="button" onClick={() => setView("today")}>
                     <span aria-hidden="true">⌁</span>
-                    <span><strong>컴퓨터 카메라 기능 테스트</strong><small>카메라 1대로 전신·손·동작 분석을 시험해요</small></span>
+                    <span><strong>두 카메라 기능 테스트</strong><small>카메라별 재생과 시공간 인계 분석을 확인해요</small></span>
                     <i aria-hidden="true">›</i>
                   </button>
                   <button type="button" onClick={() => setSyntheticLibraryOpen(true)}>
@@ -2974,7 +3582,7 @@ export default function Home() {
               <p>
                 {interfaceMode === "user"
                   ? "사용자 모드에는 실제 케어 결과와 일상 설정만 표시돼요. 카메라·가상 데이터 검증 도구는 개발자 모드에서 확인할 수 있어요."
-                  : "현재는 컴퓨터 카메라 1대를 이용한 짧은 동작 테스트와 결과 확인을 지원해요. 여러 카메라·IoT·POS 연동은 단일 카메라 검증 이후 단계에서 추가합니다."}
+                  : "현재는 내장 카메라와 웹캠을 이용한 짧은 동작 테스트와 카메라 간 인계 검증을 지원해요. IoT·POS 연동은 이후 단계에서 추가합니다."}
               </p>
             </section>
 
@@ -3287,8 +3895,8 @@ export default function Home() {
                     </div>
                     <p>
                       최근 카메라 세션의 손 움직임에서 계산한 참고 지표예요.
-                      5FPS로 기록되기 때문에 실제 손 떨림(4~12Hz)을 정밀하게
-                      측정할 수 없고, 임상적으로 검증되지 않았어요. 추세를
+                      {MOTION_SAMPLE_RATE}FPS로 기록되기 때문에 실제 손 떨림(4~12Hz)을
+                      정밀하게 측정할 수 없고, 임상적으로 검증되지 않았어요. 추세를
                       가볍게 참고하는 용도로만 사용해 주세요.
                     </p>
                     <div className="motion-signal-grid">
@@ -3354,6 +3962,68 @@ export default function Home() {
           </button>
         ))}
       </nav>
+
+      <Modal
+        open={quickMotionCameraOpen}
+        onClose={() => void closeQuickMotionCamera()}
+        labelledBy="quick-motion-camera-title"
+        className="quick-motion-camera-modal"
+      >
+        <button className="modal-close" type="button" onClick={() => void closeQuickMotionCamera()} aria-label="촬영 창 닫기">×</button>
+        <div className="quick-motion-camera-heading">
+          <span className="section-kicker">내장 카메라 · 영상 저장 안 함</span>
+          <h2 id="quick-motion-camera-title">
+            {quickMotionMode === "training"
+              ? `${draftMotionSamples.length + 1}번째 동작을 보여주세요`
+              : "판별할 동작을 보여주세요"}
+          </h2>
+          <p>얼굴·어깨·양팔이 화면에 들어오도록 선 뒤, 시작 버튼을 누르세요.</p>
+        </div>
+
+        <div className={`quick-motion-camera-preview status-${cameraStatus}`}>
+          <video ref={quickMotionVideoRef} muted playsInline aria-label="내장 카메라 동작 촬영 영상" />
+          {cameraStatus !== "connected" && (
+            <div className="quick-motion-camera-waiting">
+              <strong>{cameraStatus === "error" ? "내장 카메라를 연결하지 못했어요" : "내장 카메라를 준비하고 있어요"}</strong>
+              <span>{cameraMessage}</span>
+            </div>
+          )}
+          {cameraStatus === "connected" && (
+            <div className="quick-motion-camera-status">
+              <span className={motionCapture ? "recording" : ""}>{motionCapture ? "● 좌표 기록 중" : "촬영 준비됨"}</span>
+              <span>{targetLocked ? "상반신 인식됨" : "분석 대상 찾는 중"}</span>
+            </div>
+          )}
+        </div>
+
+        {quickMotionMode === "training" && (
+          <div className="quick-motion-modal-progress">
+            <span>학습 진행</span>
+            <strong>{draftMotionSamples.length} / {trainingTargetCount}</strong>
+          </div>
+        )}
+
+        {learnedMotionResult && quickMotionMode === "testing" && (
+          <div className={`learned-motion-result status-${learnedMotionResult.status}`} aria-live="polite">
+            <span>{learnedMotionResult.status === "matched" ? "판별 결과" : learnedMotionResult.status === "uncertain" ? "가장 가까운 후보" : "판별 보류"}</span>
+            <strong>{learnedMotionResult.label ?? "상반신 좌표가 부족합니다"}</strong>
+            <b>신뢰도 <NumberFlow value={Math.round(learnedMotionResult.confidence * 100)} suffix="%" /></b>
+            {learnedMotionResult.candidates.length > 1 && <small>다음 후보 · {learnedMotionResult.candidates[1].label}</small>}
+          </div>
+        )}
+
+        <div className="quick-motion-camera-actions">
+          <button
+            className={motionCapture ? "capture-stop-button" : "primary-button"}
+            type="button"
+            onClick={() => motionCapture ? void finishQuickMotionCapture() : startQuickMotionCapture()}
+            disabled={cameraStatus !== "connected" || quickMotionBusy}
+          >
+            {quickMotionBusy ? "좌표 확인 중…" : motionCapture ? "이번 동작 완료" : "녹화 시작"}
+          </button>
+          <button type="button" onClick={() => void closeQuickMotionCamera()}>촬영 창 닫기</button>
+        </div>
+      </Modal>
 
       <Modal open={selectedEvent !== null} onClose={() => setSelectedEvent(null)} labelledBy="video-title" className="video-modal">
         {selectedEvent && (
@@ -3498,12 +4168,8 @@ export default function Home() {
                 <strong>{careLogs.length}일치</strong>
               </article>
               <article>
-                <span>브라우저 저장 용량</span>
-                <strong>
-                  {storageUsage
-                    ? `${formatBytes(storageUsage.usageBytes)} 사용 중`
-                    : "확인 불가"}
-                </strong>
+                <span>저장된 동작 좌표</span>
+                <strong>{formatBytes(storedMotionBytes)} 사용 중</strong>
               </article>
               <article>
                 <span>장기 관찰 동의 상태</span>
@@ -3660,7 +4326,11 @@ export default function Home() {
       {replaySessionId && (
         <SessionReplayPanel
           key={replaySessionId}
-          source={{ kind: "recorded", sessionId: replaySessionId }}
+          source={{
+            kind: "recorded",
+            sessionId: replaySessionId,
+            globalSessionId: recentSessions.find((session) => session.id === replaySessionId)?.globalSessionId,
+          }}
           sessionLabel={
             recentSessions.find((session) => session.id === replaySessionId)
               ? `${formatSessionTime(
@@ -3673,6 +4343,7 @@ export default function Home() {
           }
           observationMode={observationProfile.mode}
           baselineVersion={observationProfile.baselineVersion}
+          showMultiCameraDiagnostics={interfaceMode === "developer"}
           onClose={() => setReplaySessionId(null)}
         />
       )}

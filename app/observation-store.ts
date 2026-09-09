@@ -146,14 +146,5 @@ export async function getFeedbackForEvent(eventId: string): Promise<AnalysisFeed
 }
 
 export async function deleteAllObservationData() {
-  const database = await openObservationDatabase();
-  const transaction = database.transaction(
-    [PROFILE_STORE, EPISODE_STORE, FEEDBACK_STORE],
-    "readwrite",
-  );
-  transaction.objectStore(PROFILE_STORE).clear();
-  transaction.objectStore(EPISODE_STORE).clear();
-  transaction.objectStore(FEEDBACK_STORE).clear();
-  await transactionDone(transaction);
-  database.close();
+  await requestResult(indexedDB.deleteDatabase(DB_NAME));
 }

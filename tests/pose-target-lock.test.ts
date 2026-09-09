@@ -68,6 +68,33 @@ test("target lock reports missing instead of switching to a distant pose-like ob
   assert.equal(missing.lock, acquired.lock);
 });
 
+test("the single visible person is reacquired after a sustained tracking loss", () => {
+  const owner = standingPose(0.42, 0.9);
+  const acquired = selectLockedPose([owner], null, 1000);
+  const repositionedOwner = standingPose(0.88, 0.42);
+  const recovered = selectLockedPose([repositionedOwner], acquired.lock, 1700);
+  assert.equal(recovered.state, "acquired");
+  assert.equal(recovered.landmarks, repositionedOwner);
+  assert.ok(recovered.lock);
+});
+
+test("target lock stays missing instead of merging with a similarly-placed but differently-built stranger", () => {
+  const owner = standingPose(0.45, 0.9);
+  const acquired = selectLockedPose([owner], null, 1000);
+  // Same general position and scale as the owner (small center step, small
+  // scale change) - the exact situation where slightly reframing the camera
+  // lets a bystander land close to where the owner was standing. Only the
+  // hip width is drastically different, simulating a different person's
+  // build rather than the owner shifting stance.
+  const stranger = standingPose(0.5, 0.88);
+  stranger[23] = point(0.15, 0.53);
+  stranger[24] = point(0.85, 0.53);
+  const result = selectLockedPose([stranger], acquired.lock, 1066);
+  assert.equal(result.state, "missing");
+  assert.equal(result.landmarks, null);
+  assert.equal(result.lock, acquired.lock);
+});
+
 test("cropped upper body is locked immediately before the user moves backward", () => {
   const cropped = standingPose();
   cropped[27] = point(0.44, 0.95, 0, 0.1);
@@ -75,6 +102,17 @@ test("cropped upper body is locked immediately before the user moves backward", 
   const selection = selectLockedPose([cropped], null, 1000);
   assert.equal(selection.state, "acquired");
   assert.equal(selection.landmarks, cropped);
+  assert.ok(selection.lock);
+});
+
+test("shoulders and arms are enough to lock a true upper-body-only pose", () => {
+  const upperBody = standingPose();
+  for (let index = 23; index < 33; index += 1) {
+    upperBody[index] = point(0.5, 1.2, 0, 0.05);
+  }
+  const selection = selectLockedPose([upperBody], null, 1000);
+  assert.equal(selection.state, "acquired");
+  assert.equal(selection.landmarks, upperBody);
   assert.ok(selection.lock);
 });
 
