@@ -1,0 +1,15 @@
+[
+  {
+    "id": "mem-feedback_functional_scope_only-----0",
+    "key": "-",
+    "content": "name: feedback-functional-scope-only\ndescription: \"For the memory-guard (blackbox) project, only discuss functional/implementation gaps — not ethics, IRB, legal, or research-design concerns\"\nmetadata: \n  node_type: memory\n  type: feedback\n  originSessionId: 4f8672c7-e52b-4624-9b33-66b7a60b77f0\n  modified: 2026-09-06T14:05:49.579Z\n---\n\nWhen working in the memory-guard project (~/Desktop/work/인재림/blackbox), the user has explicitly said ethics/IRB/legal/consent/study-design questions are already r…",
+    "summary": "---",
+    "namespace": "feedback_functional_scope_only",
+    "type": "semantic",
+    "metadata": {
+      "sourceFile": "/Users/younseoyeon/.claude/projects/-Users-younseoyeon-Desktop-work-----blackbox/memory/feedback_functional_scope_only.md",
+      "bootstrapped": true
+    },
+    "createdAt": 1789001111677
+  }
+]

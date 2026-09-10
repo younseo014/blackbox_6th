@@ -69,11 +69,9 @@ import {
 } from "./demo-personas";
 import {
   OCCUPATION_TEMPLATES,
-  PRIMITIVE_MOTION_LABELS,
   getOccupationTemplate,
   phaseForHour,
   type OccupationId,
-  type WorkPhase,
 } from "./occupation-templates";
 import {
   DEFAULT_PROFILE,
@@ -90,15 +88,8 @@ import {
   getObservationProfile,
   listObservationEpisodes,
   saveObservationEpisode,
-  saveObservationEpisodes,
   saveObservationProfile,
 } from "./observation-store";
-import {
-  createSyntheticTrainingDataset,
-  getSyntheticTrainingClips,
-  type SyntheticTrainingClip,
-} from "./synthetic-training";
-import { classifySkeletonMotion } from "./motion-classifier";
 import {
   classifyLearnedMotion,
   clearLearnedMotionActions,
@@ -549,9 +540,6 @@ export default function Home() {
   const [observationBaseline, setObservationBaseline] = useState<BaselineSnapshot>(() => buildBaseline([], 1));
   const [zoneSetupOpen, setZoneSetupOpen] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string>("DRINK_PREP");
-  const [syntheticLibraryOpen, setSyntheticLibraryOpen] = useState(false);
-  const [syntheticLibraryPhase, setSyntheticLibraryPhase] = useState<WorkPhase>("business");
-  const [applyingSyntheticBaseline, setApplyingSyntheticBaseline] = useState(false);
   const [closingTime, setClosingTime] = useState(
     () => loadChecklistSettings().time,
   );
@@ -1608,31 +1596,15 @@ export default function Home() {
       const rawFrames = globalSessionId
         ? await getGlobalSessionFrames(globalSessionId)
         : await getSessionFrames(sessionId);
-      const testTargetTask = observationProfile.activeTestTaskId
-        ? getOccupationTemplate(observationProfile.occupation).tasks.find(
-            (task) => task.id === observationProfile.activeTestTaskId,
-          )
-        : undefined;
-      const motionSlice = sliceTargetMotion(rawFrames, testTargetTask?.motions);
+      const motionSlice = sliceTargetMotion(rawFrames);
       const features = extractObservationFeatures(motionSlice.frames, observationProfile.zoneGrid);
-      const referenceClips = getSyntheticTrainingClips(
-        observationProfile.occupation,
-        observationProfile.bodyProportionProfile,
-      );
-      const motionClassification = classifySkeletonMotion(motionSlice.frames, referenceClips);
-      const predictedTask = motionClassification.predictedTaskType
-        ? getOccupationTemplate(observationProfile.occupation).tasks.find(
-            (task) => task.id === motionClassification.predictedTaskType,
-          )
-        : undefined;
       const episode = createObservationEpisode({
         sessionId,
         recordedAt,
         profile: observationProfile,
-        phase: predictedTask?.phase ?? testTargetTask?.phase ?? phaseForHour(new Date(recordedAt).getHours()),
+        phase: phaseForHour(new Date(recordedAt).getHours()),
         features,
         baseline: observationBaseline,
-        motionClassification,
         motionSlice: {
           startMs: motionSlice.startMs,
           endMs: motionSlice.endMs,
@@ -1641,7 +1613,6 @@ export default function Home() {
           excludedFrameCount: motionSlice.excludedFrameCount,
           reason: motionSlice.reason,
         },
-        testTargetTask,
       });
       await saveObservationEpisode(episode);
       await refreshObservationData(observationProfile);
@@ -1650,11 +1621,7 @@ export default function Home() {
           ? "평소 흐름으로 확정하기 어려운 동작은 학습에서 잠시 보류했어요"
           : observationProfile.mode === "learning"
             ? `${episode.taskLabel} 패턴을 학습 기록에 추가했어요`
-            : testTargetTask
-              ? motionClassification.status === "matched"
-                ? `${episode.taskLabel} 동작으로 자동 분석했어요`
-                : "동작 후보를 찾았지만 확정하려면 한 번 더 촬영해 주세요"
-              : `${episode.taskLabel} 동작을 개인 기준과 비교했어요`,
+            : `${episode.taskLabel} 동작을 개인 기준과 비교했어요`,
       );
     } catch {
       // Coordinate recording remains available even if contextual analysis fails.
@@ -1901,9 +1868,6 @@ export default function Home() {
       mode: "learning",
       learningStartedAt: nowMs(),
       baselineVersion: observationProfile.baselineVersion + 1,
-      baselineSource: "real",
-      syntheticDatasetId: null,
-      activeTestTaskId: null,
       zoneGrid: Array(9).fill(null),
     });
     setObservationProfile(next);
@@ -1923,9 +1887,6 @@ export default function Home() {
         mode === "learning"
           ? observationProfile.baselineVersion + 1
           : observationProfile.baselineVersion,
-      baselineSource: mode === "learning" ? "real" : observationProfile.baselineSource,
-      syntheticDatasetId: mode === "learning" ? null : observationProfile.syntheticDatasetId,
-      activeTestTaskId: mode === "learning" ? null : observationProfile.activeTestTaskId,
     });
     setObservationProfile(next);
     await refreshObservationData(next);
@@ -1943,71 +1904,6 @@ export default function Home() {
     zoneGrid[index] = zoneGrid[index] === selectedZoneId ? null : selectedZoneId;
     const next = await saveObservationProfile({ ...observationProfile, zoneGrid });
     setObservationProfile(next);
-  }
-
-  async function applySyntheticTrainingBaseline() {
-    if (applyingSyntheticBaseline) return;
-    setApplyingSyntheticBaseline(true);
-    try {
-      const baselineVersion = observationProfile.baselineVersion + 1;
-      const latestBodyProfile = await getLatestBodyProportionProfile().catch(() => null);
-      const bodyProportionProfile = latestBodyProfile ?? observationProfile.bodyProportionProfile ?? null;
-      const dataset = createSyntheticTrainingDataset(
-        observationProfile.occupation,
-        baselineVersion,
-        nowMs(),
-        bodyProportionProfile,
-      );
-      await saveObservationEpisodes(dataset.episodes);
-      const next = await saveObservationProfile({
-        ...observationProfile,
-        mode: "analysis",
-        learningStartedAt: dataset.generatedAt - 13 * 24 * 60 * 60 * 1000,
-        baselineVersion,
-        baselineSource: "synthetic",
-        syntheticDatasetId: dataset.id,
-        activeTestTaskId: null,
-        bodyProportionProfile,
-        zoneGrid: dataset.zoneGrid,
-      });
-      setObservationProfile(next);
-      await refreshObservationData(next);
-      toast.success(
-        bodyProportionProfile
-          ? `최근 촬영 전신 비율로 ${getOccupationTemplate(next.occupation).label} 가상 기준선을 적용했어요`
-          : `촬영 비율이 없어 개선된 표준 인체 비율로 ${getOccupationTemplate(next.occupation).label} 기준선을 적용했어요`,
-      );
-    } finally {
-      setApplyingSyntheticBaseline(false);
-    }
-  }
-
-  function openSyntheticClip(clip: SyntheticTrainingClip) {
-    setDemoReplay({
-      key: clip.id,
-      label: `${occupationTemplate.label} · ${clip.taskLabel} · 정상 학습 예시`,
-      frames: clip.frames,
-    });
-  }
-
-  async function selectPerformanceTestTask(clip: SyntheticTrainingClip) {
-    const next = await saveObservationProfile({
-      ...observationProfile,
-      mode: "analysis",
-      activeTestTaskId: clip.taskType,
-    });
-    setObservationProfile(next);
-    setSyntheticLibraryOpen(false);
-    toast.success(`${clip.taskLabel} 테스트 준비 완료 · 카메라 앞에서 동작 후 기록을 종료해 주세요`);
-  }
-
-  async function clearPerformanceTestTask() {
-    const next = await saveObservationProfile({
-      ...observationProfile,
-      activeTestTaskId: null,
-    });
-    setObservationProfile(next);
-    toast.success("지정 동작 테스트를 종료했어요");
   }
 
   function saveBooking(event: FormEvent<HTMLFormElement>) {
@@ -2221,7 +2117,6 @@ export default function Home() {
     window.localStorage.removeItem(INTERFACE_MODE_STORAGE_KEY);
     setInterfaceMode("user");
     setDemoMode(true);
-    setSyntheticLibraryOpen(false);
     setMyDataOpen(false);
     setView("home");
     toast.success("모든 내용을 초기화하고 처음 시작 화면으로 돌아왔어요.");
@@ -2340,16 +2235,6 @@ export default function Home() {
     0,
   );
   const occupationTemplate = getOccupationTemplate(observationProfile.occupation);
-  const syntheticTrainingClips = getSyntheticTrainingClips(
-    observationProfile.occupation,
-    observationProfile.bodyProportionProfile,
-  );
-  const visibleSyntheticClips = syntheticTrainingClips.filter(
-    (clip) => clip.phase === syntheticLibraryPhase,
-  );
-  const activeTestClip = observationProfile.activeTestTaskId
-    ? syntheticTrainingClips.find((clip) => clip.taskType === observationProfile.activeTestTaskId) ?? null
-    : null;
   const currentObservationEpisodes = observationEpisodes.filter(
     (episode) =>
       episode.occupation === observationProfile.occupation &&
@@ -2363,16 +2248,9 @@ export default function Home() {
   ).length;
   const mappedZoneCount = new Set(observationProfile.zoneGrid.filter(Boolean)).size;
   const latestObservationEpisode = currentObservationEpisodes[0] ?? null;
-  const latestPerformanceTest = currentObservationEpisodes.find(
-    (episode) => episode.source === "performance_test",
-  ) ?? null;
-  const latestPerformanceBaseline = latestPerformanceTest
-    ? observationBaseline.tasks.find((task) => task.taskType === latestPerformanceTest.taskType) ?? null
-    : null;
   const analysisObservationSignals = currentObservationEpisodes.filter(
     (episode) =>
       episode.mode === "analysis" &&
-      episode.source !== "performance_test" &&
       episode.disposition !== "excluded" &&
       ((episode.durationZScore ?? 0) >= 1.5 || (episode.pauseZScore ?? 0) >= 1.5),
   );
@@ -2403,9 +2281,6 @@ export default function Home() {
       mode: "learning",
       learningStartedAt: startedAt,
       baselineVersion: observationProfile.baselineVersion + 1,
-      baselineSource: "real",
-      syntheticDatasetId: null,
-      activeTestTaskId: null,
     });
     window.localStorage.setItem(USER_INSTALL_STORAGE_KEY, JSON.stringify(install));
     clearConsent();
@@ -2861,9 +2736,6 @@ export default function Home() {
                         : `기준선 v${observationProfile.baselineVersion}을 고정해 최근 동작의 변화를 살펴봐요.`}
                     </p>
                   </div>
-                  {observationProfile.baselineSource === "synthetic" && (
-                    <span className="synthetic-baseline-chip">가상 기준선 적용 중</span>
-                  )}
                   {observationProfile.bodyProportionProfile && (
                     <span className="body-profile-chip">
                       최근 촬영 비율 · {observationProfile.bodyProportionProfile.usableFrames}프레임
@@ -2883,134 +2755,13 @@ export default function Home() {
                 <div className="mode-card-actions">
                   <p>{occupationTemplate.description}</p>
                   <div className="mode-action-buttons">
-                    <button
-                      type="button"
-                      className="synthetic-apply-button"
-                      onClick={() => void applySyntheticTrainingBaseline()}
-                      disabled={applyingSyntheticBaseline}
-                    >
-                      {applyingSyntheticBaseline ? "2주 데이터 적용 중…" : "가상 학습 데이터 적용"}
-                    </button>
-                    <button type="button" onClick={() => setSyntheticLibraryOpen(true)}>가상 학습 데이터 보기</button>
                     <button type="button" onClick={() => setZoneSetupOpen(true)}>매장 구역 설정</button>
                   </div>
                 </div>
-                {activeTestClip && (
-                  <div className="active-performance-test" role="status">
-                    <div>
-                      <span>성능 테스트 동작</span>
-                      <strong>{activeTestClip.taskLabel}</strong>
-                      <small>{activeTestClip.instruction}</small>
-                    </div>
-                    <div>
-                      <button type="button" onClick={() => openSyntheticClip(activeTestClip)}>동작 다시 보기</button>
-                      <button type="button" onClick={() => void clearPerformanceTestTask()}>테스트 해제</button>
-                    </div>
-                  </div>
-                )}
                 {latestObservationEpisode && (
                   <div className={`latest-learning-result disposition-${latestObservationEpisode.disposition}`}>
                     <span>최근 관찰 · {latestObservationEpisode.taskLabel}</span>
                     <strong>{latestObservationEpisode.dispositionReason}</strong>
-                  </div>
-                )}
-                {latestPerformanceTest && (
-                  <div className={`performance-test-result ${(latestPerformanceTest.durationZScore ?? 0) >= 1.5 ? "changed" : "within"}`}>
-                    <div className="motion-classification-heading">
-                      <div>
-                        <span>AI 동작 자동 분석</span>
-                        <strong>
-                          {latestPerformanceTest.motionClassification?.status === "insufficient"
-                            ? "동작을 확인하기 어려워요"
-                            : latestPerformanceTest.motionClassification?.status === "uncertain"
-                              ? "가능성이 높은 동작을 찾았어요"
-                              : latestPerformanceTest.taskLabel}
-                        </strong>
-                      </div>
-                      {latestPerformanceTest.motionClassification && (
-                        <span className={`classification-confidence status-${latestPerformanceTest.motionClassification.status}`}>
-                          일치 신뢰도 <NumberFlow value={Math.round(latestPerformanceTest.motionClassification.confidence * 100)} suffix="%" />
-                        </span>
-                      )}
-                    </div>
-
-                    <details className="classification-details">
-                      <summary>자세히 보기</summary>
-
-                      {latestPerformanceTest.motionClassification?.predictedTaskLabel && (
-                        <div className="motion-prediction-summary">
-                          <span>감지한 동작</span>
-                          <strong>{latestPerformanceTest.motionClassification.predictedTaskLabel}</strong>
-                          {latestPerformanceTest.testTargetTaskType && (
-                            <small>
-                              테스트 목표 · {occupationTemplate.tasks.find((task) => task.id === latestPerformanceTest.testTargetTaskType)?.label ?? latestPerformanceTest.testTargetTaskType}
-                              {latestPerformanceTest.testTargetTaskType === latestPerformanceTest.motionClassification.predictedTaskType
-                                ? " · 목표와 일치"
-                                : " · 다른 동작으로 분석됨"}
-                            </small>
-                          )}
-                        </div>
-                      )}
-
-                      {latestPerformanceTest.motionClassification?.primitiveLabels.length ? (
-                        <div className="detected-motion-tags" aria-label="일치한 기초 움직임">
-                          {latestPerformanceTest.motionClassification.primitiveLabels.slice(0, 4).map((label) => (
-                            <span key={label}>{PRIMITIVE_MOTION_LABELS[label]}</span>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {(latestPerformanceTest.motionClassification?.candidates.length ?? 0) > 1 && (
-                        <div className="motion-candidates">
-                          <span>다른 후보</span>
-                          <div>
-                            {latestPerformanceTest.motionClassification!.candidates.slice(1).map((candidate) => (
-                              <span key={candidate.taskType}>
-                                {candidate.taskLabel} <strong><NumberFlow value={Math.round(candidate.confidence * 100)} suffix="%" /></strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {latestPerformanceTest.motionSlice && (
-                        <div className="motion-slice-summary">
-                          <div>
-                            <span>자동 분석 구간</span>
-                            <strong>{latestPerformanceTest.motionSlice.durationSeconds.toFixed(1)}초</strong>
-                          </div>
-                          <p>
-                            전체 촬영 {latestPerformanceTest.motionSlice.originalDurationSeconds.toFixed(1)}초에서
-                            카메라 접근·거리 조정·대기 구간을 제외했어요.
-                          </p>
-                        </div>
-                      )}
-
-                      {latestPerformanceBaseline && (
-                        <>
-                          <div className="performance-result-heading">
-                            <span>개인 기준선 비교 · {latestPerformanceTest.taskLabel}</span>
-                            <strong>{(latestPerformanceTest.durationZScore ?? 0) >= 1.5 ? "평소 범위를 벗어난 변화 후보" : "가상 기준 범위 안"}</strong>
-                          </div>
-                          <div className="performance-result-metrics">
-                            <span><small>가상 기준 평균</small><strong>{latestPerformanceBaseline.meanDuration.toFixed(1)}초</strong></span>
-                            <span><small>이번 수행</small><strong>{latestPerformanceTest.features.durationSeconds.toFixed(1)}초</strong></span>
-                            <span><small>가장 긴 멈춤</small><strong>{latestPerformanceTest.features.longestPauseSeconds.toFixed(1)}초</strong></span>
-                          </div>
-                        </>
-                      )}
-
-                      {latestPerformanceTest.motionClassification?.evidence.length ? (
-                        <details className="classification-evidence">
-                          <summary>분석 근거 보기</summary>
-                          <ul>
-                            {latestPerformanceTest.motionClassification.evidence.map((item) => <li key={item}>{item}</li>)}
-                          </ul>
-                        </details>
-                      ) : (
-                        <p>이전 방식으로 저장된 기록이에요. 새로 촬영하면 스켈레톤 좌표로 동작을 자동 분류해요.</p>
-                      )}
-                    </details>
                   </div>
                 )}
               </div>
@@ -3546,11 +3297,10 @@ export default function Home() {
             ) : (
               <section className="settings-intro-card developer-settings-intro">
                 <span className="section-kicker">개발자 전용 설정</span>
-                <h2>카메라와 가상 기준선을 검증해요</h2>
+                <h2>카메라 인식을 검증해요</h2>
                 <p>이 화면의 기능과 데이터는 실제 사용자가 보는 사용자 모드에는 표시되지 않아요.</p>
                 <div className="developer-setting-summary">
                   <span><small>입력 장치</small><strong>내장 카메라 + 웹캠</strong></span>
-                  <span><small>현재 기준선</small><strong>{observationProfile.baselineSource === "synthetic" ? "가상 데이터" : "직접 학습"}</strong></span>
                 </div>
               </section>
             )}
@@ -3562,18 +3312,11 @@ export default function Home() {
                 <i aria-hidden="true">›</i>
               </button>
               {interfaceMode === "developer" && (
-                <>
-                  <button type="button" onClick={() => setView("today")}>
-                    <span aria-hidden="true">⌁</span>
-                    <span><strong>두 카메라 기능 테스트</strong><small>카메라별 재생과 시공간 인계 분석을 확인해요</small></span>
-                    <i aria-hidden="true">›</i>
-                  </button>
-                  <button type="button" onClick={() => setSyntheticLibraryOpen(true)}>
-                    <span aria-hidden="true">△</span>
-                    <span><strong>가상 학습 데이터 보기</strong><small>직군별 예시 동작과 라벨을 확인해요</small></span>
-                    <i aria-hidden="true">›</i>
-                  </button>
-                </>
+                <button type="button" onClick={() => setView("today")}>
+                  <span aria-hidden="true">⌁</span>
+                  <span><strong>두 카메라 기능 테스트</strong><small>카메라별 재생과 시공간 인계 분석을 확인해요</small></span>
+                  <i aria-hidden="true">›</i>
+                </button>
               )}
             </section>
 
@@ -4233,66 +3976,6 @@ export default function Home() {
                 내 데이터 전체 삭제
               </button>
             </div>
-      </Modal>
-
-      <Modal open={syntheticLibraryOpen} onClose={() => setSyntheticLibraryOpen(false)} labelledBy="synthetic-library-title" className="synthetic-library-modal">
-            <button className="modal-close" type="button" onClick={() => setSyntheticLibraryOpen(false)} aria-label="닫기">×</button>
-            <header className="synthetic-library-header">
-              <div>
-                <span className="section-kicker">{occupationTemplate.icon} {occupationTemplate.label} · 14일 정상 업무 표본</span>
-                <h2 id="synthetic-library-title">가상 학습 행동을 보고 직접 따라 해보세요</h2>
-                <p>실제 사용자의 영상이 아닌 좌표로 만든 예시입니다. 최근 전신 촬영 기록이 있으면 그 사람의 몸 비율만 가져와 적용하고, 각 업무에는 서로 다른 전신·양팔·손가락 궤적을 사용해요.</p>
-              </div>
-              <span className="synthetic-library-count">{syntheticTrainingClips.length}개 행동</span>
-            </header>
-            <div className="synthetic-phase-tabs" role="tablist" aria-label="업무 시간대">
-              {(["open", "business", "close"] as WorkPhase[]).map((phase) => (
-                <button
-                  key={phase}
-                  type="button"
-                  role="tab"
-                  aria-selected={syntheticLibraryPhase === phase}
-                  className={syntheticLibraryPhase === phase ? "active" : ""}
-                  onClick={() => setSyntheticLibraryPhase(phase)}
-                >
-                  {phase === "open" ? "오픈" : phase === "business" ? "영업 중" : "마감"}
-                </button>
-              ))}
-            </div>
-            {visibleSyntheticClips.length > 0 ? (
-              <div className="synthetic-clip-grid">
-                {visibleSyntheticClips.map((clip) => (
-                  <article className="synthetic-clip-card" key={clip.id}>
-                    <div className="synthetic-clip-heading">
-                      <span>{clip.phaseLabel}</span>
-                      <small>{clip.zoneLabel}</small>
-                    </div>
-                    <h3>{clip.taskLabel}</h3>
-                    <p>{clip.instruction}</p>
-                    <div className="synthetic-motion-tags">
-                      {clip.primitiveLabels.slice(0, 3).map((label) => <span key={label}>{label}</span>)}
-                    </div>
-                    <dl>
-                      <div><dt>정상 소요 범위</dt><dd>{clip.expectedMinSeconds}–{clip.expectedMaxSeconds}초</dd></div>
-                      <div><dt>대표 구역</dt><dd>{clip.zoneLabel}</dd></div>
-                    </dl>
-                    <div className="synthetic-clip-actions">
-                      <button type="button" onClick={() => openSyntheticClip(clip)}>스켈레톤 보기</button>
-                      <button type="button" className="primary" onClick={() => void selectPerformanceTestTask(clip)}>이 동작 테스트하기</button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="synthetic-library-empty">
-                <strong>이 시간대에 등록된 대표 행동이 없어요</strong>
-                <p>다른 시간대를 선택해 주세요.</p>
-              </div>
-            )}
-            <footer className="synthetic-library-footer">
-              <span>가상 데이터는 실제 케어 리포트와 분리되며 이 기기에만 저장됩니다.</span>
-              <button type="button" onClick={() => setSyntheticLibraryOpen(false)}>닫기</button>
-            </footer>
       </Modal>
 
       <Modal open={zoneSetupOpen} onClose={() => setZoneSetupOpen(false)} labelledBy="zone-setup-title" className="zone-setup-modal">

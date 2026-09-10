@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "updatedAt": 1789002627087,
+  "nodeCount": 1,
+  "contentFingerprint": "94aabf9d_c4b0c034_62",
+  "nodes": {
+    "mem-feedback_functional_scope_only-----0": {
+      "id": "mem-feedback_functional_scope_only-----0",
+      "category": "feedback_functional_scope_only",
+      "confidence": 0.6000000000000001,
+      "accessCount": 2,
+      "createdAt": 1789001111677
+    }
+  },
+  "edges": [],
+  "pageRanks": {
+    "mem-feedback_functional_scope_only-----0": 1
+  }
+}

@@ -6,8 +6,6 @@ import {
   type TaskTemplate,
   type WorkPhase,
 } from "./occupation-templates";
-import type { MotionClassification } from "./motion-classifier";
-
 export type ObservationMode = "learning" | "analysis";
 export type LearningDisposition = "accepted" | "quarantined" | "excluded" | "analysis_only";
 
@@ -19,9 +17,6 @@ export type ObservationProfile = {
   mode: ObservationMode;
   learningStartedAt: number;
   baselineVersion: number;
-  baselineSource?: "real" | "synthetic";
-  syntheticDatasetId?: string | null;
-  activeTestTaskId?: string | null;
   bodyProportionProfile?: BodyProportionProfile | null;
   zoneGrid: ZoneGrid;
   updatedAt: number;
@@ -58,10 +53,7 @@ export type ObservationEpisode = {
   pauseZScore: number | null;
   contextWeight: 0 | 1 | 2 | 3;
   baselineVersion: number;
-  source?: "real_learning" | "synthetic_training" | "real_analysis" | "performance_test";
-  syntheticDatasetId?: string;
-  testTargetTaskType?: string;
-  motionClassification?: MotionClassification;
+  source?: "real_learning" | "real_analysis";
   motionSlice?: {
     startMs: number;
     endMs: number;
@@ -108,9 +100,6 @@ export const DEFAULT_PROFILE: ObservationProfile = {
   mode: "learning",
   learningStartedAt: 0,
   baselineVersion: 1,
-  baselineSource: "real",
-  syntheticDatasetId: null,
-  activeTestTaskId: null,
   bodyProportionProfile: null,
   zoneGrid: Array(9).fill(null),
   updatedAt: 0,
@@ -330,29 +319,12 @@ export function createObservationEpisode(args: {
   phase: WorkPhase;
   features: ObservationFeatures;
   baseline: BaselineSnapshot;
-  motionClassification?: MotionClassification;
   motionSlice?: ObservationEpisode["motionSlice"];
-  testTargetTask?: TaskTemplate;
-  /** @deprecated Kept for older callers; use motionClassification + testTargetTask. */
-  taskOverride?: TaskTemplate;
 }): ObservationEpisode {
   const inferred = inferTask(args.profile.occupation, args.phase, args.features);
-  const template = getOccupationTemplate(args.profile.occupation);
-  const predictedTask = args.motionClassification?.predictedTaskType
-    ? template.tasks.find((task) => task.id === args.motionClassification?.predictedTaskType)
-    : undefined;
-  const legacyOverride = args.taskOverride;
-  const inferredTask = predictedTask ?? legacyOverride ?? inferred.task;
-  const confidence = args.motionClassification
-    ? args.motionClassification.confidence
-    : legacyOverride
-      ? 0.94
-      : inferred.confidence;
-  const primitiveLabels = args.motionClassification?.primitiveLabels.length
-    ? args.motionClassification.primitiveLabels
-    : legacyOverride
-      ? legacyOverride.motions
-      : inferred.primitiveLabels;
+  const inferredTask = inferred.task;
+  const confidence = inferred.confidence;
+  const primitiveLabels = inferred.primitiveLabels;
   const taskBaseline = args.baseline.tasks.find((item) => item.taskType === inferredTask.id);
   const durationZScore = taskBaseline
     ? safeZScore(args.features.durationSeconds, taskBaseline.meanDuration, taskBaseline.durationSD)
@@ -376,7 +348,7 @@ export function createObservationEpisode(args: {
     disposition = "quarantined";
     dispositionReason = "평소 흐름으로 확정하기 어려워 기준선 학습에서 잠시 보류했어요.";
   }
-  const useFallbackLabel = !args.motionClassification && confidence < 0.55 && inferredTask.fallbackLabel;
+  const useFallbackLabel = confidence < 0.55 && inferredTask.fallbackLabel;
   return {
     id: `episode-${crypto.randomUUID()}`,
     sessionId: args.sessionId,
@@ -396,13 +368,7 @@ export function createObservationEpisode(args: {
     pauseZScore,
     contextWeight: contextWeight(args.features, inferredTask),
     baselineVersion: args.profile.baselineVersion,
-    source: args.testTargetTask || legacyOverride
-      ? "performance_test"
-      : args.profile.mode === "analysis"
-        ? "real_analysis"
-        : "real_learning",
-    testTargetTaskType: args.testTargetTask?.id ?? legacyOverride?.id,
-    motionClassification: args.motionClassification,
+    source: args.profile.mode === "analysis" ? "real_analysis" : "real_learning",
     motionSlice: args.motionSlice,
   };
 }

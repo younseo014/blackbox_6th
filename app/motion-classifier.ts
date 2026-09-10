@@ -1,30 +1,9 @@
 import { parseSessionFrame } from "./pose-store";
-import type { PrimitiveMotionLabel } from "./occupation-templates";
-import type { SyntheticTrainingClip } from "./synthetic-training";
-
-export type MotionClassificationCandidate = {
-  taskType: string;
-  taskLabel: string;
-  confidence: number;
-  distance: number;
-  primitiveLabels: PrimitiveMotionLabel[];
-};
-
-export type MotionClassification = {
-  status: "matched" | "uncertain" | "insufficient";
-  predictedTaskType: string | null;
-  predictedTaskLabel: string | null;
-  confidence: number;
-  candidates: MotionClassificationCandidate[];
-  primitiveLabels: PrimitiveMotionLabel[];
-  evidence: string[];
-};
 
 const SAMPLE_COUNT = 28;
 const DISPLAY_ASPECT_RATIO = 16 / 9;
 const BODY_JOINTS = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17];
 const FINGER_TIPS = [4, 8, 12, 16, 20];
-const MATCH_CONFIDENCE = 0.52;
 
 type SignatureFrame = {
   values: number[];
@@ -36,10 +15,6 @@ type MotionSignature = {
   usableFrames: number;
   handCoverage: number;
 };
-
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(maximum, Math.max(minimum, value));
-}
 
 function point(body: number[], index: number) {
   return {
@@ -212,71 +187,4 @@ export function compareSkeletonMotions(observedFrames: number[][], referenceFram
   const observed = buildMotionSignature(observedFrames);
   const reference = buildMotionSignature(referenceFrames);
   return observed && reference ? viewInvariantDistance(observed, reference) : null;
-}
-
-function confidenceFor(distance: number, runnerUpDistance: number) {
-  const shapeScore = Math.exp(-distance * 4.2);
-  const margin = runnerUpDistance > 0
-    ? clamp((runnerUpDistance - distance) / runnerUpDistance, 0, 1)
-    : 1;
-  return clamp(0.18 + shapeScore * 0.58 + margin * 0.24, 0.05, 0.99);
-}
-
-export function classifySkeletonMotion(
-  rawFrames: number[][],
-  clips: SyntheticTrainingClip[],
-): MotionClassification {
-  const observed = buildMotionSignature(rawFrames);
-  if (!observed || clips.length === 0) {
-    return {
-      status: "insufficient",
-      predictedTaskType: null,
-      predictedTaskLabel: null,
-      confidence: 0,
-      candidates: [],
-      primitiveLabels: [],
-      evidence: ["상반신 좌표가 충분하지 않아 동작을 확정하지 못했어요."],
-    };
-  }
-
-  const ranked = clips
-    .map((clip) => {
-      const reference = buildMotionSignature(clip.frames);
-      return {
-        clip,
-        distance: reference ? viewInvariantDistance(observed, reference) : 10,
-      };
-    })
-    .sort((a, b) => a.distance - b.distance);
-  const best = ranked[0];
-  const runnerUpDistance = ranked[1]?.distance ?? best.distance * 2;
-  const confidence = confidenceFor(best.distance, runnerUpDistance);
-  const candidates = ranked.slice(0, 3).map((item, index) => ({
-    taskType: item.clip.taskType,
-    taskLabel: item.clip.taskLabel,
-    confidence: index === 0
-      ? confidence
-      : clamp(confidence * Math.exp(-(item.distance - best.distance) * 5.5), 0.02, confidence - 0.01),
-    distance: item.distance,
-    primitiveLabels: item.clip.primitiveLabels,
-  }));
-  const matched = confidence >= MATCH_CONFIDENCE;
-  return {
-    status: matched ? "matched" : "uncertain",
-    predictedTaskType: best.clip.taskType,
-    predictedTaskLabel: best.clip.taskLabel,
-    confidence,
-    candidates,
-    primitiveLabels: best.clip.primitiveLabels,
-    evidence: [
-      `${observed.usableFrames}개 스켈레톤 좌표 프레임의 관절 궤적을 비교했어요.`,
-      "카메라의 정면·후면 차이를 줄이기 위해 좌우 반전된 스켈레톤도 함께 비교했어요.",
-      observed.handCoverage >= 0.5
-        ? "손가락 좌표가 충분해 손 모양 변화도 함께 비교했어요."
-        : "손가락 인식이 적어 상반신·팔 궤적을 중심으로 비교했어요.",
-      matched
-        ? `${best.clip.taskLabel} 예시와 움직임의 방향·범위·순서가 가장 가까웠어요.`
-        : "후보 간 차이가 작아 동작을 확정하지 않고 가능성이 높은 순서로 보여드려요.",
-    ],
-  };
 }
