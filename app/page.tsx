@@ -155,10 +155,27 @@ type ClosingChecklistItem = {
   done: boolean;
 };
 
-type DailyScheduleItem = {
+type WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+type WorkRoutineScheduleItem = {
   id: string;
   time: string;
   label: string;
+  repeats: boolean;
+};
+
+type WorkRoutine = {
+  id: string;
+  name: string;
+  days: WeekdayIndex[];
+  openTime: string;
+  closeTime: string;
+  schedule: WorkRoutineScheduleItem[];
+};
+
+type WorkContextConfig = {
+  routines: WorkRoutine[];
+  closedDays: WeekdayIndex[];
 };
 
 type UserInstallState = {
@@ -175,7 +192,21 @@ const DEFAULT_CLOSING_CHECKLIST: ClosingChecklistItem[] = [
 ];
 
 const CHECKLIST_STORAGE_KEY = "memory-guard-closing-checklist-v1";
-const DAILY_SCHEDULE_STORAGE_KEY = "memory-guard-daily-schedule-v1";
+const WORK_CONTEXT_CONFIG_STORAGE_KEY = "memory-guard-work-context-config-v2";
+const WEEKDAY_LABELS: Record<WeekdayIndex, string> = { 0: "일", 1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토" };
+const WEEKDAY_DISPLAY_ORDER: WeekdayIndex[] = [1, 2, 3, 4, 5, 6, 0];
+const DEFAULT_WORK_ROUTINE: WorkRoutine = {
+  id: "default",
+  name: "기본 루틴",
+  days: [0, 1, 2, 3, 4, 5, 6],
+  openTime: "08:00",
+  closeTime: "21:00",
+  schedule: [],
+};
+const DEFAULT_WORK_CONTEXT_CONFIG: WorkContextConfig = {
+  routines: [DEFAULT_WORK_ROUTINE],
+  closedDays: [],
+};
 const INTERFACE_MODE_STORAGE_KEY = "memory-guard-interface-mode-v1";
 const USER_INSTALL_STORAGE_KEY = "memory-guard-user-install-v1";
 const POSE_DISPLAY_HOLD_MS = 450;
@@ -244,14 +275,32 @@ function loadChecklistSettings() {
   }
 }
 
-function loadDailySchedule(): DailyScheduleItem[] {
-  if (typeof window === "undefined") return [];
+function isWeekdayIndex(value: unknown): value is WeekdayIndex {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6;
+}
+
+function loadWorkContextConfig(): WorkContextConfig {
+  if (typeof window === "undefined") return DEFAULT_WORK_CONTEXT_CONFIG;
   try {
-    const stored = window.localStorage.getItem(DAILY_SCHEDULE_STORAGE_KEY);
-    const items = stored ? (JSON.parse(stored) as DailyScheduleItem[]) : [];
-    return Array.isArray(items) ? items : [];
+    const stored = window.localStorage.getItem(WORK_CONTEXT_CONFIG_STORAGE_KEY);
+    if (!stored) return DEFAULT_WORK_CONTEXT_CONFIG;
+    const parsed = JSON.parse(stored) as Partial<WorkContextConfig>;
+    const routines = Array.isArray(parsed.routines) && parsed.routines.length > 0
+      ? parsed.routines.map((routine) => ({
+          id: routine.id ?? crypto.randomUUID(),
+          name: routine.name ?? "루틴",
+          days: Array.isArray(routine.days) ? routine.days.filter(isWeekdayIndex) : [],
+          openTime: routine.openTime ?? DEFAULT_WORK_ROUTINE.openTime,
+          closeTime: routine.closeTime ?? DEFAULT_WORK_ROUTINE.closeTime,
+          schedule: Array.isArray(routine.schedule)
+            ? routine.schedule.map((item) => ({ ...item, repeats: item.repeats ?? false }))
+            : [],
+        }))
+      : [DEFAULT_WORK_ROUTINE];
+    const closedDays = Array.isArray(parsed.closedDays) ? parsed.closedDays.filter(isWeekdayIndex) : [];
+    return { routines, closedDays };
   } catch {
-    return [];
+    return DEFAULT_WORK_CONTEXT_CONFIG;
   }
 }
 
@@ -266,6 +315,19 @@ function currentDateKey() {
 function minutesFromClock(value: string) {
   const [hours, minutes] = value.split(":").map(Number);
   return hours * 60 + minutes;
+}
+
+function formatClockLabel(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  const period = hours < 12 ? "오전" : "오후";
+  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
+  return minutes === 0 ? `${period} ${displayHour}시` : `${period} ${displayHour}시 ${minutes}분`;
+}
+
+function routineNameForDay(config: WorkContextConfig, day: WeekdayIndex): string {
+  if (config.closedDays.includes(day)) return "휴무";
+  const owner = config.routines.find((routine) => routine.days.includes(day));
+  return owner ? owner.name : "미지정";
 }
 
 const CHUNK_FRAME_COUNT = MOTION_SAMPLE_RATE * 30;
@@ -548,9 +610,7 @@ export default function Home() {
   );
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [checklistReminderDue, setChecklistReminderDue] = useState(false);
-  const [dailySchedule, setDailySchedule] = useState<DailyScheduleItem[]>(loadDailySchedule);
-  const [newScheduleTime, setNewScheduleTime] = useState("08:30");
-  const [newScheduleLabel, setNewScheduleLabel] = useState("");
+  const [workContextConfig, setWorkContextConfig] = useState<WorkContextConfig>(loadWorkContextConfig);
   const [brainHealthOpen, setBrainHealthOpen] = useState(false);
   const [learnedMotions, setLearnedMotions] = useState<LearnedMotionAction[]>([]);
   const [quickMotionMode, setQuickMotionMode] = useState<QuickMotionMode>("idle");
@@ -785,8 +845,8 @@ export default function Home() {
   }, [closingChecklist, closingTime]);
 
   useEffect(() => {
-    window.localStorage.setItem(DAILY_SCHEDULE_STORAGE_KEY, JSON.stringify(dailySchedule));
-  }, [dailySchedule]);
+    window.localStorage.setItem(WORK_CONTEXT_CONFIG_STORAGE_KEY, JSON.stringify(workContextConfig));
+  }, [workContextConfig]);
 
   useEffect(() => {
     const checkReminder = () => {
@@ -2161,20 +2221,113 @@ export default function Home() {
     setClosingChecklist((items) => items.filter((item) => item.id !== itemId));
   }
 
-  function addScheduleItem(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const label = newScheduleLabel.trim();
-    if (!label || !newScheduleTime) return;
-    setDailySchedule((items) =>
-      [...items, { id: crypto.randomUUID(), time: newScheduleTime, label }].sort((a, b) =>
-        a.time.localeCompare(b.time),
-      ),
-    );
-    setNewScheduleLabel("");
+  function addRoutine() {
+    setWorkContextConfig((config) => ({
+      ...config,
+      routines: [
+        ...config.routines,
+        {
+          id: crypto.randomUUID(),
+          name: `루틴 ${config.routines.length + 1}`,
+          days: [],
+          openTime: DEFAULT_WORK_ROUTINE.openTime,
+          closeTime: DEFAULT_WORK_ROUTINE.closeTime,
+          schedule: [],
+        },
+      ],
+    }));
   }
 
-  function removeScheduleItem(itemId: string) {
-    setDailySchedule((items) => items.filter((item) => item.id !== itemId));
+  function removeRoutine(routineId: string) {
+    setWorkContextConfig((config) => {
+      if (config.routines.length <= 1) return config;
+      const removed = config.routines.find((routine) => routine.id === routineId);
+      const remaining = config.routines.filter((routine) => routine.id !== routineId);
+      if (!removed || removed.days.length === 0) return { ...config, routines: remaining };
+      const [first, ...rest] = remaining;
+      const merged = { ...first, days: [...new Set([...first.days, ...removed.days])].sort() as WeekdayIndex[] };
+      return { ...config, routines: [merged, ...rest] };
+    });
+  }
+
+  function renameRoutine(routineId: string, name: string) {
+    setWorkContextConfig((config) => ({
+      ...config,
+      routines: config.routines.map((routine) => (routine.id === routineId ? { ...routine, name } : routine)),
+    }));
+  }
+
+  function setRoutineTime(routineId: string, field: "openTime" | "closeTime", value: string) {
+    setWorkContextConfig((config) => ({
+      ...config,
+      routines: config.routines.map((routine) => (routine.id === routineId ? { ...routine, [field]: value } : routine)),
+    }));
+  }
+
+  function assignDayToRoutine(routineId: string, day: WeekdayIndex) {
+    setWorkContextConfig((config) => ({
+      closedDays: config.closedDays.filter((closedDay) => closedDay !== day),
+      routines: config.routines.map((routine) => ({
+        ...routine,
+        days: routine.id === routineId
+          ? (routine.days.includes(day) ? routine.days : [...routine.days, day].sort())
+          : routine.days.filter((existing) => existing !== day),
+      })),
+    }));
+  }
+
+  function toggleClosedDay(day: WeekdayIndex) {
+    setWorkContextConfig((config) => {
+      const isClosed = config.closedDays.includes(day);
+      if (isClosed) {
+        const [first, ...rest] = config.routines;
+        return {
+          closedDays: config.closedDays.filter((closedDay) => closedDay !== day),
+          routines: first ? [{ ...first, days: [...first.days, day].sort() }, ...rest] : config.routines,
+        };
+      }
+      return {
+        closedDays: [...config.closedDays, day].sort(),
+        routines: config.routines.map((routine) => ({ ...routine, days: routine.days.filter((existing) => existing !== day) })),
+      };
+    });
+  }
+
+  function removeRoutineScheduleItem(routineId: string, itemId: string) {
+    setWorkContextConfig((config) => ({
+      ...config,
+      routines: config.routines.map((routine) =>
+        routine.id === routineId
+          ? { ...routine, schedule: routine.schedule.filter((item) => item.id !== itemId) }
+          : routine,
+      ),
+    }));
+  }
+
+  function handleAddRoutineItem(routineId: string) {
+    return (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = new FormData(form);
+      const time = String(data.get("time") ?? "");
+      const label = String(data.get("label") ?? "").trim();
+      const repeats = data.get("repeats") === "on";
+      if (!label || !time) return;
+      setWorkContextConfig((config) => ({
+        ...config,
+        routines: config.routines.map((routine) =>
+          routine.id === routineId
+            ? {
+                ...routine,
+                schedule: [...routine.schedule, { id: crypto.randomUUID(), time, label, repeats }].sort((a, b) =>
+                  a.time.localeCompare(b.time),
+                ),
+              }
+            : routine,
+        ),
+      }));
+      form.reset();
+    };
   }
 
   const statusText =
@@ -2235,6 +2388,13 @@ export default function Home() {
     0,
   );
   const occupationTemplate = getOccupationTemplate(observationProfile.occupation);
+  function routineSummary(routine: WorkRoutine) {
+    return [
+      `${formatClockLabel(routine.openTime)} 오픈 준비`,
+      ...routine.schedule.map((item) => `${formatClockLabel(item.time)} ${item.label}${item.repeats ? " (반복)" : ""}`),
+      `${formatClockLabel(routine.closeTime)} 마감`,
+    ].join(" → ");
+  }
   const currentObservationEpisodes = observationEpisodes.filter(
     (episode) =>
       episode.occupation === observationProfile.occupation &&
@@ -3233,35 +3393,118 @@ export default function Home() {
               </button>
             )}
 
-            <section className="settings-checklist-card">
+            <section className="settings-checklist-card work-context-card">
               <div>
-                <span className="section-kicker">나의 하루 일과</span>
-                <h2>평소 업무 시간표를 알려주세요</h2>
-                <p>직군 기본값 대신, 사장님 매장에서 실제로 반복되는 시간과 업무를 등록하면 더 정확하게 비교할 수 있어요.</p>
+                <span className="section-kicker">업무 맥락 등록</span>
+                <h2>사장님의 실제 업무 루틴을 알려주세요</h2>
+                <p>직군 기본값 대신, 매장에서 실제로 반복되는 요일별 루틴과 정기 휴일을 등록하면 더 정확하게 비교할 수 있어요. 평일처럼 같은 루틴을 쓰는 요일은 하나의 루틴에 묶어서 지정할 수 있어요.</p>
               </div>
-              <ul className="settings-checklist-items">
-                {dailySchedule.map((item) => (
-                  <li key={item.id}>
-                    <span>{item.time} · {item.label}</span>
-                    <button type="button" onClick={() => removeScheduleItem(item.id)} aria-label={`${item.label} 삭제`}>삭제</button>
-                  </li>
-                ))}
-              </ul>
-              <form className="checklist-add-form" onSubmit={addScheduleItem}>
-                <input
-                  type="time"
-                  value={newScheduleTime}
-                  onChange={(event) => setNewScheduleTime(event.target.value)}
-                  aria-label="일과 시간"
-                />
-                <input
-                  value={newScheduleLabel}
-                  onChange={(event) => setNewScheduleLabel(event.target.value)}
-                  placeholder="예: 홀 청소"
-                  aria-label="일과 내용"
-                />
-                <button type="submit">일과 추가</button>
-              </form>
+
+              <div className="work-context-week-overview">
+                <span className="section-kicker">요일별 배정 현황</span>
+                <div className="weekday-chip-row">
+                  {WEEKDAY_DISPLAY_ORDER.map((day) => (
+                    <span key={day} className={`weekday-overview-chip ${workContextConfig.closedDays.includes(day) ? "closed" : ""}`}>
+                      <strong>{WEEKDAY_LABELS[day]}</strong>
+                      <small>{routineNameForDay(workContextConfig, day)}</small>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="work-context-closed-days">
+                <span className="section-kicker">정기 휴일</span>
+                <div className="weekday-chip-row">
+                  {WEEKDAY_DISPLAY_ORDER.map((day) => (
+                    <button
+                      key={day}
+                      type="button"
+                      className={`weekday-toggle-chip ${workContextConfig.closedDays.includes(day) ? "active" : ""}`}
+                      onClick={() => toggleClosedDay(day)}
+                      aria-pressed={workContextConfig.closedDays.includes(day)}
+                    >
+                      {WEEKDAY_LABELS[day]}
+                    </button>
+                  ))}
+                </div>
+                <p className="work-context-hint">정기 휴일로 지정하면 그 요일은 어떤 루틴에도 속하지 않아요. 다시 누르면 첫 번째 루틴으로 돌아갑니다.</p>
+              </div>
+
+              {workContextConfig.routines.map((routine) => (
+                <div className="work-routine-card" key={routine.id}>
+                  <div className="work-routine-head">
+                    <input
+                      className="work-routine-name"
+                      value={routine.name}
+                      onChange={(event) => renameRoutine(routine.id, event.target.value)}
+                      aria-label="루틴 이름"
+                    />
+                    {workContextConfig.routines.length > 1 && (
+                      <button type="button" className="work-routine-remove" onClick={() => removeRoutine(routine.id)}>
+                        루틴 삭제
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="weekday-chip-row">
+                    {WEEKDAY_DISPLAY_ORDER.map((day) => (
+                      <button
+                        key={day}
+                        type="button"
+                        className={`weekday-toggle-chip ${routine.days.includes(day) ? "active" : ""}`}
+                        onClick={() => assignDayToRoutine(routine.id, day)}
+                        aria-pressed={routine.days.includes(day)}
+                      >
+                        {WEEKDAY_LABELS[day]}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="work-context-times">
+                    <label>
+                      <span>출근·오픈 시각</span>
+                      <input
+                        type="time"
+                        value={routine.openTime}
+                        onChange={(event) => setRoutineTime(routine.id, "openTime", event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      <span>마감 시각</span>
+                      <input
+                        type="time"
+                        value={routine.closeTime}
+                        onChange={(event) => setRoutineTime(routine.id, "closeTime", event.target.value)}
+                      />
+                    </label>
+                  </div>
+
+                  <ul className="settings-checklist-items">
+                    {routine.schedule.map((item) => (
+                      <li key={item.id}>
+                        <span>{item.time} · {item.label}{item.repeats ? " · 반복" : ""}</span>
+                        <button type="button" onClick={() => removeRoutineScheduleItem(routine.id, item.id)} aria-label={`${item.label} 삭제`}>삭제</button>
+                      </li>
+                    ))}
+                  </ul>
+                  <form className="checklist-add-form" onSubmit={handleAddRoutineItem(routine.id)}>
+                    <input type="time" name="time" defaultValue="08:30" aria-label="업무 시간" />
+                    <input name="label" placeholder="예: 홀 청소" aria-label="업무 내용" />
+                    <label className="schedule-repeat-toggle">
+                      <input type="checkbox" name="repeats" />
+                      <span>시간대별 반복 업무</span>
+                    </label>
+                    <button type="submit">업무 추가</button>
+                  </form>
+
+                  <div className="work-context-summary">
+                    <span className="section-kicker">{routine.name} 요약</span>
+                    <p>{routineSummary(routine)}</p>
+                  </div>
+                </div>
+              ))}
+
+              <button type="button" className="work-routine-add" onClick={addRoutine}>+ 새 루틴 추가</button>
             </section>
 
             <section className="settings-checklist-card">

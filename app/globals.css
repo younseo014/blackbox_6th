@@ -5620,6 +5620,187 @@ body {
   background: white;
 }
 
+.work-context-times {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.work-context-times label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.work-context-times input {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #cedae0;
+  border-radius: 12px;
+  background: white;
+  color: #4b6b80;
+  font-weight: 800;
+}
+
+.work-context-card .checklist-add-form {
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+}
+
+.schedule-repeat-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.work-context-summary {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #f3f7f4;
+}
+
+.work-context-summary p {
+  margin: 6px 0 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.6;
+  font-weight: 700;
+}
+
+.work-context-week-overview,
+.work-context-closed-days {
+  margin-top: 18px;
+}
+
+.weekday-chip-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.weekday-overview-chip {
+  min-width: 40px;
+  padding: 8px 6px;
+  border-radius: 10px;
+  background: #f3f7f4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.weekday-overview-chip strong {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.weekday-overview-chip small {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.weekday-overview-chip.closed {
+  background: #f7ecec;
+}
+
+.weekday-overview-chip.closed small {
+  color: #9a6a62;
+  font-weight: 800;
+}
+
+.weekday-toggle-chip {
+  min-width: 40px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #cedae0;
+  border-radius: 10px;
+  background: white;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.weekday-toggle-chip.active {
+  border-color: transparent;
+  background: #2f3c34;
+  color: white;
+}
+
+.work-context-closed-days .weekday-toggle-chip.active {
+  background: #9a6a62;
+}
+
+.work-context-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.work-routine-card {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px dashed #d7ddd9;
+}
+
+.work-routine-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.work-routine-name {
+  flex: 1;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #cedae0;
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.work-routine-remove {
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: #9a6a62;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.work-routine-card .weekday-chip-row {
+  margin-top: 14px;
+}
+
+.work-routine-add {
+  margin-top: 18px;
+  min-height: 46px;
+  width: 100%;
+  border: 1px dashed #cedae0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .checklist-add-form button {
   padding: 0 15px;
   border: 0;
@@ -5726,6 +5907,8 @@ body {
   .care-connect-actions,
   .brain-health-actions { grid-template-columns: 1fr; }
   .brain-health-modal { padding: 26px 20px; }
+  .work-context-times { grid-template-columns: 1fr; }
+  .work-context-card .checklist-add-form { grid-template-columns: 1fr; }
 }
 
 /* -- User / developer interface separation ------------------------------ */

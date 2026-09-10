@@ -1,19 +1,62 @@
 {
   "version": 1,
-  "updatedAt": 1789002627087,
-  "nodeCount": 1,
-  "contentFingerprint": "94aabf9d_c4b0c034_62",
+  "updatedAt": 1789006056869,
+  "nodeCount": 4,
+  "contentFingerprint": "d302db00_6a8e9ac5_208",
   "nodes": {
     "mem-feedback_functional_scope_only-----0": {
       "id": "mem-feedback_functional_scope_only-----0",
       "category": "feedback_functional_scope_only",
-      "confidence": 0.6000000000000001,
-      "accessCount": 2,
+      "confidence": 1,
+      "accessCount": 11,
       "createdAt": 1789001111677
+    },
+    "insight-1789006052149-bns2": {
+      "id": "insight-1789006052149-bns2",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1789006052149
+    },
+    "insight-1789006052149-d1yv": {
+      "id": "insight-1789006052149-d1yv",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1789006052149
+    },
+    "insight-1789006052149-x69i": {
+      "id": "insight-1789006052149-x69i",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1789006052149
     }
   },
-  "edges": [],
+  "edges": [
+    {
+      "sourceId": "insight-1789006052149-bns2",
+      "targetId": "insight-1789006052149-d1yv",
+      "type": "similar",
+      "weight": 0.7808219178082192
+    },
+    {
+      "sourceId": "insight-1789006052149-bns2",
+      "targetId": "insight-1789006052149-x69i",
+      "type": "similar",
+      "weight": 0.7702702702702703
+    },
+    {
+      "sourceId": "insight-1789006052149-d1yv",
+      "targetId": "insight-1789006052149-x69i",
+      "type": "similar",
+      "weight": 0.7195121951219512
+    }
+  ],
   "pageRanks": {
-    "mem-feedback_functional_scope_only-----0": 1
+    "mem-feedback_functional_scope_only-----0": 0.16498242448120026,
+    "insight-1789006052149-bns2": 0.16498242448120026,
+    "insight-1789006052149-d1yv": 0.23510001253794233,
+    "insight-1789006052149-x69i": 0.43493513849965726
   }
 }

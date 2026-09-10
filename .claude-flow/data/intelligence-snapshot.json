@@ -40,5 +40,149 @@
         "accessCount": 0
       }
     ]
+  },
+  {
+    "timestamp": 1789006052150,
+    "nodes": 4,
+    "edges": 3,
+    "pageRankSum": 1,
+    "confidences": [
+      1,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "accessCounts": [
+      11,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 1,
+        "pageRank": 0.16498242448120026,
+        "accessCount": 11
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.5,
+        "pageRank": 0.43493513849965726,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.23510001253794233,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.5,
+        "pageRank": 0.16498242448120026,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789006052154,
+    "nodes": 4,
+    "edges": 3,
+    "pageRankSum": 1,
+    "confidences": [
+      1,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "accessCounts": [
+      11,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 1,
+        "pageRank": 0.16498242448120026,
+        "accessCount": 11
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.5,
+        "pageRank": 0.43493513849965726,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.23510001253794233,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.5,
+        "pageRank": 0.16498242448120026,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789006056871,
+    "nodes": 4,
+    "edges": 3,
+    "pageRankSum": 1,
+    "confidences": [
+      1,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "accessCounts": [
+      11,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 1,
+        "pageRank": 0.16498242448120026,
+        "accessCount": 11
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.5,
+        "pageRank": 0.43493513849965726,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.23510001253794233,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.5,
+        "pageRank": 0.16498242448120026,
+        "accessCount": 0
+      }
+    ]
   }
 ]
