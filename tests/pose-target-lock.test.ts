@@ -116,6 +116,19 @@ test("shoulders and arms are enough to lock a true upper-body-only pose", () => 
   assert.ok(selection.lock);
 });
 
+test("one visible arm is enough to recognize and track a partial person", () => {
+  const owner = standingPose();
+  const acquired = selectLockedPose([owner], null, 1000);
+  const armOnly = standingPose();
+  for (const index of [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) {
+    armOnly[index] = { ...armOnly[index], visibility: 0.05 };
+  }
+  for (const index of [11, 13, 15]) armOnly[index] = { ...owner[index], visibility: 0.8 };
+
+  assert.equal(selectLockedPose([armOnly], null, 1066).landmarks, armOnly);
+  assert.equal(selectLockedPose([armOnly], acquired.lock, 1066).landmarks, armOnly);
+});
+
 test("target lock follows the same person from close upper-body to farther full-body framing", () => {
   const close = standingPose(0.5, 1.05);
   close[27] = point(0.44, 0.95, 0, 0.1);

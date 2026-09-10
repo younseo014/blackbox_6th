@@ -11,6 +11,12 @@ export type LearningDisposition = "accepted" | "quarantined" | "excluded" | "ana
 
 export type ZoneGrid = Array<string | null>;
 
+export type CustomZone = {
+  id: string;
+  label: string;
+  contextZoneId: string | null;
+};
+
 export type ObservationProfile = {
   id: "primary";
   occupation: OccupationId;
@@ -19,6 +25,8 @@ export type ObservationProfile = {
   baselineVersion: number;
   bodyProportionProfile?: BodyProportionProfile | null;
   zoneGrid: ZoneGrid;
+  secondaryZoneGrid: ZoneGrid;
+  customZones: CustomZone[];
   updatedAt: number;
 };
 
@@ -37,6 +45,7 @@ export type ObservationFeatures = {
 export type ObservationEpisode = {
   id: string;
   sessionId: string;
+  globalSessionId?: string;
   recordedAt: number;
   date: string;
   occupation: OccupationId;
@@ -102,6 +111,8 @@ export const DEFAULT_PROFILE: ObservationProfile = {
   baselineVersion: 1,
   bodyProportionProfile: null,
   zoneGrid: Array(9).fill(null),
+  secondaryZoneGrid: Array(9).fill(null),
+  customZones: [],
   updatedAt: 0,
 };
 
@@ -198,7 +209,11 @@ function gridIndex(point: { x: number; y: number }) {
   return row * 3 + column;
 }
 
-export function extractObservationFeatures(rawFrames: number[][], zoneGrid: ZoneGrid): ObservationFeatures {
+export function extractObservationFeatures(
+  rawFrames: number[][],
+  zoneGrid: ZoneGrid,
+  zoneAliases: Record<string, string> = {},
+): ObservationFeatures {
   if (rawFrames.length === 0) {
     return {
       durationSeconds: 0,
@@ -216,7 +231,8 @@ export function extractObservationFeatures(rawFrames: number[][], zoneGrid: Zone
   const points = frames.map(primaryWrist);
   const zoneTrail = frames.map((frame) => {
     const center = bodyCenter(frame);
-    return center ? zoneGrid[gridIndex(center)] ?? null : null;
+    const zoneId = center ? zoneGrid[gridIndex(center)] ?? null : null;
+    return zoneId ? zoneAliases[zoneId] ?? zoneId : null;
   });
   let pathLength = 0;
   let activeSteps = 0;

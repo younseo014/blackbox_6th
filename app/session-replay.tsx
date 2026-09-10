@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   approximateHeadCenterFromShoulders,
   computeHandMotionVariability,
@@ -76,8 +76,21 @@ function humanizeDetection(event: DetectedMotionEvent) {
 }
 
 export type SessionReplaySource =
-  | { kind: "recorded"; sessionId: string; globalSessionId?: string }
+  | {
+      kind: "recorded";
+      sessionId: string;
+      globalSessionId?: string;
+      window?: { startMs: number; endMs: number };
+    }
   | { kind: "synthetic"; frames: number[][] };
+
+function framesInWindow(frames: number[][], window?: { startMs: number; endMs: number }) {
+  if (!window) return frames;
+  return frames.filter((frame) => {
+    const timeMs = frame[0] ?? 0;
+    return timeMs >= window.startMs && timeMs <= window.endMs;
+  });
+}
 
 export function SessionReplayPanel({
   source,
@@ -87,6 +100,8 @@ export function SessionReplayPanel({
   observationMode = "analysis",
   baselineVersion = 1,
   showMultiCameraDiagnostics = false,
+  reviewPanel,
+  hideAnalysisFeedback = false,
   onClose,
 }: {
   source: SessionReplaySource;
@@ -96,6 +111,8 @@ export function SessionReplayPanel({
   observationMode?: ObservationMode;
   baselineVersion?: number;
   showMultiCameraDiagnostics?: boolean;
+  reviewPanel?: ReactNode;
+  hideAnalysisFeedback?: boolean;
   onClose: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -113,6 +130,8 @@ export function SessionReplayPanel({
   const [showFeedbackReasons, setShowFeedbackReasons] = useState(false);
   const recordedSessionId = source.kind === "recorded" ? source.sessionId : null;
   const recordedGlobalSessionId = source.kind === "recorded" ? source.globalSessionId : undefined;
+  const recordedWindowStart = source.kind === "recorded" ? source.window?.startMs : undefined;
+  const recordedWindowEnd = source.kind === "recorded" ? source.window?.endMs : undefined;
 
   useEffect(() => {
     if (!recordedSessionId) return;
@@ -122,7 +141,13 @@ export function SessionReplayPanel({
       : getSessionFrames(recordedSessionId).then((frames) => [{ cameraSlot: 1 as const, frames }]))
       .then((streams) => {
         if (cancelled) return;
-        const sorted = streams.sort((a, b) => a.cameraSlot - b.cameraSlot);
+        const replayWindow = recordedWindowStart !== undefined && recordedWindowEnd !== undefined
+          ? { startMs: recordedWindowStart, endMs: recordedWindowEnd }
+          : undefined;
+        const sorted = streams
+          .map((stream) => ({ ...stream, frames: framesInWindow(stream.frames, replayWindow) }))
+          .filter((stream) => stream.frames.length > 0)
+          .sort((a, b) => a.cameraSlot - b.cameraSlot);
         const first = sorted[0];
         setCameraStreams(sorted);
         setSelectedCameraSlot(first?.cameraSlot ?? 1);
@@ -130,7 +155,7 @@ export function SessionReplayPanel({
       })
       .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
-  }, [recordedGlobalSessionId, recordedSessionId]);
+  }, [recordedGlobalSessionId, recordedSessionId, recordedWindowStart, recordedWindowEnd]);
 
   const continuityReport = useMemo<CameraContinuityReport | null>(
     () => cameraStreams.length > 1 ? analyzeCameraContinuity(cameraStreams) : null,
@@ -278,6 +303,8 @@ export function SessionReplayPanel({
           <p>{source.kind === "synthetic" ? "설명을 위해 만든 예시 동작입니다." : "영상·음성 없이 저장된 몸과 손 좌표를 재생합니다."}</p>
         </header>
 
+        {reviewPanel}
+
         {cameraStreams.length > 1 && (
           <div className="replay-camera-tabs" role="tablist" aria-label="재생할 카메라">
             {cameraStreams.map((stream) => (
@@ -385,7 +412,7 @@ export function SessionReplayPanel({
                   <span>업무 흐름 · <strong>{motionTags.rhythm}</strong></span>
                 </div>
                 {detectionExplanation?.contributesToSignal && <p className="care-included">이번 주 케어 흐름에 반영된 항목이에요.</p>}
-                <div className="analysis-feedback">
+                {!hideAnalysisFeedback && <div className="analysis-feedback">
                   <strong>이 분석이 맞았나요?</strong>
                   {feedback ? <p>{feedback === "accurate" ? "확인해 주셔서 감사해요. 분석 결과를 유지할게요." : "이 장면은 분석 집계에서 제외했어요."}</p> : (
                     <div>
@@ -399,7 +426,7 @@ export function SessionReplayPanel({
                     <button type="button" onClick={() => void submitFeedback("false_positive", "wrong_task")}>다른 업무</button>
                     <button type="button" onClick={() => void submitFeedback("false_positive", "camera_error")}>카메라 오류</button>
                   </div>}
-                </div>
+                </div>}
               </aside>
             </div>
 

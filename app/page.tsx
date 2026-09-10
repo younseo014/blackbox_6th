@@ -10,7 +10,6 @@ import type {
   PoseLandmarker,
 } from "@mediapipe/tasks-vision";
 import {
-  BODY_LANDMARK_COUNT,
   HAND_LANDMARK_COUNT,
   MOTION_FRAME_STRIDE,
   MOTION_SAMPLE_RATE,
@@ -20,6 +19,7 @@ import {
   downloadMotionSession,
   extractHandPointTrajectory,
   finishMotionSession,
+  getGlobalSessionCameraFrames,
   getGlobalSessionFrames,
   getSessionFrames,
   getLatestBodyProportionProfile,
@@ -70,6 +70,7 @@ import {
 import {
   OCCUPATION_TEMPLATES,
   getOccupationTemplate,
+  inferZoneContext,
   phaseForHour,
   type OccupationId,
 } from "./occupation-templates";
@@ -101,6 +102,19 @@ import {
 } from "./custom-motion-training";
 import { sliceTargetMotion } from "./motion-segmentation";
 import { createGlobalCaptureSession, type GlobalCaptureSession } from "./multi-camera";
+import {
+  ACTION_AMBIGUITY_REASON_LABELS,
+  applyManualActionLabel,
+  createActionReview,
+  listPendingActionReviews,
+  markActionReviewUnresolved,
+  normalizeActionCandidates,
+  type ReviewableObservationEpisode,
+} from "./action-review";
+import {
+  buildWorkContextCandidates,
+  listWorkContextLabels,
+} from "./work-context-inference";
 import {
   matchHandToPose,
   selectLockedPose,
@@ -579,6 +593,8 @@ export default function Home() {
   const [latestSession, setLatestSession] = useState<MotionSessionRecord | null>(null);
   const [recentSessions, setRecentSessions] = useState<MotionSessionRecord[]>([]);
   const [replaySessionId, setReplaySessionId] = useState<string | null>(null);
+  const [selectedReviewEpisodeId, setSelectedReviewEpisodeId] = useState<string | null>(null);
+  const [selectedReviewTaskType, setSelectedReviewTaskType] = useState("");
   const [demoReplay, setDemoReplay] = useState<{
     key: string;
     label: string;
@@ -602,6 +618,8 @@ export default function Home() {
   const [observationBaseline, setObservationBaseline] = useState<BaselineSnapshot>(() => buildBaseline([], 1));
   const [zoneSetupOpen, setZoneSetupOpen] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string>("DRINK_PREP");
+  const [zoneCameraSlot, setZoneCameraSlot] = useState<1 | 2>(1);
+  const [customZoneName, setCustomZoneName] = useState("");
   const [closingTime, setClosingTime] = useState(
     () => loadChecklistSettings().time,
   );
@@ -621,6 +639,7 @@ export default function Home() {
   const [learnedMotionResult, setLearnedMotionResult] = useState<LearnedMotionResult | null>(null);
   const [quickMotionBusy, setQuickMotionBusy] = useState(false);
   const [quickMotionCameraOpen, setQuickMotionCameraOpen] = useState(false);
+  const [multiCameraModalOpen, setMultiCameraModalOpen] = useState(false);
 
   // --- Consent, real observation metrics, and data controls ---
   // Lazy initializer instead of an effect: getConsent() is SSR-safe (it
@@ -776,7 +795,7 @@ export default function Home() {
         secondaryVideoRef.current.play().catch(() => undefined);
       }
     }
-  }, [cameraStatus, view, quickMotionCameraOpen]);
+  }, [cameraStatus, view, quickMotionCameraOpen, multiCameraModalOpen]);
 
   useEffect(() => {
     queueMicrotask(() => setLearnedMotions(loadLearnedMotionActions()));
@@ -958,6 +977,7 @@ export default function Home() {
       setShowConsentModal(true);
       return;
     }
+    setMultiCameraModalOpen(true);
     void startCamera();
   }
 
@@ -981,7 +1001,10 @@ export default function Home() {
     setConsentState(next);
     setShowConsentModal(false);
     if (observationConsent && pendingCameraStartRef.current) {
+      if (!quickMotionCameraRequestedRef.current) setMultiCameraModalOpen(true);
       void startCamera(undefined, undefined, quickMotionCameraRequestedRef.current);
+    } else if (pendingCameraStartRef.current && !quickMotionCameraRequestedRef.current) {
+      setMultiCameraModalOpen(false);
     }
     pendingCameraStartRef.current = false;
   }
@@ -1122,6 +1145,14 @@ export default function Home() {
     const handBaseOptions = {
       modelAssetPath: "/models/hand_landmarker.task",
     };
+    const poseTrackingOptions = {
+      runningMode: "VIDEO" as const,
+      numPoses: 3,
+      minPoseDetectionConfidence: 0.25,
+      minPosePresenceConfidence: 0.25,
+      minTrackingConfidence: 0.25,
+      outputSegmentationMasks: false,
+    };
 
     if (!poseLandmarkerRef.current) {
       try {
@@ -1129,12 +1160,7 @@ export default function Home() {
           vision,
           {
             baseOptions: { ...poseBaseOptions, delegate: "GPU" },
-            runningMode: "VIDEO",
-            numPoses: 3,
-            minPoseDetectionConfidence: 0.4,
-            minPosePresenceConfidence: 0.4,
-            minTrackingConfidence: 0.35,
-            outputSegmentationMasks: false,
+            ...poseTrackingOptions,
           },
         );
       } catch {
@@ -1142,12 +1168,7 @@ export default function Home() {
           vision,
           {
             baseOptions: poseBaseOptions,
-            runningMode: "VIDEO",
-            numPoses: 3,
-            minPoseDetectionConfidence: 0.4,
-            minPosePresenceConfidence: 0.4,
-            minTrackingConfidence: 0.35,
-            outputSegmentationMasks: false,
+            ...poseTrackingOptions,
           },
         );
       }
@@ -1157,12 +1178,12 @@ export default function Home() {
       try {
         secondaryPoseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
           vision,
-          { baseOptions: { ...poseBaseOptions, delegate: "GPU" }, runningMode: "VIDEO", numPoses: 3, minPoseDetectionConfidence: 0.4, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.35, outputSegmentationMasks: false },
+          { baseOptions: { ...poseBaseOptions, delegate: "GPU" }, ...poseTrackingOptions },
         );
       } catch {
         secondaryPoseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
           vision,
-          { baseOptions: poseBaseOptions, runningMode: "VIDEO", numPoses: 3, minPoseDetectionConfidence: 0.4, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.35, outputSegmentationMasks: false },
+          { baseOptions: poseBaseOptions, ...poseTrackingOptions },
         );
       }
     }
@@ -1264,6 +1285,7 @@ export default function Home() {
     hands: HandState,
     cameraSlot: 1 | 2 = 1,
   ) {
+    if (!landmarks) return;
     const bufferRef = cameraSlot === 1 ? poseBufferRef : secondaryPoseBufferRef;
     const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : secondaryChunkDetectedFramesRef;
     const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : secondaryChunkFullBodyFramesRef;
@@ -1280,17 +1302,11 @@ export default function Home() {
     buffer.push(hands.leftScore);
     buffer.push(hands.rightScore);
 
-    if (landmarks) {
-      for (let index = 11; index < 33; index += 1) {
-        const point = landmarks[index];
-        buffer.push(point.x, point.y, point.z, point.visibility);
-      }
-      detectedRef.current += 1;
-    } else {
-      for (let index = 0; index < BODY_LANDMARK_COUNT * 4; index += 1) {
-        buffer.push(Number.NaN);
-      }
+    for (let index = 11; index < 33; index += 1) {
+      const point = landmarks[index];
+      buffer.push(point.x, point.y, point.z, point.visibility);
     }
+    detectedRef.current += 1;
 
     const pushHand = (hand: NormalizedLandmark[] | null) => {
       if (hand) {
@@ -1464,10 +1480,10 @@ export default function Home() {
             : { left: null, right: null, leftScore: 0, rightScore: 0 };
           recordPoseFrame(
             timestamp,
-            displayLandmarks,
-            displayFullBody,
-            displayHead,
-            recordingHands,
+            liveLandmarks,
+            fullBody,
+            head,
+            liveLandmarks ? recordingHands : { left: null, right: null, leftScore: 0, rightScore: 0 },
           );
         }
       } catch {
@@ -1607,10 +1623,8 @@ export default function Home() {
         setCameraMessage(secondaryStreamRef.current
           ? "두 카메라의 몸·손 좌표를 한 명의 공통 시간축에 기록하고 있어요."
           : "얼굴은 제외하고 몸·머리 방향·손가락 좌표를 기록하고 있어요.");
-        toast.success(secondaryStreamRef.current ? "두 카메라 통합 좌표 기록을 시작했어요" : "몸과 손가락 좌표 상시 기록을 시작했어요");
       } else {
         setCameraMessage("몸·머리 방향 좌표를 기록 중이에요. 손가락 추적은 이 기기에서 준비하지 못했어요.");
-        toast.success("몸 스켈레톤 좌표 기록을 시작했어요");
       }
       poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
     } catch {
@@ -1653,12 +1667,30 @@ export default function Home() {
     globalSessionId?: string,
   ) {
     try {
+      const cameraStreams = globalSessionId
+        ? await getGlobalSessionCameraFrames(globalSessionId)
+        : [{ cameraSlot: 1 as const, frames: await getSessionFrames(sessionId) }];
       const rawFrames = globalSessionId
         ? await getGlobalSessionFrames(globalSessionId)
-        : await getSessionFrames(sessionId);
+        : cameraStreams[0].frames;
       const motionSlice = sliceTargetMotion(rawFrames);
-      const features = extractObservationFeatures(motionSlice.frames, observationProfile.zoneGrid);
-      const episode = createObservationEpisode({
+      const zoneAliases = Object.fromEntries(
+        observationProfile.customZones
+          .filter((zone) => zone.contextZoneId)
+          .map((zone) => [zone.id, zone.contextZoneId!]),
+      );
+      const bestCamera = cameraStreams
+        .map((stream) => ({
+          ...stream,
+          frames: stream.frames.filter((frame) => frame[0] >= motionSlice.startMs && frame[0] <= motionSlice.endMs),
+        }))
+        .sort((a, b) => b.frames.filter((frame) => frame[1] === 1).length - a.frames.filter((frame) => frame[1] === 1).length)[0];
+      const features = extractObservationFeatures(
+        bestCamera?.frames ?? motionSlice.frames,
+        bestCamera?.cameraSlot === 2 ? observationProfile.secondaryZoneGrid : observationProfile.zoneGrid,
+        zoneAliases,
+      );
+      let episode: ReviewableObservationEpisode = createObservationEpisode({
         sessionId,
         recordedAt,
         profile: observationProfile,
@@ -1674,11 +1706,61 @@ export default function Home() {
           reason: motionSlice.reason,
         },
       });
+      const labelOptions = listWorkContextLabels(workContextConfig);
+      let motionCandidates: Array<{ label: string; confidence: number }> = [];
+      if (learnedMotions.length > 0) {
+        const loadedActions = await Promise.all(learnedMotions.map(async (action) => ({
+          id: action.id,
+          label: action.label,
+          samples: (await Promise.all(action.samples.map(framesForMotionSample))).filter(
+            (frames) => frames.length >= 6,
+          ),
+        })));
+        const learnedResult = classifyLearnedMotion(motionSlice.frames, loadedActions);
+        motionCandidates = learnedResult.candidates.map((candidate) => ({
+          label: candidate.label,
+          confidence: Math.max(0, Math.min(1, Math.exp(-candidate.distance * 4.2))),
+        }));
+      }
+      const candidates = normalizeActionCandidates(buildWorkContextCandidates({
+        config: workContextConfig,
+        recordedAt,
+        motionCandidates,
+      }));
+      const bestCandidate = candidates[0];
+      const hasGroundedMotionLabel = motionCandidates.some((motionCandidate) =>
+        labelOptions.some((option) =>
+          option.taskLabel.trim().toLocaleLowerCase() === motionCandidate.label.trim().toLocaleLowerCase(),
+        ),
+      );
+      episode = {
+        ...episode,
+        taskType: bestCandidate?.taskType ?? "UNCLASSIFIED",
+        taskLabel: bestCandidate?.taskLabel ?? "미분류",
+        taskConfidence: bestCandidate?.confidence ?? 0,
+      };
+      const qualityReasons = [] as Array<"insufficient_frames" | "missing_zone" | "missing_time_context" | "unknown_motion">;
+      if (motionSlice.frames.length < 6) qualityReasons.push("insufficient_frames");
+      if (!features.dominantZone) qualityReasons.push("missing_zone");
+      if (labelOptions.length === 0) qualityReasons.push("missing_time_context");
+      if (!hasGroundedMotionLabel) qualityReasons.push("unknown_motion");
+      const actionReview = createActionReview(episode, { candidates, qualityReasons });
+      episode = {
+        ...episode,
+        globalSessionId,
+        ...(actionReview ? {
+          actionReview,
+          disposition: "quarantined" as const,
+          dispositionReason: "업무 라벨이 애매해 개발자 검토 전까지 기준선 학습에서 보류했어요.",
+        } : {}),
+      };
       await saveObservationEpisode(episode);
       await refreshObservationData(observationProfile);
       toast.success(
-        episode.disposition === "quarantined"
-          ? "평소 흐름으로 확정하기 어려운 동작은 학습에서 잠시 보류했어요"
+        episode.actionReview?.status === "pending"
+          ? "업무 라벨이 애매한 동작을 개발자 검토함에 보관했어요"
+          : episode.disposition === "quarantined"
+            ? "평소 흐름으로 확정하기 어려운 동작은 학습에서 잠시 보류했어요"
           : observationProfile.mode === "learning"
             ? `${episode.taskLabel} 패턴을 학습 기록에 추가했어요`
             : `${episode.taskLabel} 동작을 개인 기준과 비교했어요`,
@@ -1929,6 +2011,11 @@ export default function Home() {
       learningStartedAt: nowMs(),
       baselineVersion: observationProfile.baselineVersion + 1,
       zoneGrid: Array(9).fill(null),
+      secondaryZoneGrid: Array(9).fill(null),
+      customZones: observationProfile.customZones.map((zone) => ({
+        ...zone,
+        contextZoneId: inferZoneContext(template, zone.label)?.id ?? null,
+      })),
     });
     setObservationProfile(next);
     setSelectedZoneId(template.zones[0]?.id ?? "");
@@ -1960,10 +2047,31 @@ export default function Home() {
   }
 
   async function assignZoneCell(index: number) {
-    const zoneGrid = [...observationProfile.zoneGrid];
+    const key = zoneCameraSlot === 1 ? "zoneGrid" : "secondaryZoneGrid";
+    const zoneGrid = [...observationProfile[key]];
     zoneGrid[index] = zoneGrid[index] === selectedZoneId ? null : selectedZoneId;
-    const next = await saveObservationProfile({ ...observationProfile, zoneGrid });
+    const next = await saveObservationProfile({ ...observationProfile, [key]: zoneGrid });
     setObservationProfile(next);
+  }
+
+  async function addCustomZone() {
+    const label = customZoneName.trim();
+    if (!label) return;
+    const existing = observationProfile.customZones.find((zone) => zone.label === label);
+    if (existing) {
+      setSelectedZoneId(existing.id);
+      setCustomZoneName("");
+      return;
+    }
+    const context = inferZoneContext(getOccupationTemplate(observationProfile.occupation), label);
+    const zone = { id: `CUSTOM:${crypto.randomUUID()}`, label, contextZoneId: context?.id ?? null };
+    const next = await saveObservationProfile({
+      ...observationProfile,
+      customZones: [...observationProfile.customZones, zone],
+    });
+    setObservationProfile(next);
+    setSelectedZoneId(zone.id);
+    setCustomZoneName("");
   }
 
   function saveBooking(event: FormEvent<HTMLFormElement>) {
@@ -2134,6 +2242,7 @@ export default function Home() {
     ]);
     clearConsent();
     window.localStorage.removeItem(CHECKLIST_STORAGE_KEY);
+    window.localStorage.removeItem(WORK_CONTEXT_CONFIG_STORAGE_KEY);
     window.localStorage.removeItem(USER_INSTALL_STORAGE_KEY);
     clearLearnedMotionActions();
     setConsentState(getConsent());
@@ -2148,6 +2257,7 @@ export default function Home() {
     setQuickMotionMode("idle");
     setClosingTime(DEFAULT_CLOSING_TIME);
     setClosingChecklist(DEFAULT_CLOSING_CHECKLIST);
+    setWorkContextConfig(DEFAULT_WORK_CONTEXT_CONFIG);
     const resetProfile = {
       ...DEFAULT_PROFILE,
       learningStartedAt: nowMs(),
@@ -2388,6 +2498,17 @@ export default function Home() {
     0,
   );
   const occupationTemplate = getOccupationTemplate(observationProfile.occupation);
+  const zoneOptions = [...occupationTemplate.zones, ...observationProfile.customZones];
+  const activeZoneGrid = zoneCameraSlot === 1
+    ? observationProfile.zoneGrid
+    : observationProfile.secondaryZoneGrid;
+  const selectedCustomZone = observationProfile.customZones.find((zone) => zone.id === selectedZoneId);
+  const selectedZoneContext = selectedCustomZone?.contextZoneId
+    ? occupationTemplate.zones.find((zone) => zone.id === selectedCustomZone.contextZoneId)
+    : null;
+  const draftZoneContext = customZoneName.trim()
+    ? inferZoneContext(occupationTemplate, customZoneName)
+    : null;
   function routineSummary(routine: WorkRoutine) {
     return [
       `${formatClockLabel(routine.openTime)} 오픈 준비`,
@@ -2406,7 +2527,7 @@ export default function Home() {
   const quarantinedObservationCount = currentObservationEpisodes.filter(
     (episode) => episode.disposition === "quarantined",
   ).length;
-  const mappedZoneCount = new Set(observationProfile.zoneGrid.filter(Boolean)).size;
+  const mappedZoneCount = new Set(activeZoneGrid.filter(Boolean)).size;
   const latestObservationEpisode = currentObservationEpisodes[0] ?? null;
   const analysisObservationSignals = currentObservationEpisodes.filter(
     (episode) =>
@@ -2414,6 +2535,72 @@ export default function Home() {
       episode.disposition !== "excluded" &&
       ((episode.durationZScore ?? 0) >= 1.5 || (episode.pauseZScore ?? 0) >= 1.5),
   );
+  const pendingActionReviews = listPendingActionReviews(
+    currentObservationEpisodes as ReviewableObservationEpisode[],
+  );
+  const selectedReviewEpisode = selectedReviewEpisodeId
+    ? (currentObservationEpisodes.find((episode) => episode.id === selectedReviewEpisodeId) as ReviewableObservationEpisode | undefined)
+    : undefined;
+  const reviewLabelOptions = listWorkContextLabels(workContextConfig);
+  const registeredReviewTaskTypes = new Set(reviewLabelOptions.map((option) => option.taskType));
+
+  function actionReviewDisplayLabel(episode: ReviewableObservationEpisode) {
+    return episode.actionReview?.candidates.find((candidate) => registeredReviewTaskTypes.has(candidate.taskType))?.taskLabel
+      ?? (registeredReviewTaskTypes.has(episode.taskType) ? episode.taskLabel : "미분류");
+  }
+
+  function openActionReview(episode: ReviewableObservationEpisode) {
+    const firstOption = reviewLabelOptions.find(
+      (option) => option.taskType === episode.actionReview?.candidates[0]?.taskType,
+    ) ?? reviewLabelOptions[0];
+    setSelectedReviewTaskType(firstOption?.taskType ?? "");
+    setSelectedReviewEpisodeId(episode.id);
+  }
+
+  async function confirmActionReview() {
+    if (!selectedReviewEpisode || !selectedReviewTaskType) return;
+    const selectedLabel = reviewLabelOptions.find((option) => option.taskType === selectedReviewTaskType);
+    if (!selectedLabel) return;
+    const updated = applyManualActionLabel(selectedReviewEpisode, {
+      ...selectedLabel,
+      reviewer: "developer",
+    });
+    await saveObservationEpisode(updated);
+    if (updated.motionSlice) {
+      const sample: LearnedMotionSample = {
+        sessionId: updated.sessionId,
+        globalSessionId: updated.globalSessionId,
+        startMs: updated.motionSlice.startMs,
+        endMs: updated.motionSlice.endMs,
+      };
+      const matching = learnedMotions.find(
+        (motion) => motion.label.toLocaleLowerCase() === selectedLabel.taskLabel.toLocaleLowerCase(),
+      );
+      const next = matching
+        ? learnedMotions.map((motion) => motion.id === matching.id
+            ? { ...motion, samples: [...motion.samples.filter((item) => item.sessionId !== sample.sessionId), sample] }
+            : motion)
+        : [...learnedMotions, {
+            id: `learned-${crypto.randomUUID()}`,
+            label: selectedLabel.taskLabel,
+            samples: [sample],
+            createdAt: nowMs(),
+          }];
+      saveLearnedMotionActions(next);
+      setLearnedMotions(next);
+    }
+    await refreshObservationData(observationProfile);
+    setSelectedReviewEpisodeId(null);
+    toast.success(`${selectedLabel.taskLabel} 업무로 확정하고 학습 표본에 반영했어요`);
+  }
+
+  async function leaveActionReviewUnresolved() {
+    if (!selectedReviewEpisode) return;
+    await saveObservationEpisode(markActionReviewUnresolved(selectedReviewEpisode));
+    await refreshObservationData(observationProfile);
+    setSelectedReviewEpisodeId(null);
+    toast.success("판별 불가로 표시하고 기준선 학습에서 제외했어요");
+  }
 
   function switchInterfaceMode() {
     if (interfaceMode === "user") {
@@ -2723,6 +2910,44 @@ export default function Home() {
               </button>
             </section>
 
+            <section className="manual-review-queue" aria-labelledby="manual-review-title">
+              <div className="manual-review-heading">
+                <div>
+                  <span>수동 라벨 검토</span>
+                  <h2 id="manual-review-title">판별이 애매한 행동만 모았어요</h2>
+                  <p>영상·음성 없이 스켈레톤 구간과 분류 근거를 확인한 뒤 업무 이름을 확정합니다.</p>
+                </div>
+                <strong aria-label={`검토 대기 ${pendingActionReviews.length}건`}>
+                  {pendingActionReviews.length}<small>건 대기</small>
+                </strong>
+              </div>
+
+              {pendingActionReviews.length > 0 ? (
+                <div className="manual-review-list">
+                  {pendingActionReviews.slice(0, 6).map((episode) => (
+                    <article key={episode.id} aria-label={`검토 대기 행동 ${formatSessionTime(episode.recordedAt)}`}>
+                      <div className="manual-review-time">
+                        <span>{formatSessionTime(episode.recordedAt)}</span>
+                        <small>{episode.features.dominantZone
+                          ? occupationTemplate.zones.find((zone) => zone.id === episode.features.dominantZone)?.label ?? episode.features.dominantZone
+                          : "구역 미확인"}</small>
+                      </div>
+                      <div className="manual-review-summary">
+                        <strong>{actionReviewDisplayLabel(episode)}</strong>
+                        <span>{episode.actionReview?.reasons.map((reason) => ACTION_AMBIGUITY_REASON_LABELS[reason]).join(" · ")}</span>
+                      </div>
+                      <button type="button" onClick={() => openActionReview(episode)}>스켈레톤 확인</button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="manual-review-empty">
+                  <span aria-hidden="true">✓</span>
+                  <div><strong>지금은 확인할 행동이 없어요</strong><small>후보가 비슷하거나 좌표가 부족한 행동만 이곳에 나타납니다.</small></div>
+                </div>
+              )}
+            </section>
+
             <section className="quick-motion-lab" aria-labelledby="quick-motion-title">
               <div className="quick-motion-heading">
                 <div>
@@ -2992,95 +3217,14 @@ export default function Home() {
                   </div>
                 )}
 
-                {cameraStatus === "connected" && <div ref={cameraFeedLayoutRef} className="camera-feed-layout">
-                  <div
-                    ref={cameraFrameRef}
-                    className={`camera-frame ${cameraStatus}`}
-                  >
-                    <div className="camera-main-view">
-                      <video ref={videoRef} muted playsInline aria-label="카메라 1 영상" />
-                      <canvas
-                        ref={overlayCanvasRef}
-                        className="pose-overlay"
-                        aria-label="실시간 전신 스켈레톤"
-                      />
-                      {cameraStatus === "connected" && (
-                        <span className="camera-source-label">카메라 1</span>
-                      )}
-                    </div>
-                  {cameraStatus !== "connected" && (
-                    <div className="camera-empty">
-                      <span className="camera-symbol" aria-hidden="true">
-                        ●
-                      </span>
-                      <strong>
-                        {cameraStatus === "requesting"
-                          ? "카메라를 연결하고 있어요"
-                          : "컴퓨터 카메라를 연결해 주세요"}
-                      </strong>
-                      <p>{cameraMessage}</p>
-                      <button
-                        className="primary-button"
-                        type="button"
-                        onClick={requestCameraStart}
-                        disabled={cameraStatus === "requesting"}
-                      >
-                        {cameraStatus === "requesting" ? "연결 중…" : "카메라 연결"}
-                      </button>
-                    </div>
-                  )}
-                  {cameraStatus === "connected" && (
-                    <div className="tracking-readout">
-                      <span className={targetLocked ? "target-locked" : ""}>
-                        대상 · {targetLocked ? "고정됨" : "찾는 중"}
-                      </span>
-                      <span>머리 · {headDirectionLabel}</span>
-                      <span
-                        className={detectedHands > 0 ? "hands-found hand-status" : "hand-status"}
-                        aria-label={`손가락 관절 인식: 왼손 ${detectedHandSides.left ? "인식됨" : "미인식"}, 오른손 ${detectedHandSides.right ? "인식됨" : "미인식"}`}
-                      >
-                        손 · <b className={detectedHandSides.left ? "detected" : "missing"}>왼손 {detectedHandSides.left ? "✓" : "—"}</b>
-                        <b className={detectedHandSides.right ? "detected" : "missing"}>오른손 {detectedHandSides.right ? "✓" : "—"}</b>
-                      </span>
-                    </div>
-                  )}
-                  {cameraStatus === "connected" && (
-                    <button
-                      className="camera-fullscreen-button"
-                      type="button"
-                      onClick={() => void toggleCameraFullscreen()}
-                      aria-label={cameraFullscreen ? "카메라 전체화면 닫기" : "카메라 전체화면으로 보기"}
-                    >
-                      <span aria-hidden="true">{cameraFullscreen ? "↙" : "↗"}</span>
-                      {cameraFullscreen ? "전체화면 닫기" : "전체화면"}
+                {cameraStatus === "connected" && (
+                  <div className="camera-connect-action camera-connected-action" aria-live="polite">
+                    <p>카메라 화면은 팝업에서 크게 확인할 수 있어요.</p>
+                    <button className="primary-button" type="button" onClick={() => setMultiCameraModalOpen(true)}>
+                      카메라 화면 열기
                     </button>
-                  )}
-                  {cameraStatus === "connected" && (
-                    <div className="camera-caption">
-                      <span className={`pose-state ${poseStatus}`}>
-                        <i aria-hidden="true" /> {poseStatusLabel}
-                      </span>
-                      <button type="button" onClick={() => void stopCamera()}>
-                        카메라 끄기
-                      </button>
-                    </div>
-                  )}
                   </div>
-
-                  {cameraStatus === "connected" && secondaryCameraConnected && (
-                    <section className="secondary-camera-frame" aria-label="카메라 2 화면">
-                      <div className="secondary-camera-heading">
-                        <span>카메라 2</span>
-                        <small>공통 대상 · 좌표 기록</small>
-                      </div>
-                      <div className="camera-secondary-view">
-                        <video ref={secondaryVideoRef} muted playsInline aria-label="카메라 2 영상" />
-                        <canvas ref={secondaryOverlayCanvasRef} className="pose-overlay" aria-label="카메라 2 전신 스켈레톤" />
-                        <span className={`secondary-pose-state ${secondaryPoseStatus}`}>좌표 · {secondaryPoseStatus === "full" ? "전신 인식" : secondaryPoseStatus === "partial" ? "일부 인식" : secondaryPoseStatus === "error" ? "추적 오류" : "찾는 중"}</span>
-                      </div>
-                    </section>
-                  )}
-                </div>}
+                )}
 
                 <div className="coordinate-recorder">
                   <div className="recorder-heading">
@@ -3950,6 +4094,119 @@ export default function Home() {
       </nav>
 
       <Modal
+        open={multiCameraModalOpen}
+        onClose={() => setMultiCameraModalOpen(false)}
+        labelledBy="multi-camera-modal-title"
+        className={`multi-camera-modal ${secondaryCameraConnected ? "has-secondary-camera" : "single-camera"}`}
+      >
+        <button className="modal-close" type="button" onClick={() => setMultiCameraModalOpen(false)} aria-label="카메라 팝업 닫기">×</button>
+        <header className="multi-camera-modal-header">
+          <div className="multi-camera-modal-heading">
+            <span className="section-kicker">두 카메라 테스트 · 영상 저장 안 함</span>
+            <h2 id="multi-camera-modal-title">카메라 화면 확인</h2>
+            <p>{cameraMessage}</p>
+          </div>
+
+          {availableCameras.length > 0 && (
+            <div className="camera-source-controls multi-camera-source-controls" aria-label="팝업 카메라 선택">
+              <label>
+                <span>카메라 1</span>
+                <select
+                  value={primaryCameraId}
+                  onChange={(event) => void changeCameraSource("primary", event.target.value)}
+                  disabled={cameraStatus === "requesting"}
+                >
+                  {availableCameras.map((camera, index) => (
+                    <option key={camera.deviceId} value={camera.deviceId}>{cameraDisplayName(camera, index)}</option>
+                  ))}
+                </select>
+              </label>
+              {availableCameras.length > 1 && (
+                <label>
+                  <span>카메라 2</span>
+                  <select
+                    value={secondaryCameraId}
+                    onChange={(event) => void changeCameraSource("secondary", event.target.value)}
+                    disabled={cameraStatus === "requesting"}
+                  >
+                    {availableCameras
+                      .filter((camera) => camera.deviceId !== primaryCameraId)
+                      .map((camera, index) => (
+                        <option key={camera.deviceId} value={camera.deviceId}>{cameraDisplayName(camera, index)}</option>
+                      ))}
+                  </select>
+                </label>
+              )}
+            </div>
+          )}
+        </header>
+
+        {cameraStatus === "connected" ? (
+          <div ref={cameraFeedLayoutRef} className="camera-feed-layout multi-camera-feed-layout">
+            <div ref={cameraFrameRef} className={`camera-frame ${cameraStatus}`}>
+              <div className="camera-main-view">
+                <video ref={videoRef} muted playsInline aria-label="카메라 1 영상" />
+                <canvas ref={overlayCanvasRef} className="pose-overlay" aria-label="실시간 전신 스켈레톤" />
+              </div>
+              <div className="tracking-readout">
+                <span className={targetLocked ? "target-locked" : ""}>대상 · {targetLocked ? "고정됨" : "찾는 중"}</span>
+                <span>머리 · {headDirectionLabel}</span>
+                <span
+                  className={detectedHands > 0 ? "hands-found hand-status" : "hand-status"}
+                  aria-label={`손가락 관절 인식: 왼손 ${detectedHandSides.left ? "인식됨" : "미인식"}, 오른손 ${detectedHandSides.right ? "인식됨" : "미인식"}`}
+                >
+                  손 · <b className={detectedHandSides.left ? "detected" : "missing"}>왼손 {detectedHandSides.left ? "✓" : "—"}</b>
+                  <b className={detectedHandSides.right ? "detected" : "missing"}>오른손 {detectedHandSides.right ? "✓" : "—"}</b>
+                </span>
+              </div>
+              <button
+                className="camera-fullscreen-button"
+                type="button"
+                onClick={() => void toggleCameraFullscreen()}
+                aria-label={cameraFullscreen ? "카메라 전체화면 닫기" : "카메라 전체화면으로 보기"}
+              >
+                <span aria-hidden="true">{cameraFullscreen ? "↙" : "↗"}</span>
+                {cameraFullscreen ? "전체화면 닫기" : "전체화면"}
+              </button>
+              <div className="camera-caption">
+                <span className={`pose-state ${poseStatus}`}><i aria-hidden="true" /> {poseStatusLabel}</span>
+              </div>
+            </div>
+
+            {secondaryCameraConnected && (
+              <section className="secondary-camera-frame" aria-label="카메라 2 화면">
+                <div className="secondary-camera-heading">
+                  <span>카메라 2</span>
+                  <small>공통 대상 · 좌표 기록</small>
+                </div>
+                <div className="camera-secondary-view">
+                  <video ref={secondaryVideoRef} muted playsInline aria-label="카메라 2 영상" />
+                  <canvas ref={secondaryOverlayCanvasRef} className="pose-overlay" aria-label="카메라 2 전신 스켈레톤" />
+                  <span className={`secondary-pose-state ${secondaryPoseStatus}`}>좌표 · {secondaryPoseStatus === "full" ? "전신 인식" : secondaryPoseStatus === "partial" ? "일부 인식" : secondaryPoseStatus === "error" ? "추적 오류" : "찾는 중"}</span>
+                </div>
+              </section>
+            )}
+          </div>
+        ) : (
+          <div className={`multi-camera-modal-waiting status-${cameraStatus}`} aria-live="polite">
+            <span aria-hidden="true" />
+            <strong>{cameraStatus === "requesting" ? "카메라를 연결하고 있어요" : cameraStatus === "error" ? "카메라를 연결하지 못했어요" : "카메라 연결을 기다리고 있어요"}</strong>
+            <p>{cameraMessage}</p>
+            {cameraStatus !== "requesting" && (
+              <button className="primary-button" type="button" onClick={requestCameraStart}>다시 연결</button>
+            )}
+          </div>
+        )}
+
+        <div className="multi-camera-modal-actions">
+          {cameraStatus === "connected" && (
+            <button className="camera-stop-button" type="button" onClick={() => void stopCamera().then(() => setMultiCameraModalOpen(false))}>카메라 끄기</button>
+          )}
+          <button className="modal-confirm-button" type="button" onClick={() => setMultiCameraModalOpen(false)}>확인 완료</button>
+        </div>
+      </Modal>
+
+      <Modal
         open={quickMotionCameraOpen}
         onClose={() => void closeQuickMotionCamera()}
         labelledBy="quick-motion-camera-title"
@@ -4225,16 +4482,66 @@ export default function Home() {
             <button className="modal-close" type="button" onClick={() => setZoneSetupOpen(false)} aria-label="닫기">×</button>
             <span className="section-kicker">{occupationTemplate.icon} {occupationTemplate.label} 관찰 맥락</span>
             <h2 id="zone-setup-title">카메라 화면에 매장 구역을 표시해 주세요</h2>
-            <p>구역을 고른 뒤 실제 카메라 화면에서 해당 위치에 가까운 칸을 눌러주세요. 카메라 위치가 바뀌면 다시 설정해야 해요.</p>
+            <p>카메라를 고르고, 실제 화면에서 구역에 가까운 칸을 눌러주세요. 카메라 위치가 바뀌면 다시 설정해야 해요.</p>
+            <div className="zone-camera-tabs" role="tablist" aria-label="편집할 카메라">
+              {[1, 2].map((slot) => (
+                <button
+                  key={slot}
+                  type="button"
+                  role="tab"
+                  aria-selected={zoneCameraSlot === slot}
+                  className={zoneCameraSlot === slot ? "active" : ""}
+                  onClick={() => setZoneCameraSlot(slot as 1 | 2)}
+                >
+                  <strong>카메라 {slot}</strong>
+                  <span>{slot === 1
+                    ? availableCameras.find((camera) => camera.deviceId === primaryCameraId)?.label || "기본 카메라"
+                    : availableCameras.find((camera) => camera.deviceId === secondaryCameraId)?.label || "두 번째 카메라"}</span>
+                </button>
+              ))}
+            </div>
             <label className="zone-picker">
               <span>지정할 구역</span>
               <select value={selectedZoneId} onChange={(event) => setSelectedZoneId(event.target.value)}>
-                {occupationTemplate.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
+                <optgroup label="추천 구역">
+                  {occupationTemplate.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
+                </optgroup>
+                {observationProfile.customZones.length > 0 && (
+                  <optgroup label="직접 추가한 구역">
+                    {observationProfile.customZones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
+                  </optgroup>
+                )}
               </select>
             </label>
-            <div className="zone-camera-grid" aria-label="카메라 화면 3×3 구역 설정">
-              {observationProfile.zoneGrid.map((zoneId, index) => {
-                const zone = occupationTemplate.zones.find((item) => item.id === zoneId);
+            <div className="custom-zone-box">
+              <label htmlFor="custom-zone-name">목록에 없는 구역인가요?</label>
+              <div className="custom-zone-entry">
+                <input
+                  id="custom-zone-name"
+                  value={customZoneName}
+                  maxLength={24}
+                  placeholder="예: 테라스, 포장대, 직원 휴게실"
+                  onChange={(event) => setCustomZoneName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void addCustomZone();
+                    }
+                  }}
+                />
+                <button type="button" disabled={!customZoneName.trim()} onClick={() => void addCustomZone()}>구역 추가</button>
+              </div>
+            </div>
+            {(draftZoneContext || selectedCustomZone) && (
+              <p className="zone-context-hint">
+                {draftZoneContext || selectedZoneContext
+                  ? `‘${(draftZoneContext ?? selectedZoneContext)!.label}’ 맥락으로 이해해요.`
+                  : "새 구역으로 기록하고 행동·시간대와 함께 학습해요."}
+              </p>
+            )}
+            <div className="zone-camera-grid" aria-label={`카메라 ${zoneCameraSlot} 화면 3×3 구역 설정`}>
+              {activeZoneGrid.map((zoneId, index) => {
+                const zone = zoneOptions.find((item) => item.id === zoneId);
                 return (
                   <button key={index} type="button" className={zoneId ? "mapped" : ""} onClick={() => void assignZoneCell(index)}>
                     <small>{index + 1}</small>
@@ -4244,7 +4551,7 @@ export default function Home() {
               })}
             </div>
             <div className="zone-setup-footer">
-              <span>{mappedZoneCount}개 구역 설정됨 · 정밀 거리 대신 화면상 위치를 사용해요.</span>
+              <span>카메라 {zoneCameraSlot}에 {mappedZoneCount}개 구역 설정됨 · 화면상 위치를 사용해요.</span>
               <button type="button" onClick={() => setZoneSetupOpen(false)}>설정 완료</button>
             </div>
       </Modal>
@@ -4271,6 +4578,77 @@ export default function Home() {
           baselineVersion={observationProfile.baselineVersion}
           showMultiCameraDiagnostics={interfaceMode === "developer"}
           onClose={() => setReplaySessionId(null)}
+        />
+      )}
+
+      {selectedReviewEpisode && (
+        <SessionReplayPanel
+          key={selectedReviewEpisode.id}
+          source={{
+            kind: "recorded",
+            sessionId: selectedReviewEpisode.sessionId,
+            globalSessionId: selectedReviewEpisode.globalSessionId,
+            window: selectedReviewEpisode.motionSlice
+              ? {
+                  startMs: selectedReviewEpisode.motionSlice.startMs,
+                  endMs: selectedReviewEpisode.motionSlice.endMs,
+                }
+              : undefined,
+          }}
+          sessionLabel={`${formatSessionTime(selectedReviewEpisode.recordedAt)} · 업무 라벨 검토`}
+          observationMode={selectedReviewEpisode.mode}
+          baselineVersion={selectedReviewEpisode.baselineVersion}
+          hideAnalysisFeedback
+          reviewPanel={(
+            <section className="manual-review-panel" aria-labelledby="manual-review-panel-title">
+              <div className="manual-review-evidence">
+                <span>자동 판별 근거</span>
+                <strong id="manual-review-panel-title">
+                  {actionReviewDisplayLabel(selectedReviewEpisode)}
+                </strong>
+                <p>
+                  {selectedReviewEpisode.actionReview?.reasons
+                    .map((reason) => ACTION_AMBIGUITY_REASON_LABELS[reason])
+                    .join(" · ")}
+                </p>
+                <small>
+                  {selectedReviewEpisode.features.dominantZone
+                    ? `감지 구역 · ${occupationTemplate.zones.find((zone) => zone.id === selectedReviewEpisode.features.dominantZone)?.label ?? selectedReviewEpisode.features.dominantZone}`
+                    : "감지 구역을 확인하지 못했어요"}
+                </small>
+              </div>
+
+              {reviewLabelOptions.length > 0 ? (
+                <div className="manual-review-choice" role="radiogroup" aria-label="업무 라벨 후보">
+                  <span>스켈레톤을 보고 실제 업무를 선택하세요</span>
+                  <div>
+                    {reviewLabelOptions.map((option) => (
+                      <label key={option.taskType} className={selectedReviewTaskType === option.taskType ? "selected" : ""}>
+                        <input
+                          type="radio"
+                          name="manual-task-label"
+                          value={option.taskType}
+                          checked={selectedReviewTaskType === option.taskType}
+                          onChange={() => setSelectedReviewTaskType(option.taskType)}
+                        />
+                        <span>{option.taskLabel}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="manual-review-actions">
+                    <button className="primary-button" type="button" onClick={() => void confirmActionReview()} disabled={!selectedReviewTaskType}>라벨 확정</button>
+                    <button type="button" onClick={() => void leaveActionReviewUnresolved()}>판별 불가</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="manual-review-no-labels">
+                  <strong>먼저 업무 맥락에 업무 이름을 등록해 주세요</strong>
+                  <button type="button" onClick={() => { setSelectedReviewEpisodeId(null); setView("settings"); }}>업무 맥락 등록으로 이동</button>
+                </div>
+              )}
+            </section>
+          )}
+          onClose={() => setSelectedReviewEpisodeId(null)}
         />
       )}
 

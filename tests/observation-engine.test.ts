@@ -9,7 +9,7 @@ import {
   safeZScore,
   type ObservationEpisode,
 } from "../app/observation-engine.ts";
-import { OCCUPATION_TEMPLATES, getOccupationTemplate } from "../app/occupation-templates.ts";
+import { OCCUPATION_TEMPLATES, getOccupationTemplate, inferZoneContext } from "../app/occupation-templates.ts";
 
 test("occupation templates: all six requested occupations have zones, tasks and sequences", () => {
   assert.deepEqual(
@@ -21,6 +21,14 @@ test("occupation templates: all six requested occupations have zones, tasks and 
     assert.ok(template.tasks.some((task) => task.phase === "business"));
     assert.ok(template.sequences.length >= 1);
   }
+});
+
+test("custom zone names inherit the closest occupation context", () => {
+  const cafe = getOccupationTemplate("cafe");
+  assert.equal(inferZoneContext(cafe, "테라스 좌석")?.id, "HALL");
+  assert.equal(inferZoneContext(cafe, "포스 옆")?.id, "POS");
+  assert.equal(inferZoneContext(cafe, "포장대")?.id, "SERVING");
+  assert.equal(inferZoneContext(cafe, "반려견 공간"), null);
 });
 
 test("safeZScore: uses personal mean and SD and defers when SD is too small", () => {

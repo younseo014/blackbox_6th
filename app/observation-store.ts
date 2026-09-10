@@ -59,7 +59,12 @@ export async function getObservationProfile(): Promise<ObservationProfile> {
   );
   await transactionDone(transaction);
   database.close();
-  if (record) return record;
+  if (record) return {
+    ...DEFAULT_PROFILE,
+    ...record,
+    secondaryZoneGrid: record.secondaryZoneGrid ?? Array(9).fill(null),
+    customZones: record.customZones ?? [],
+  };
   const now = Date.now();
   return { ...DEFAULT_PROFILE, learningStartedAt: now, updatedAt: now };
 }

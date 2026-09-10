@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "updatedAt": 1789006056869,
-  "nodeCount": 4,
-  "contentFingerprint": "d302db00_6a8e9ac5_208",
+  "updatedAt": 1789016484401,
+  "nodeCount": 5,
+  "contentFingerprint": "ab59f861_a05f4b66_257",
   "nodes": {
     "mem-feedback_functional_scope_only-----0": {
       "id": "mem-feedback_functional_scope_only-----0",
       "category": "feedback_functional_scope_only",
-      "confidence": 1,
-      "accessCount": 11,
+      "confidence": 0.5,
+      "accessCount": 0,
       "createdAt": 1789001111677
     },
     "insight-1789006052149-bns2": {
@@ -31,6 +31,13 @@
       "confidence": 0.5,
       "accessCount": 0,
       "createdAt": 1789006052149
+    },
+    "insight-1789016484400-iqbl": {
+      "id": "insight-1789016484400-iqbl",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1789016484400
     }
   },
   "edges": [
@@ -47,16 +54,35 @@
       "weight": 0.7702702702702703
     },
     {
+      "sourceId": "insight-1789006052149-bns2",
+      "targetId": "insight-1789016484400-iqbl",
+      "type": "similar",
+      "weight": 0.8636363636363636
+    },
+    {
       "sourceId": "insight-1789006052149-d1yv",
       "targetId": "insight-1789006052149-x69i",
       "type": "similar",
       "weight": 0.7195121951219512
+    },
+    {
+      "sourceId": "insight-1789006052149-d1yv",
+      "targetId": "insight-1789016484400-iqbl",
+      "type": "similar",
+      "weight": 0.75
+    },
+    {
+      "sourceId": "insight-1789006052149-x69i",
+      "targetId": "insight-1789016484400-iqbl",
+      "type": "similar",
+      "weight": 0.7402597402597403
     }
   ],
   "pageRanks": {
-    "mem-feedback_functional_scope_only-----0": 0.16498242448120026,
-    "insight-1789006052149-bns2": 0.16498242448120026,
-    "insight-1789006052149-d1yv": 0.23510001253794233,
-    "insight-1789006052149-x69i": 0.43493513849965726
+    "mem-feedback_functional_scope_only-----0": 0.11771252882066918,
+    "insight-1789006052149-bns2": 0.11771252882066918,
+    "insight-1789006052149-d1yv": 0.15106444983988296,
+    "insight-1789006052149-x69i": 0.21526686907457687,
+    "insight-1789016484400-iqbl": 0.39824362344420194
   }
 }

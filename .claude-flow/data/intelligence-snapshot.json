@@ -184,5 +184,62 @@
         "accessCount": 0
       }
     ]
+  },
+  {
+    "timestamp": 1789016484402,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.5,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.5,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.5,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
   }
 ]

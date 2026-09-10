@@ -81,11 +81,39 @@ async function withPage(options, run) {
   }
 }
 
+async function openDeveloperCamera(page) {
+  const connectButton = page.getByRole("button", { name: "카메라 연결", exact: true });
+  if (!(await connectButton.isVisible().catch(() => false))) {
+    await page.getByLabel("개발자 모드로 전환").click();
+    await connectButton.waitFor();
+  }
+  await connectButton.click();
+}
+
 async function acceptObservationConsent(page) {
-  await page.getByRole("button", { name: "카메라 연결", exact: true }).click();
+  await openDeveloperCamera(page);
   await page.getByRole("button", { name: "동의하고 카메라 켜기", exact: true }).click();
   await page.waitForTimeout(3000);
+  const cameraDialog = page.getByRole("dialog", { name: "카메라 화면 확인" });
+  await cameraDialog.waitFor();
+  await cameraDialog.getByLabel("카메라 1 영상").waitFor();
+  await cameraDialog.getByRole("button", { name: "확인 완료", exact: true }).click();
 }
+
+test("개발자 카메라 테스트: 작은 인라인 영상 대신 큰 팝업을 열고 다시 열 수 있다", async () => {
+  await withPage({}, async (page, context) => {
+    await context.grantPermissions(["camera"], { origin: BASE_URL });
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    await acceptObservationConsent(page);
+
+    assert.equal(await page.locator(".camera-panel .camera-feed-layout").count(), 0);
+    await page.getByRole("button", { name: "카메라 화면 열기", exact: true }).click();
+    const cameraDialog = page.getByRole("dialog", { name: "카메라 화면 확인" });
+    await cameraDialog.waitFor();
+    assert.equal(await cameraDialog.getByLabel("카메라 1 영상").count(), 1);
+    await cameraDialog.getByRole("button", { name: "확인 완료", exact: true }).click();
+  });
+});
 
 // --- Persona: 카메라 권한을 거부한 사용자 -----------------------------
 
@@ -99,7 +127,7 @@ test("페르소나: 카메라 권한 거부 - 에러 메시지가 뜨고 다른 
     });
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
 
-    await page.getByRole("button", { name: "카메라 연결", exact: true }).click();
+    await openDeveloperCamera(page);
     await page.getByRole("button", { name: "동의하고 카메라 켜기", exact: true }).click();
     await page.waitForTimeout(1000);
 
@@ -110,6 +138,10 @@ test("페르소나: 카메라 권한 거부 - 에러 메시지가 뜨고 다른 
         .waitFor({ timeout: 5000 }),
       "expected the camera-permission-denied message to be shown",
     );
+
+    await page.getByRole("dialog", { name: "카메라 화면 확인" })
+      .getByRole("button", { name: "확인 완료", exact: true })
+      .click();
 
     // Store-safety features must keep working with no camera at all.
     await page.getByRole("button", { name: "스마트 마감", exact: false }).first().click();
@@ -132,7 +164,7 @@ test("페르소나: 관찰 비동의 - 카메라는 꺼진 채로 남고 케어 
   await withPage({}, async (page) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
 
-    await page.getByRole("button", { name: "카메라 연결", exact: true }).click();
+    await openDeveloperCamera(page);
     await page.getByRole("button", { name: "매장 안전 기능만 사용할게요", exact: true }).click();
     await page.waitForTimeout(500);
 
@@ -198,12 +230,17 @@ test("페르소나: 여러 세션 누적 - 카메라를 두 번 연결하면 세
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
 
     await acceptObservationConsent(page);
-    await page.getByRole("button", { name: "카메라 끄기", exact: true }).click();
+    await page.getByRole("button", { name: "카메라 화면 열기", exact: true }).click();
+    await page.getByRole("dialog", { name: "카메라 화면 확인" })
+      .getByRole("button", { name: "카메라 끄기", exact: true })
+      .click();
     await page.waitForTimeout(500);
 
     await page.getByRole("button", { name: "카메라 연결", exact: true }).click();
     await page.waitForTimeout(3000);
-    await page.getByRole("button", { name: "카메라 끄기", exact: true }).click();
+    await page.getByRole("dialog", { name: "카메라 화면 확인" })
+      .getByRole("button", { name: "카메라 끄기", exact: true })
+      .click();
     await page.waitForTimeout(500);
 
     await page.getByRole("button", { name: "내 데이터 관리", exact: false }).click();
@@ -312,7 +349,10 @@ test("개발용 세션 리플레이: 기록된 세션을 재생하면 스켈레�
     // stopping the camera flushes any buffered frames into a chunk, so the
     // session becomes replayable right after.
     await page.waitForTimeout(3000);
-    await page.getByRole("button", { name: "카메라 끄기", exact: true }).click();
+    await page.getByRole("button", { name: "카메라 화면 열기", exact: true }).click();
+    await page.getByRole("dialog", { name: "카메라 화면 확인" })
+      .getByRole("button", { name: "카메라 끄기", exact: true })
+      .click();
     await page.waitForTimeout(1000);
 
     await page.getByRole("button", { name: "내 데이터 관리", exact: false }).click();
@@ -442,6 +482,170 @@ test("개발용 합성 시나리오 리플레이: 페르소나의 '동작 보기
       page.locator(".replay-modal").waitFor({ state: "detached", timeout: 5000 }),
       "expected the replay modal to close",
     );
+  });
+});
+
+test("개발자 수동 라벨링: 애매한 행동의 스켈레톤을 보고 업무 라벨을 확정한다", async () => {
+  await withPage({}, async (page) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    await page.evaluate(async () => {
+      const resultOf = (request) => new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const done = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+
+      localStorage.setItem("memory-guard-interface-mode-v1", "developer");
+      localStorage.setItem("memory-guard-work-context-config-v2", JSON.stringify({
+        routines: [{
+          id: "routine-test",
+          name: "테스트 루틴",
+          days: [0, 1, 2, 3, 4, 5, 6],
+          openTime: "08:00",
+          closeTime: "21:00",
+          schedule: [
+            { id: "drink", time: "10:00", label: "음료 제조", repeats: true },
+            { id: "wash", time: "18:00", label: "설거지", repeats: true },
+          ],
+        }],
+        closedDays: [],
+      }));
+
+      const stride = 224;
+      const frameCount = 12;
+      const values = new Float32Array(stride * frameCount);
+      for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+        const frameOffset = frameIndex * stride;
+        values[frameOffset] = frameIndex * 100;
+        values[frameOffset + 1] = 1;
+        values[frameOffset + 2] = 1;
+        for (let joint = 0; joint < 22; joint += 1) {
+          const pointOffset = frameOffset + 10 + joint * 4;
+          values[pointOffset] = 0.42 + (joint % 2) * 0.16 + frameIndex * 0.002;
+          values[pointOffset + 1] = 0.2 + Math.floor(joint / 2) * 0.04;
+          values[pointOffset + 2] = 0;
+          values[pointOffset + 3] = 1;
+        }
+      }
+
+      const motionRequest = indexedDB.open("memory-guard-motion-v2", 1);
+      motionRequest.onupgradeneeded = () => {
+        const database = motionRequest.result;
+        database.createObjectStore("motion_sessions", { keyPath: "id" });
+        const chunks = database.createObjectStore("motion_chunks", { keyPath: "id" });
+        chunks.createIndex("sessionId", "sessionId", { unique: false });
+      };
+      const motionDb = await resultOf(motionRequest);
+      const motionTx = motionDb.transaction(["motion_sessions", "motion_chunks"], "readwrite");
+      motionTx.objectStore("motion_sessions").put({
+        id: "manual-review-session",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+        frameCount,
+        detectedFrameCount: frameCount,
+        fullBodyFrameCount: frameCount,
+        handDetectedFrameCount: 0,
+        storageBytes: values.byteLength,
+        sampleRate: 10,
+        bodyLandmarkCount: 22,
+        handLandmarkCount: 21,
+        coordinateSpace: "normalized_image",
+        mirroredPreview: true,
+        source: "local_camera",
+        faceLandmarksStored: false,
+        cameraSlot: 1,
+      });
+      motionTx.objectStore("motion_chunks").put({
+        id: "manual-review-session:0",
+        sessionId: "manual-review-session",
+        startFrame: 0,
+        frameCount,
+        createdAt: Date.now(),
+        data: values.buffer,
+      });
+      await done(motionTx);
+      motionDb.close();
+
+      const observationRequest = indexedDB.open("memory-guard-observation-v1", 1);
+      observationRequest.onupgradeneeded = () => {
+        const database = observationRequest.result;
+        database.createObjectStore("profiles", { keyPath: "id" });
+        const episodes = database.createObjectStore("episodes", { keyPath: "id" });
+        episodes.createIndex("recordedAt", "recordedAt", { unique: false });
+        episodes.createIndex("sessionId", "sessionId", { unique: false });
+        const feedback = database.createObjectStore("feedback", { keyPath: "id" });
+        feedback.createIndex("eventId", "eventId", { unique: false });
+      };
+      const observationDb = await resultOf(observationRequest);
+      const observationTx = observationDb.transaction("episodes", "readwrite");
+      observationTx.objectStore("episodes").put({
+        id: "manual-review-episode",
+        sessionId: "manual-review-session",
+        recordedAt: Date.now(),
+        date: new Date().toISOString().slice(0, 10),
+        occupation: "cafe",
+        mode: "learning",
+        phase: "business",
+        taskType: "DRINK_PREP_TASK",
+        taskLabel: "음료 제조",
+        taskConfidence: 0.48,
+        primitiveLabels: ["REPETITIVE_ARM"],
+        features: {
+          durationSeconds: 1.1,
+          activeRatio: 0.5,
+          pauseCount: 0,
+          longestPauseSeconds: 0,
+          pathLength: 0.2,
+          routeComplexity: 1,
+          repetitionCount: 2,
+          dominantZone: "DRINK_PREP",
+          zoneTransitions: 0,
+        },
+        disposition: "quarantined",
+        dispositionReason: "업무 라벨 검토 대기",
+        durationZScore: null,
+        pauseZScore: null,
+        contextWeight: 1,
+        baselineVersion: 1,
+        motionSlice: {
+          startMs: 0,
+          endMs: 1100,
+          durationSeconds: 1.1,
+          originalDurationSeconds: 1.1,
+          excludedFrameCount: 0,
+          reason: "test",
+        },
+        actionReview: {
+          status: "pending",
+          candidates: [
+            { taskType: "WORK_CONTEXT:음료 제조", taskLabel: "음료 제조", confidence: 0.48 },
+            { taskType: "WORK_CONTEXT:설거지", taskLabel: "설거지", confidence: 0.44 },
+          ],
+          reasons: ["low_confidence", "close_candidates"],
+          topCandidateMargin: 0.04,
+          manualLabel: null,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      });
+      await done(observationTx);
+      observationDb.close();
+    });
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByLabel("검토 대기 1건").waitFor();
+    await page.getByRole("button", { name: "스켈레톤 확인" }).click();
+    await page.getByRole("dialog", { name: /업무 라벨 검토/ }).waitFor();
+    await page.getByRole("radio", { name: "설거지" }).check();
+    await page.getByRole("button", { name: "라벨 확정" }).click();
+    await page.getByLabel("검토 대기 0건").waitFor();
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByLabel("검토 대기 0건").waitFor();
   });
 });
 

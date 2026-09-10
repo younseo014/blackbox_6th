@@ -1,9 +1,9 @@
 import type { NormalizedLandmarkLike } from "./motion-analysis";
 
-const CORE_LANDMARKS = [11, 12] as const;
 // Head and face landmarks are intentionally excluded from target identity.
 // Tracking is based on torso, arm, and leg continuity only.
 const BODY_LANDMARKS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28] as const;
+const BODY_SEGMENTS = [[11, 13], [13, 15], [12, 14], [14, 16], [23, 25], [25, 27], [24, 26], [26, 28], [11, 12], [23, 24]] as const;
 const MAX_CENTER_STEP = 0.55;
 const MAX_SCALE_LOG_CHANGE = 0.65;
 // Shape (shoulder/hip/leg ratios) is the only real identity signal this
@@ -26,6 +26,7 @@ type TargetDescriptor = {
   hipRatio: number;
   legRatio: number;
   quality: number;
+  partial: boolean;
 };
 
 export type PoseTargetLock = {
@@ -73,21 +74,44 @@ function pairIsVisible(
 
 function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | null {
   if (landmarks.length < 29) return null;
-  if (CORE_LANDMARKS.some((index) => !landmarks[index])) return null;
 
   const visiblePoints = BODY_LANDMARKS
     .map((index) => landmarks[index])
-    .filter((point) => point && landmarkVisibility(point) >= 0.25);
-  if (visiblePoints.length < 4) return null;
+    .filter((point) => point && landmarkVisibility(point) >= 0.2);
+  const visibleSegment = BODY_SEGMENTS.some(([first, second]) =>
+    landmarks[first] && landmarks[second] && pairIsVisible(landmarks[first], landmarks[second], 0.2),
+  );
+  if (!visibleSegment) return null;
 
   const leftShoulder = landmarks[11];
   const rightShoulder = landmarks[12];
   const leftHip = landmarks[23];
   const rightHip = landmarks[24];
+  const shouldersVisible = pairIsVisible(leftShoulder, rightShoulder, 0.15);
+  const xs = visiblePoints.map((point) => point.x);
+  const ys = visiblePoints.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  if (!shouldersVisible) {
+    const span = Math.max(maxX - minX, maxY - minY);
+    if (span < 0.025) return null;
+    return {
+      centerX: visiblePoints.reduce((sum, point) => sum + point.x, 0) / visiblePoints.length,
+      centerY: visiblePoints.reduce((sum, point) => sum + point.y, 0) / visiblePoints.length,
+      height: Math.max(0.12, span * 3.5),
+      width: Math.max(0.06, maxX - minX),
+      torsoLength: Math.max(0.045, span * 1.4),
+      shoulderRatio: Number.NaN,
+      hipRatio: Number.NaN,
+      legRatio: Number.NaN,
+      quality: visiblePoints.reduce((sum, point) => sum + (point.visibility ?? 0), 0) / visiblePoints.length,
+      partial: true,
+    };
+  }
   const shoulderCenter = visibilityWeightedCenter(leftShoulder, rightShoulder);
-  const shoulderWidth = pairIsVisible(leftShoulder, rightShoulder, 0.15)
-    ? imageDistance(leftShoulder, rightShoulder)
-    : 0;
+  const shoulderWidth = imageDistance(leftShoulder, rightShoulder);
   const hipsVisible = pairIsVisible(leftHip, rightHip);
   const hipCenter = hipsVisible
     ? visibilityWeightedCenter(leftHip, rightHip)
@@ -97,12 +121,6 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
     : shoulderWidth / 0.6;
   if (torsoLength < 0.045) return null;
 
-  const xs = visiblePoints.map((point) => point.x);
-  const ys = visiblePoints.map((point) => point.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
   // Torso scale stays comparable when legs or arms move outside the frame.
   const height = Math.max(0.12, torsoLength * 2.8, Math.min(torsoLength * 3.6, maxY - minY));
   const width = Math.max(0.08, maxX - minX);
@@ -131,6 +149,7 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
     quality:
       visiblePoints.reduce((sum, point) => sum + (point.visibility ?? 0), 0) /
       visiblePoints.length,
+    partial: !hipsVisible,
   };
 }
 
@@ -163,8 +182,8 @@ function continuityScore(lock: PoseTargetLock, candidate: TargetDescriptor): num
   const scaleChange = Math.abs(Math.log(candidate.height / lock.latest.height));
   const currentShapeDistance = shapeDistance(lock.initial, candidate);
   if (
-    centerStep > MAX_CENTER_STEP ||
-    scaleChange > MAX_SCALE_LOG_CHANGE ||
+    centerStep > (candidate.partial ? 0.9 : MAX_CENTER_STEP) ||
+    scaleChange > (candidate.partial ? 1.4 : MAX_SCALE_LOG_CHANGE) ||
     currentShapeDistance > MAX_SHAPE_DISTANCE
   ) {
     return Number.POSITIVE_INFINITY;
@@ -173,7 +192,7 @@ function continuityScore(lock: PoseTargetLock, candidate: TargetDescriptor): num
 }
 
 /**
- * Locks onto the strongest usable upper-body or full-body pose immediately,
+ * Locks onto the strongest usable partial-body or full-body pose immediately,
  * then accepts only spatially/anatomically continuous body candidates. Head
  * landmarks are never part of the identity descriptor. A rejected frame is
  * reported as missing without releasing the lock, so temporary cropping does

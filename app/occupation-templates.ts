@@ -245,6 +245,32 @@ export function getOccupationTemplate(id: OccupationId): OccupationTemplate {
   return OCCUPATION_TEMPLATES.find((item) => item.id === id) ?? OCCUPATION_TEMPLATES[0];
 }
 
+const ZONE_NAME_HINTS: Array<[RegExp, string[]]> = [
+  [/출입|입구|현관|문앞/, ["ENTRANCE"]],
+  [/주문|결제|계산|포스|카운터|접수|예약/, ["POS", "POS_ADMIN", "RECEPTION"]],
+  [/세척|설거지|싱크|소독/, ["SINK", "SINK_CLEAN", "WASH_CLEAN", "SHAMPOO"]],
+  [/창고|재고|수납|보관|재료/, ["STORAGE", "STOCK", "INGREDIENT_STORAGE", "MATERIAL_STORAGE", "TOOL_STORAGE", "MATERIAL"]],
+  [/냉장|냉동|냉고/, ["FRIDGE", "COLD_STORAGE", "WALK_IN_COOLER"]],
+  [/제조|준비|조리|작업/, ["DRINK_PREP", "KITCHEN_PREP", "COOKING", "WORKBENCH", "TOOL_STATION"]],
+  [/포장|픽업|배식|서빙/, ["PACKING", "SERVING"]],
+  [/홀|좌석|테이블|대기|테라스/, ["HALL", "CLIENT_CHAIR"]],
+  [/쓰레기|폐기|분리수거/, ["WASTE"]],
+  [/휴게|휴식|직원실/, ["REST"]],
+  [/피팅|탈의/, ["FITTING_ROOM"]],
+  [/촬영|사진|거울/, ["PHOTO_AREA", "MIRROR_CONTENT"]],
+];
+
+export function inferZoneContext(template: OccupationTemplate, label: string) {
+  const normalized = label.replace(/\s|[·\-_]/g, "");
+  const direct = template.zones.find((zone) => {
+    const zoneLabel = zone.label.replace(/\s|[·\-_]/g, "");
+    return normalized.includes(zoneLabel) || zoneLabel.includes(normalized);
+  });
+  if (direct) return direct;
+  const ids = ZONE_NAME_HINTS.find(([pattern]) => pattern.test(normalized))?.[1];
+  return ids ? template.zones.find((zone) => ids.includes(zone.id)) ?? null : null;
+}
+
 export function phaseForHour(hour: number): WorkPhase {
   if (hour < 10) return "open";
   if (hour >= 20) return "close";
