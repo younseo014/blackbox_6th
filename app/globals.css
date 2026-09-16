@@ -1,19 +1,29 @@
 @import "tailwindcss";
 
 :root {
-  --purple-primary: #482a7c;
-  --purple-accent: #5b3e96;
-  --purple-light: #f9f9fc;
-  --text-dark: #111111;
-  --text-muted: #636366;
-  --text-gray: #8e8e93;
-  --divider-color: #f0f0f4;
-  --chevron-color: #c7c7cc;
-  --connected: #34c759;
-  --danger: #b42318;
-  --canvas: #ffffff;
-  --shell: #f4f4f6;
-  --focus: rgba(72, 42, 124, 0.28);
+  --surface: #ffffff;
+  --neutral-soft: #f6f8fa;
+  --line: #dde5ec;
+  --ink: #191f28;
+  --muted: #566675;
+  --sky-soft: #eaf6fe;
+  --sky-fill: #c8e8fb;
+  --sky-fill-hover: #aedcf7;
+  --sky-strong: #0875b1;
+  --sky-ink: #164c70;
+  --purple-primary: var(--sky-strong);
+  --purple-accent: var(--sky-ink);
+  --purple-light: var(--sky-soft);
+  --text-dark: var(--ink);
+  --text-muted: var(--muted);
+  --text-gray: #738391;
+  --divider-color: var(--line);
+  --chevron-color: #9aa8b4;
+  --connected: var(--sky-strong);
+  --danger: var(--sky-strong);
+  --canvas: var(--surface);
+  --shell: var(--neutral-soft);
+  --focus: var(--sky-strong);
   color-scheme: light;
 }
 
@@ -46,7 +56,7 @@ a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -327,8 +337,8 @@ h1, h2, h3, p { margin-top: 0; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--purple-primary);
-  color: white;
+  background: var(--sky-fill);
+  color: var(--sky-ink);
   font-size: 15px;
   font-weight: 650;
   cursor: pointer;
@@ -587,7 +597,7 @@ input, select {
   gap: 3px;
   background: white;
 }
-.user-mode-toggle button.active { border-color: rgba(72, 42, 124, .28); background: var(--purple-light); color: var(--purple-primary); }
+.user-mode-toggle button.active { border-color: rgba(8, 117, 177, .32); background: var(--sky-soft); color: var(--sky-strong); }
 .user-mode-toggle button > span { font-size: 20px; }
 .user-mode-toggle strong { font-size: 13.5px; }
 .user-mode-toggle small { color: var(--text-gray); font-size: 11px; }
@@ -669,7 +679,7 @@ input, select {
 .occupation-icon svg { width: 22px; height: 22px; }
 .care-empty-state h2 { margin-bottom: 8px; font-size: 20px; }
 .care-empty-state p { margin: 0 auto 17px; color: var(--text-muted); font-size: 13.5px; line-height: 1.6; }
-.care-empty-state button { min-height: 48px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--purple-primary); color: white; font-weight: 650; }
+.care-empty-state button { min-height: 48px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--sky-fill); color: var(--sky-ink); font-weight: 650; }
 .care-summary,
 .signal-result,
 .day-detail,
@@ -716,8 +726,8 @@ input, select {
 .modal-close { position: absolute; z-index: 2; top: 10px; right: 10px; width: 44px; height: 44px; border: 0; border-radius: 50%; background: #f2f2f7; font-size: 22px; }
 .modal-heading h2, .booking-modal h2, .consent-modal h2, .my-data-modal h2, .brain-health-modal h2, .zone-setup-modal h2 { margin: 8px 38px 8px 0; font-size: 20px; line-height: 1.35; }
 .modal-heading p, .booking-modal > p, .zone-setup-modal > p { color: var(--text-muted); font-size: 13px; }
-.modal-confirm, .modal-confirm-button, .booking-modal form button[type="submit"] { width: 100%; min-height: 52px; margin-top: 14px; border: 0; border-radius: 14px; background: var(--purple-primary); color: white; font-weight: 650; }
-.primary-button { min-height: 44px; padding: 0 15px; border: 0; border-radius: 10px; background: var(--purple-primary); color: white; font-weight: 650; }
+.modal-confirm, .modal-confirm-button, .booking-modal form button[type="submit"] { width: 100%; min-height: 52px; margin-top: 14px; border: 0; border-radius: 14px; background: var(--sky-fill); color: var(--sky-ink); font-weight: 650; }
+.primary-button { min-height: 44px; padding: 0 15px; border: 0; border-radius: 10px; background: var(--sky-fill); color: var(--sky-ink); font-weight: 650; }
 .secondary-button { min-height: 44px; padding: 0 15px; border: 1px solid #dedce3; border-radius: 10px; background: white; color: var(--purple-primary); font-weight: 650; }
 .booking-modal form { display: grid; gap: 13px; }
 .booking-modal label { color: var(--text-muted); font-size: 12px; font-weight: 650; }
@@ -804,16 +814,22 @@ input, select {
 }
 
 .return-user-button {
-  width: 44px;
+  min-width: 44px;
   height: 44px;
-  padding: 10px;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-dark);
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  color: var(--sky-ink);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
 }
-.return-user-button svg { width: 22px; height: 22px; display: block; }
+.return-user-button svg { width: 17px; height: 17px; display: block; }
 
 .interface-developer .topbar {
   margin: 8px 0 20px;
@@ -980,7 +996,7 @@ input, select {
 .mode-card-heading { display: grid; }
 .mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .mode-toggle button { min-height: 42px; border: 1px solid var(--divider-color); border-radius: 9px; background: white; color: var(--text-gray); font-size: 12px; font-weight: 650; }
-.mode-toggle button.active { border-color: rgba(72, 42, 124, .26); background: var(--purple-light); color: var(--purple-primary); }
+.mode-toggle button.active { border-color: rgba(8, 117, 177, .3); background: var(--sky-soft); color: var(--sky-strong); }
 .mode-card-body { display: grid; gap: 14px; }
 .mode-copy { display: grid; grid-template-columns: 9px 1fr; gap: 9px; }
 .mode-status-dot { width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; background: var(--purple-accent); }
@@ -1045,7 +1061,11 @@ input, select {
   .interface-user button:hover { color: var(--purple-primary); }
   .interface-user .first-user-welcome > button:hover,
   .interface-user .complete-user-setup:hover,
-  .interface-user .care-empty-state button:hover { background: #3c2269; color: white; }
+  .interface-user .care-empty-state button:hover,
+  .interface-user .primary-button:hover,
+  .interface-developer .primary-button:hover,
+  .modal-confirm:hover,
+  .modal-confirm-button:hover { background: var(--sky-fill-hover); color: var(--sky-ink); }
   .timeline-event:hover { background: linear-gradient(90deg, transparent, var(--purple-light)); }
 }
 

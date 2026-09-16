@@ -2500,6 +2500,7 @@ export default function Home() {
   }
 
   function switchInterfaceMode() {
+    window.scrollTo({ top: 0, behavior: "auto" });
     if (interfaceMode === "user") {
       setInterfaceMode("developer");
       setDemoMode(true);
@@ -2628,6 +2629,7 @@ export default function Home() {
                 <span className="developer-mode-pill"><i aria-hidden="true" />개발자 도구</span>
                 <button className="return-user-button" type="button" onClick={switchInterfaceMode} aria-label="사용자 모드로 돌아가기">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18-6-6 6-6" /><path d="M3 12h18" /></svg>
+                  <span>사용자 모드</span>
                 </button>
               </>
             )}
