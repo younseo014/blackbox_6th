@@ -12,6 +12,8 @@
     "test": "npm run build && node --test tests/rendered-html.test.mjs && npm run test:unit",
     "test:unit": "node --import tsx --test tests/motion-analysis.test.ts tests/care-metrics.test.ts tests/demo-personas.test.ts tests/pose-store.test.ts tests/demo-motion.test.ts tests/motion-detection.test.ts tests/observation-engine.test.ts tests/pose-target-lock.test.ts tests/multi-camera.test.ts tests/custom-motion-training.test.ts tests/action-review.test.ts tests/work-context-inference.test.ts",
     "test:e2e": "npm run build && node tests/e2e/run-personas.mjs",
+    "download:lara": "node scripts/download-lara-omocap.mjs",
+    "train:lara": "python3 scripts/train-lara-primitives.py",
     "train:utkinect": "node --import tsx scripts/train-utkinect-primitives.ts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern public/mediapipe-wasm",
     "deploy": "npm run build && wrangler deploy -c dist/server/wrangler.json"
