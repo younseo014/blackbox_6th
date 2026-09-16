@@ -4,7 +4,7 @@
 // (metrics-store.ts) and, optionally, a server route.
 //
 // Important scope note: this file computes signals FROM real interactions
-// the user already takes in the app (closing re-checks, unfinished tasks,
+// the user already takes in the app (re-checks, unfinished tasks,
 // gaps between logged events). It does not diagnose anything - see
 // `detectChangeSignal`, which deliberately returns a "watch" / "none" style
 // signal plus the plain-language reasons behind it, never a diagnostic label.
@@ -13,6 +13,7 @@ export type BusyLevel = "quiet" | "normal" | "busy";
 
 export type DailyLog = {
   date: string; // YYYY-MM-DD, local date
+  /** @deprecated Kept only so older browser records can still be read. */
   safetyAlerts: number;
   doubleChecks: number;
   tasksStarted: number;
@@ -34,7 +35,6 @@ export function emptyDailyLog(date: string): DailyLog {
 }
 
 export type MetricSummary = {
-  safetyAlerts: number;
   doubleChecks: number;
   dropRate: number; // 0..1, share of started tasks never completed
   microDelayRate: number; // 0..1, share of delays over the slow threshold
@@ -58,7 +58,6 @@ export function summarizeLog(log: DailyLog): MetricSummary {
       ? slowDelays / log.microDelaySeconds.length
       : 0;
   return {
-    safetyAlerts: log.safetyAlerts,
     doubleChecks: log.doubleChecks,
     dropRate,
     microDelayRate,
@@ -92,7 +91,6 @@ export function computeBaseline(
 
   const summaries = eligible.map(summarizeLog);
   return {
-    safetyAlerts: average(summaries.map((s) => s.safetyAlerts)),
     doubleChecks: average(summaries.map((s) => s.doubleChecks)),
     dropRate: average(summaries.map((s) => s.dropRate)),
     microDelayRate: average(summaries.map((s) => s.microDelayRate)),
@@ -107,6 +105,25 @@ export type ChangeSignal = {
   reasons: string[];
   confoundNote: string | null;
 };
+
+/**
+ * Dementia/cognitive-health guidance is intentionally gated more strictly
+ * than an ordinary change notice. It only appears after a personal baseline
+ * exists, at least two recent days are available, all tracked behavior
+ * indicators moved together, and a busy-period explanation is not dominant.
+ */
+export function shouldShowCognitiveSupport(
+  signal: ChangeSignal,
+  recentLogs: DailyLog[],
+  baseline: ReturnType<typeof computeBaseline>,
+): boolean {
+  return Boolean(
+    baseline &&
+    recentLogs.length >= 2 &&
+    signal.level === "notable" &&
+    !signal.confoundNote
+  );
+}
 
 /**
  * Compares the most recent days against the personal baseline. Never
@@ -128,7 +145,6 @@ export function detectChangeSignal(
   const busyDays = recentLogs.filter((log) => log.busyLevel === "busy").length;
   const recentSummaries = recentLogs.map(summarizeLog);
   const recent: MetricSummary = {
-    safetyAlerts: average(recentSummaries.map((s) => s.safetyAlerts)),
     doubleChecks: average(recentSummaries.map((s) => s.doubleChecks)),
     dropRate: average(recentSummaries.map((s) => s.dropRate)),
     microDelayRate: average(recentSummaries.map((s) => s.microDelayRate)),
@@ -139,10 +155,6 @@ export function detectChangeSignal(
   const reasons: string[] = [];
   let signalCount = 0;
 
-  if (recent.safetyAlerts >= baseline.safetyAlerts + 1) {
-    reasons.push("정해진 시간 뒤에도 남아 있던 마감 항목이 평소보다 늘었어요.");
-    signalCount += 1;
-  }
   if (recent.doubleChecks >= baseline.doubleChecks + 1) {
     reasons.push("마감 반복 확인 횟수가 평소보다 늘었어요.");
     signalCount += 1;

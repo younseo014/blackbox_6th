@@ -20,6 +20,7 @@ export type CustomZone = {
 export type ObservationProfile = {
   id: "primary";
   occupation: OccupationId;
+  occupationName: string;
   mode: ObservationMode;
   learningStartedAt: number;
   baselineVersion: number;
@@ -106,6 +107,7 @@ export type AnalysisFeedback = {
 export const DEFAULT_PROFILE: ObservationProfile = {
   id: "primary",
   occupation: "cafe",
+  occupationName: "",
   mode: "learning",
   learningStartedAt: 0,
   baselineVersion: 1,
@@ -386,16 +388,5 @@ export function createObservationEpisode(args: {
     baselineVersion: args.profile.baselineVersion,
     source: args.profile.mode === "analysis" ? "real_analysis" : "real_learning",
     motionSlice: args.motionSlice,
-  };
-}
-
-export function qualitativeMotionTags(features: ObservationFeatures, baseline?: TaskBaseline) {
-  const durationZ = baseline
-    ? safeZScore(features.durationSeconds, baseline.meanDuration, baseline.durationSD)
-    : null;
-  return {
-    speed: durationZ !== null && durationZ >= 1.5 ? "평소보다 느림" : features.activeRatio > 0.55 ? "빠름" : "보통",
-    range: features.pathLength > 1.8 ? "큼" : features.pathLength > 0.45 ? "보통" : "작음",
-    flow: features.longestPauseSeconds >= 5 ? "중단 후 재개" : features.repetitionCount >= 2 ? "반복됨" : "자연스러움",
   };
 }

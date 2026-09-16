@@ -5,7 +5,7 @@
 // movement. They exist so a developer can preview - via the same
 // session-replay viewer used for real camera sessions - what a plausible
 // physical movement might look like for a flagged event type ("마감 반복
-// 확인", "미세 지연", "안전 알림", ...), since a virtual persona obviously
+// 확인", "미세 지연", ...), since a virtual persona obviously
 // has no real recording to show. No Math.random()/Date.now() is used, so
 // the same (type, seed) always produces the exact same clip - both for
 // reproducible unit tests and so replaying an event twice looks identical.
@@ -28,7 +28,6 @@ import {
 export type DemoMotionType =
   | "double_check"
   | "micro_delay"
-  | "safety_alert"
   | "normal_task"
   | "fine_hand_task"
   | "register_tap"
@@ -282,7 +281,6 @@ function buildRawFrame(frameIndex: number, spec: FrameSpec): number[] {
 const CLIP_SECONDS: Record<DemoMotionType, number> = {
   double_check: 2.6,
   micro_delay: 1.6,
-  safety_alert: 0.6,
   normal_task: 0.9,
   fine_hand_task: 0.9,
   register_tap: 1.95,
@@ -389,39 +387,6 @@ function generateMicroDelayMotion(seed: number): number[][] {
         rightHandCenter,
         rightHandAngle: handAngle,
         rightOpenness: 0.5,
-        leftHandCenter: idlePoint(REST_LEFT, i, seed),
-        leftHandAngle: REST_LEFT_ANGLE,
-        leftOpenness: 0.4,
-      }),
-    );
-  }
-  return frames;
-}
-
-/**
- * "안전 알림" - a fast, reactive full-body motion: crouches down toward a
- * floor-level target (e.g. slapping a plug/switch off), then straightens
- * back up quickly. The crouch plus a sharp narrow approach leaves a high
- * peak speed / jerk signature in computeMovementSmoothness.
- */
-function generateSafetyAlertMotion(seed: number): number[][] {
-  const frameCount = frameCountFor("safety_alert");
-  const target: Point2D = { x: 0.63 + seedJitter(seed, 0.02), y: 0.78 };
-  const frames: number[][] = [];
-  for (let i = 0; i < frameCount; i += 1) {
-    const t = i / (frameCount - 1);
-    const progress = clamp01(Math.max(bump(t, 0.3, 0.09), bump(t, 0.58, 0.12) * 0.35));
-    const crouch = clamp01(bump(t, 0.3, 0.16));
-    frames.push(
-      buildRawFrame(i, {
-        headYaw: 0.3 * progress,
-        headPitch: 0.28 * crouch,
-        headRoll: 0.04 * progress,
-        torsoLean: { x: 0.02 * progress, y: 0.05 * crouch },
-        crouch,
-        rightHandCenter: lerpPoint(REST_RIGHT, target, progress),
-        rightHandAngle: REST_RIGHT_ANGLE - 0.9 * progress,
-        rightOpenness: 0.3 + 0.55 * progress,
         leftHandCenter: idlePoint(REST_LEFT, i, seed),
         leftHandAngle: REST_LEFT_ANGLE,
         leftOpenness: 0.4,
@@ -641,8 +606,6 @@ export function generateEventMotion(type: DemoMotionType, seed = 0): number[][] 
       return generateDoubleCheckMotion(seed);
     case "micro_delay":
       return generateMicroDelayMotion(seed);
-    case "safety_alert":
-      return generateSafetyAlertMotion(seed);
     case "register_tap":
       return generateRegisterTapMotion(seed);
     case "fine_hand_task":
@@ -662,7 +625,6 @@ export function generateEventMotion(type: DemoMotionType, seed = 0): number[][] 
 export const DEMO_MOTION_LABELS: Record<DemoMotionType, string> = {
   double_check: "마감 반복 확인 동작",
   micro_delay: "미세 지연(머뭇거림) 동작",
-  safety_alert: "안전 알림 반응 동작",
   normal_task: "평소 업무 동작",
   fine_hand_task: "손가락 중심의 정상 업무 동작",
   register_tap: "결제·입력 재시도 동작",

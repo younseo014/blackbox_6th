@@ -61,12 +61,6 @@ export const DEFAULT_AMBIGUITY_THRESHOLDS: AmbiguityThresholds = {
   minimumCandidateMargin: 0.12,
 };
 
-export const ACTION_REVIEW_STATUS_LABELS: Record<ActionReviewStatus, string> = {
-  pending: "검토 대기",
-  confirmed: "라벨 확정",
-  unresolved: "판별 불가",
-};
-
 export const ACTION_AMBIGUITY_REASON_LABELS: Record<ActionAmbiguityReason, string> = {
   no_candidates: "업무 후보 없음",
   low_confidence: "낮은 분류 신뢰도",
@@ -229,4 +223,3 @@ export function listPendingActionReviews(
     .filter(needsActionReview)
     .sort((a, b) => a.recordedAt - b.recordedAt);
 }
-

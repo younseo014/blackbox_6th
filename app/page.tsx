@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import NumberFlow from "@number-flow/react";
 import { Dialog } from "@base-ui-components/react/dialog";
@@ -41,6 +41,7 @@ import { detectMotionEvents, motionSamplesFromRawFrames } from "./motion-detecti
 import {
   computeBaseline,
   detectChangeSignal,
+  shouldShowCognitiveSupport,
   summarizeLog,
   type DailyLog,
 } from "./care-metrics";
@@ -51,12 +52,9 @@ import {
   listRecentLogs,
   recordDoubleCheck,
   recordMicroDelay,
-  recordSafetyAlert,
   recordTaskCompleted,
   recordTaskStarted,
-  setBusyLevel as persistBusyLevel,
   setConsent,
-  todayDateKey,
   type ConsentState,
 } from "./metrics-store";
 import {
@@ -68,11 +66,10 @@ import {
   type DemoPersona,
 } from "./demo-personas";
 import {
-  OCCUPATION_TEMPLATES,
   getOccupationTemplate,
+  inferOccupationContext,
   inferZoneContext,
   phaseForHour,
-  type OccupationId,
 } from "./occupation-templates";
 import {
   DEFAULT_PROFILE,
@@ -121,12 +118,11 @@ import {
   type PoseTargetLock,
 } from "./pose-target-lock";
 
-type View = "home" | "settings" | "today" | "timeline" | "closing" | "care";
+type View = "home" | "settings" | "today" | "timeline" | "care";
 type InterfaceMode = "user" | "developer";
 type CameraStatus = "idle" | "requesting" | "connected" | "error";
 type PoseStatus = "idle" | "loading" | "searching" | "holding" | "partial" | "full" | "error";
-type ClosingStatus = "idle" | "checking" | "attention" | "done";
-type EventKind = "payment" | "door" | "safety" | "booking";
+type EventKind = "payment" | "booking";
 type QuickMotionMode = "idle" | "training" | "labeling" | "testing";
 
 type TimelineEvent = {
@@ -198,7 +194,6 @@ type UserInstallState = {
   careOffset: DailyLog | null;
 };
 
-const DEFAULT_CLOSING_TIME = "19:00";
 const DEFAULT_CLOSING_CHECKLIST: ClosingChecklistItem[] = [
   { id: "pos", label: "포스기 닫기", done: false },
   { id: "revenue", label: "오늘 매출 정산하기", done: false },
@@ -263,10 +258,7 @@ function scopeCareLogsToUserInstall(
 }
 
 function loadChecklistSettings() {
-  const fallback = {
-    time: DEFAULT_CLOSING_TIME,
-    items: DEFAULT_CLOSING_CHECKLIST,
-  };
+  const fallback = DEFAULT_CLOSING_CHECKLIST;
   if (typeof window === "undefined") return fallback;
   try {
     const stored = window.localStorage.getItem(CHECKLIST_STORAGE_KEY);
@@ -277,13 +269,9 @@ function loadChecklistSettings() {
       items?: ClosingChecklistItem[];
     };
     const items = Array.isArray(parsed.items) ? parsed.items : DEFAULT_CLOSING_CHECKLIST;
-    return {
-      time: parsed.time ?? DEFAULT_CLOSING_TIME,
-      items:
-        parsed.date === currentDateKey()
-          ? items
-          : items.map((item) => ({ ...item, done: false })),
-    };
+    return parsed.date === currentDateKey()
+      ? items
+      : items.map((item) => ({ ...item, done: false }));
   } catch {
     return fallback;
   }
@@ -301,15 +289,15 @@ function loadWorkContextConfig(): WorkContextConfig {
     const parsed = JSON.parse(stored) as Partial<WorkContextConfig>;
     const routines = Array.isArray(parsed.routines) && parsed.routines.length > 0
       ? parsed.routines.map((routine) => ({
-          id: routine.id ?? crypto.randomUUID(),
-          name: routine.name ?? "루틴",
-          days: Array.isArray(routine.days) ? routine.days.filter(isWeekdayIndex) : [],
-          openTime: routine.openTime ?? DEFAULT_WORK_ROUTINE.openTime,
-          closeTime: routine.closeTime ?? DEFAULT_WORK_ROUTINE.closeTime,
-          schedule: Array.isArray(routine.schedule)
-            ? routine.schedule.map((item) => ({ ...item, repeats: item.repeats ?? false }))
-            : [],
-        }))
+        id: routine.id ?? crypto.randomUUID(),
+        name: routine.name ?? "루틴",
+        days: Array.isArray(routine.days) ? routine.days.filter(isWeekdayIndex) : [],
+        openTime: routine.openTime ?? DEFAULT_WORK_ROUTINE.openTime,
+        closeTime: routine.closeTime ?? DEFAULT_WORK_ROUTINE.closeTime,
+        schedule: Array.isArray(routine.schedule)
+          ? routine.schedule.map((item) => ({ ...item, repeats: item.repeats ?? false }))
+          : [],
+      }))
       : [DEFAULT_WORK_ROUTINE];
     const closedDays = Array.isArray(parsed.closedDays) ? parsed.closedDays.filter(isWeekdayIndex) : [];
     return { routines, closedDays };
@@ -324,11 +312,6 @@ function currentDateKey() {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-}
-
-function minutesFromClock(value: string) {
-  const [hours, minutes] = value.split(":").map(Number);
-  return hours * 60 + minutes;
 }
 
 function formatClockLabel(value: string) {
@@ -348,13 +331,6 @@ const CHUNK_FRAME_COUNT = MOTION_SAMPLE_RATE * 30;
 
 const initialEvents: TimelineEvent[] = [
   {
-    id: "sample-1",
-    time: "16:30",
-    title: "손님이 나가셨어요",
-    detail: "출입문 움직임 감지",
-    kind: "door",
-  },
-  {
     id: "sample-2",
     time: "14:05",
     title: "결제가 완료됐어요",
@@ -368,25 +344,53 @@ const initialEvents: TimelineEvent[] = [
     detail: "김하나 고객 · 커트",
     kind: "booking",
   },
-  {
-    id: "sample-4",
-    time: "09:42",
-    title: "매장 문을 열었어요",
-    detail: "출입문 센서 감지",
-    kind: "door",
-  },
 ];
 
-const userNavItems: Array<{ id: View; label: string; icon: string }> = [
-  { id: "home", label: "홈", icon: "⌂" },
-  { id: "care", label: "기록", icon: "♡" },
-  { id: "settings", label: "설정", icon: "⚙" },
+const userNavItems: Array<{ id: View; label: string }> = [
+  { id: "home", label: "홈" },
+  { id: "timeline", label: "기록" },
+  { id: "care", label: "변화" },
+  { id: "settings", label: "설정" },
 ];
 
-const developerNavItems: Array<{ id: View; label: string; icon: string }> = [
-  { id: "today", label: "카메라 테스트", icon: "⌁" },
-  { id: "care", label: "가상 리포트", icon: "◇" },
-  { id: "settings", label: "테스트 설정", icon: "⚙" },
+function NavIcon({ view }: { view: View }) {
+  const paths: Partial<Record<View, ReactNode>> = {
+    home: <><path d="M3.5 10.8 12 3.6l8.5 7.2" /><path d="M5.8 9.3v10.2h12.4V9.3M9.4 19.5v-6h5.2v6" /></>,
+    today: <><rect x="3" y="6" width="18" height="13" rx="3" /><path d="m8 6 1.2-2h5.6L16 6" /><circle cx="12" cy="12.5" r="3.2" /></>,
+    timeline: <><path d="M6 3.8h12a2 2 0 0 1 2 2v14.4H6a2 2 0 0 1-2-2V5.8a2 2 0 0 1 2-2Z" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
+    care: <><path d="M4 12h3l2-5 4 10 2-5h5" /><path d="M12 21C6.8 18.2 3 14.8 3 10.2 3 6.8 5.4 4.5 8.4 4.5c1.7 0 2.9.8 3.6 2 .7-1.2 1.9-2 3.6-2 3 0 5.4 2.3 5.4 5.7" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></>,
+  };
+
+  return (
+    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths[view] ?? <circle cx="12" cy="12" r="8" />}
+    </svg>
+  );
+}
+
+function CareMark() {
+  return (
+    <span className="care-summary-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.8 9.4c0 5.2-4.3 8.3-8.8 11-4.5-2.7-8.8-5.8-8.8-11A4.9 4.9 0 0 1 8 4.5c1.8 0 3.2.9 4 2.2.8-1.3 2.2-2.2 4-2.2a4.9 4.9 0 0 1 4.8 4.9Z" />
+      </svg>
+    </span>
+  );
+}
+
+function StoreIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 10v10h16V10M3 10l2-6h14l2 6" /><path d="M8 20v-5h4v5M3 10c0 1.5 1 2.5 2.5 2.5S8 11.5 8 10c0 1.5 1 2.5 2.5 2.5S13 11.5 13 10c0 1.5 1 2.5 2.5 2.5S18 11.5 18 10c0 1.5 1 2.5 2.5 2.5" />
+    </svg>
+  );
+}
+
+const developerNavItems: Array<{ id: View; label: string }> = [
+  { id: "today", label: "카메라 테스트" },
+  { id: "care", label: "가상 리포트" },
+  { id: "settings", label: "테스트 설정" },
 ];
 
 const eventPresets: Array<{
@@ -395,30 +399,16 @@ const eventPresets: Array<{
   kind: EventKind;
   button: string;
 }> = [
-  {
-    title: "결제가 완료됐어요",
-    detail: "로컬 카메라 테스트 · 결제 이벤트",
-    kind: "payment",
-    button: "결제 완료",
-  },
-  {
-    title: "손님이 나가셨어요",
-    detail: "로컬 카메라 테스트 · 퇴장 이벤트",
-    kind: "door",
-    button: "손님 퇴장",
-  },
-  {
-    title: "출입문이 열렸어요",
-    detail: "로컬 카메라 테스트 · 출입 이벤트",
-    kind: "door",
-    button: "출입문 열림",
-  },
-];
+    {
+      title: "결제가 완료됐어요",
+      detail: "로컬 카메라 테스트 · 결제 이벤트",
+      kind: "payment",
+      button: "결제 완료",
+    },
+  ];
 
 const kindLabel: Record<EventKind, string> = {
   payment: "결제",
-  door: "출입",
-  safety: "안전",
   booking: "예약",
 };
 
@@ -535,9 +525,7 @@ function TimelineList({
           type="button"
         >
           <span className="event-time">{event.time}</span>
-          <span className={`event-node ${event.kind}`} aria-hidden="true">
-            {event.kind === "safety" ? "✓" : ""}
-          </span>
+          <span className={`event-node ${event.kind}`} aria-hidden="true" />
           {index < visibleEvents.length - 1 && (
             <span className="event-line" aria-hidden="true" />
           )}
@@ -599,13 +587,10 @@ export default function Home() {
     key: string;
     label: string;
     frames: number[][];
-    detectionExplanation?: DemoDetectionExplanation;
+    detectionExplanation?: ReturnType<typeof explainDemoEvent>;
   } | null>(null);
   const [events, setEvents] = useState<TimelineEvent[]>(initialEvents);
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
-  const [heaterOn, setHeaterOn] = useState(true);
-  const [closingStatus, setClosingStatus] = useState<ClosingStatus>("idle");
-  const [closingStep, setClosingStep] = useState(0);
   const [savepointOpen, setSavepointOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingName, setBookingName] = useState("김하나");
@@ -614,20 +599,17 @@ export default function Home() {
   const [selectedPersonaIndex, setSelectedPersonaIndex] = useState(0);
   const [selectedDemoDay, setSelectedDemoDay] = useState(6);
   const [observationProfile, setObservationProfile] = useState<ObservationProfile>(DEFAULT_PROFILE);
+  const [occupationInput, setOccupationInput] = useState("");
   const [observationEpisodes, setObservationEpisodes] = useState<ObservationEpisode[]>([]);
   const [observationBaseline, setObservationBaseline] = useState<BaselineSnapshot>(() => buildBaseline([], 1));
   const [zoneSetupOpen, setZoneSetupOpen] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string>("DRINK_PREP");
   const [zoneCameraSlot, setZoneCameraSlot] = useState<1 | 2>(1);
   const [customZoneName, setCustomZoneName] = useState("");
-  const [closingTime, setClosingTime] = useState(
-    () => loadChecklistSettings().time,
-  );
   const [closingChecklist, setClosingChecklist] = useState<ClosingChecklistItem[]>(
-    () => loadChecklistSettings().items,
+    loadChecklistSettings,
   );
   const [newChecklistItem, setNewChecklistItem] = useState("");
-  const [checklistReminderDue, setChecklistReminderDue] = useState(false);
   const [workContextConfig, setWorkContextConfig] = useState<WorkContextConfig>(loadWorkContextConfig);
   const [brainHealthOpen, setBrainHealthOpen] = useState(false);
   const [learnedMotions, setLearnedMotions] = useState<LearnedMotionAction[]>([]);
@@ -648,9 +630,6 @@ export default function Home() {
   const [consent, setConsentState] = useState<ConsentState>(() => getConsent());
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [careLogs, setCareLogs] = useState<DailyLog[]>([]);
-  const [todayBusyLevel, setTodayBusyLevel] = useState<"quiet" | "normal" | "busy">(
-    "normal",
-  );
   const [myDataOpen, setMyDataOpen] = useState(false);
   const [storedMotionBytes, setStoredMotionBytes] = useState(0);
   const [motionSignal, setMotionSignal] = useState<{
@@ -659,8 +638,6 @@ export default function Home() {
   } | null>(null);
   const pendingCameraStartRef = useRef(false);
   const quickMotionCameraRequestedRef = useRef(false);
-  const closingDoneTodayRef = useRef(false);
-  const checklistReminderRecordedRef = useRef(false);
   const checklistTaskStartedRef = useRef(false);
   const bookingShownAtRef = useRef<number | null>(null);
   const lastTestEventAtRef = useRef<number | null>(null);
@@ -670,8 +647,6 @@ export default function Home() {
     try {
       const logs = await listRecentLogs(28);
       setCareLogs(logs);
-      const today = logs.find((log) => log.date === todayDateKey());
-      if (today) setTodayBusyLevel(today.busyLevel);
     } catch {
       // local-only storage; ignore transient read errors
     }
@@ -753,8 +728,6 @@ export default function Home() {
     startedAt: null,
   });
 
-  const todayEvents = useMemo(() => events, [events]);
-
   useEffect(() => {
     const storedMode = loadInterfaceMode();
     const storedInstall = loadUserInstallState();
@@ -818,6 +791,7 @@ export default function Home() {
       .then(async (profile) => {
         const saved = await saveObservationProfile(profile);
         setObservationProfile(saved);
+        setOccupationInput(saved.occupationName || getOccupationTemplate(saved.occupation).label);
         const template = getOccupationTemplate(saved.occupation);
         setSelectedZoneId(template.zones[0]?.id ?? "");
         const episodes = await listObservationEpisodes(500);
@@ -846,8 +820,6 @@ export default function Home() {
     listRecentLogs(28)
       .then((logs) => {
         setCareLogs(logs);
-        const today = logs.find((log) => log.date === todayDateKey());
-        if (today) setTodayBusyLevel(today.busyLevel);
       })
       .catch(() => undefined);
   }, []);
@@ -857,36 +829,14 @@ export default function Home() {
       CHECKLIST_STORAGE_KEY,
       JSON.stringify({
         date: currentDateKey(),
-        time: closingTime,
         items: closingChecklist,
       }),
     );
-  }, [closingChecklist, closingTime]);
+  }, [closingChecklist]);
 
   useEffect(() => {
     window.localStorage.setItem(WORK_CONTEXT_CONFIG_STORAGE_KEY, JSON.stringify(workContextConfig));
   }, [workContextConfig]);
-
-  useEffect(() => {
-    const checkReminder = () => {
-      const now = new Date();
-      const nowMinutes = now.getHours() * 60 + now.getMinutes();
-      const hasIncompleteItem = closingChecklist.some((item) => !item.done);
-      const reminderIsDue = hasIncompleteItem && nowMinutes >= minutesFromClock(closingTime);
-      setChecklistReminderDue(reminderIsDue);
-      if (
-        reminderIsDue &&
-        consent.observationConsent &&
-        !checklistReminderRecordedRef.current
-      ) {
-        checklistReminderRecordedRef.current = true;
-        void recordSafetyAlert().then(refreshCareData);
-      }
-    };
-    checkReminder();
-    const timer = window.setInterval(checkReminder, 30_000);
-    return () => window.clearInterval(timer);
-  }, [closingChecklist, closingTime, consent.observationConsent]);
 
   useEffect(() => {
     if (
@@ -1040,13 +990,13 @@ export default function Home() {
       const preferredPrimary = primaryOnly
         ? cameras.find(isBuiltInCamera) ?? cameras[0]
         : cameras.find((camera) => camera.deviceId === savedPrimary)
-          ?? cameras.find(isBuiltInCamera)
-          ?? cameras[0];
+        ?? cameras.find(isBuiltInCamera)
+        ?? cameras[0];
       const preferredSecondary = primaryOnly
         ? undefined
         : cameras.find(
-            (camera) => camera.deviceId === savedSecondary && camera.deviceId !== preferredPrimary.deviceId,
-          ) ?? cameras.find((camera) => camera.deviceId !== preferredPrimary.deviceId);
+          (camera) => camera.deviceId === savedSecondary && camera.deviceId !== preferredPrimary.deviceId,
+        ) ?? cameras.find((camera) => camera.deviceId !== preferredPrimary.deviceId);
 
       setAvailableCameras(cameras);
       setPrimaryCameraId(preferredPrimary.deviceId);
@@ -1555,8 +1505,8 @@ export default function Home() {
       ];
       globalCaptureSessionRef.current = createGlobalCaptureSession(connectedCameras);
       const sharedSession = {
-          globalSessionId: globalCaptureSessionRef.current.id,
-          timelineOriginMs: globalCaptureSessionRef.current.timelineOriginMs,
+        globalSessionId: globalCaptureSessionRef.current.id,
+        timelineOriginMs: globalCaptureSessionRef.current.timelineOriginMs,
       };
       const session = await createMotionSession(
         `motion-${crypto.randomUUID()}`,
@@ -1566,10 +1516,10 @@ export default function Home() {
       poseSessionRef.current = session;
       secondaryPoseSessionRef.current = secondaryStreamRef.current
         ? await createMotionSession(
-            `motion-${crypto.randomUUID()}`,
-            startedAt,
-            { ...sharedSession, cameraId: secondaryId, cameraSlot: 2 },
-          )
+          `motion-${crypto.randomUUID()}`,
+          startedAt,
+          { ...sharedSession, cameraId: secondaryId, cameraSlot: 2 },
+        )
         : null;
       sessionPerformanceStartRef.current = globalCaptureSessionRef.current.timelineOriginMs;
       lastDetectionTimeRef.current = 0;
@@ -1636,10 +1586,9 @@ export default function Home() {
 
   // Analyzes a just-finished session's real coordinates with the same
   // motion detector used for the demo persona replay (app/motion-detection.ts)
-  // and records ANY detected events into today's log - ALONGSIDE the
-  // existing button/timer signals (recordDoubleCheck/recordSafetyAlert
-  // elsewhere in this file), not instead of them. Best-effort: a failed
-  // analysis shouldn't block ending the camera session.
+  // and records behavior-pattern events into today's log. Safety-style
+  // detections are deliberately ignored: camera movement cannot prove that
+  // a device was left on or that a guest entered or exited.
   async function recordMotionDetections(sessionId: string, globalSessionId?: string) {
     try {
       const rawFrames = globalSessionId
@@ -1648,11 +1597,9 @@ export default function Home() {
       const samples = motionSamplesFromRawFrames(rawFrames);
       const detections = detectMotionEvents(samples);
       for (const detection of detections) {
-        if (detection.type === "safety_alert") {
-          await recordSafetyAlert();
-        } else if (detection.type === "double_check") {
+        if (detection.type === "double_check") {
           await recordDoubleCheck();
-        } else {
+        } else if (detection.type === "micro_delay") {
           await recordMicroDelay((detection.endMs - detection.startMs) / 1000);
         }
       }
@@ -1761,9 +1708,9 @@ export default function Home() {
           ? "업무 라벨이 애매한 동작을 개발자 검토함에 보관했어요"
           : episode.disposition === "quarantined"
             ? "평소 흐름으로 확정하기 어려운 동작은 학습에서 잠시 보류했어요"
-          : observationProfile.mode === "learning"
-            ? `${episode.taskLabel} 패턴을 학습 기록에 추가했어요`
-            : `${episode.taskLabel} 동작을 개인 기준과 비교했어요`,
+            : observationProfile.mode === "learning"
+              ? `${episode.taskLabel} 패턴을 학습 기록에 추가했어요`
+              : `${episode.taskLabel} 동작을 개인 기준과 비교했어요`,
       );
     } catch {
       // Coordinate recording remains available even if contextual analysis fails.
@@ -1924,58 +1871,6 @@ export default function Home() {
     }
   }
 
-  function startClosingCheck() {
-    if (closingDoneTodayRef.current && consent.observationConsent) {
-      // Re-running the closing check after it was already marked done today
-      // is exactly the "마감 반복 확인 (Double Check)" pattern from the PRD.
-      void recordDoubleCheck().then(refreshCareData);
-    }
-    setClosingStatus("checking");
-    setClosingStep(0);
-    let step = 0;
-    const timer = window.setInterval(() => {
-      step += 1;
-      setClosingStep(step);
-      if (step >= 3) {
-        window.clearInterval(timer);
-        if (heaterOn) {
-          setClosingStatus("attention");
-          if (consent.observationConsent) {
-            void recordSafetyAlert().then(refreshCareData);
-          }
-        } else {
-          completeClosing();
-        }
-      }
-    }, 650);
-  }
-
-  function completeClosing() {
-    setClosingStatus("done");
-    setClosingStep(3);
-    closingDoneTodayRef.current = true;
-    setEvents((previous) => {
-      if (previous[0]?.title === "오늘의 마감이 완료됐어요") return previous;
-      return [
-        {
-          id: `closing-${crypto.randomUUID()}`,
-          time: currentTime(),
-          title: "오늘의 마감이 완료됐어요",
-          detail: "가스 · 전기 · 출입문 모두 안전",
-          kind: "safety",
-        },
-        ...previous,
-      ];
-    });
-    toast.success("모든 항목이 안전해요. 편안히 퇴근하세요");
-  }
-
-  function turnOffHeater() {
-    setHeaterOn(false);
-    setClosingStatus("idle");
-    toast.success("온열기 전원을 차단했어요");
-  }
-
   function openDemoEventReplay(
     persona: DemoPersona,
     day: DemoDay,
@@ -1991,22 +1886,18 @@ export default function Home() {
       key: `${persona.id}-${dayIndex}-${exampleIndex}`,
       label: `${persona.name} · ${example.label} · ${DEMO_MOTION_LABELS[example.motionType]}`,
       frames,
-      detectionExplanation: explainDemoEvent(persona, dayIndex, day, example, frames),
+      detectionExplanation: explainDemoEvent(persona, dayIndex, day, frames),
     });
   }
 
-  function changeBusyLevel(level: "quiet" | "normal" | "busy") {
-    setTodayBusyLevel(level);
-    if (consent.observationConsent) {
-      void persistBusyLevel(level).then(refreshCareData);
-    }
-  }
-
-  async function changeOccupation(occupation: OccupationId) {
+  async function changeOccupation(occupationName: string) {
+    const inference = inferOccupationContext(occupationName);
+    const occupation = inference.template.id;
     const template = getOccupationTemplate(occupation);
     const next = await saveObservationProfile({
       ...observationProfile,
       occupation,
+      occupationName,
       mode: "learning",
       learningStartedAt: nowMs(),
       baselineVersion: observationProfile.baselineVersion + 1,
@@ -2018,9 +1909,20 @@ export default function Home() {
       })),
     });
     setObservationProfile(next);
+    setOccupationInput(occupationName);
     setSelectedZoneId(template.zones[0]?.id ?? "");
     await refreshObservationData(next);
-    toast.success(`${template.label} 기본 업무 맥락으로 새 학습을 시작했어요`);
+    toast.success(`${occupationName}을(를) ${template.label} 업무 맥락으로 이해했어요`);
+  }
+
+  function saveOccupation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = occupationInput.trim();
+    if (!name) {
+      toast.success("업종 이름을 입력해 주세요");
+      return;
+    }
+    void changeOccupation(name);
   }
 
   async function changeObservationMode(mode: ObservationMode) {
@@ -2255,7 +2157,6 @@ export default function Home() {
     setCareLogs([]);
     setLearnedMotions([]);
     setQuickMotionMode("idle");
-    setClosingTime(DEFAULT_CLOSING_TIME);
     setClosingChecklist(DEFAULT_CLOSING_CHECKLIST);
     setWorkContextConfig(DEFAULT_WORK_CONTEXT_CONFIG);
     const resetProfile = {
@@ -2264,6 +2165,7 @@ export default function Home() {
       updatedAt: nowMs(),
     };
     setObservationProfile(resetProfile);
+    setOccupationInput("");
     setObservationEpisodes([]);
     setObservationBaseline(buildBaseline([], resetProfile.baselineVersion));
     setPoseStats({
@@ -2428,11 +2330,11 @@ export default function Home() {
         routines: config.routines.map((routine) =>
           routine.id === routineId
             ? {
-                ...routine,
-                schedule: [...routine.schedule, { id: crypto.randomUUID(), time, label, repeats }].sort((a, b) =>
-                  a.time.localeCompare(b.time),
-                ),
-              }
+              ...routine,
+              schedule: [...routine.schedule, { id: crypto.randomUUID(), time, label, repeats }].sort((a, b) =>
+                a.time.localeCompare(b.time),
+              ),
+            }
             : routine,
         ),
       }));
@@ -2454,13 +2356,13 @@ export default function Home() {
         ? "전신이 보이게 뒤로 이동해 주세요"
         : poseStatus === "holding"
           ? "대상 잠금 유지 중"
-        : poseStatus === "searching"
-          ? "사람을 찾고 있어요"
-          : poseStatus === "loading"
-            ? "동작 추적 모델 준비 중"
-            : poseStatus === "error"
-              ? "스켈레톤 인식 오류"
-              : "좌표 기록 대기";
+          : poseStatus === "searching"
+            ? "사람을 찾고 있어요"
+            : poseStatus === "loading"
+              ? "동작 추적 모델 준비 중"
+              : poseStatus === "error"
+                ? "스켈레톤 인식 오류"
+                : "좌표 기록 대기";
 
   const fullBodyRatio = poseStats.detectedFrames
     ? Math.round((poseStats.fullBodyFrames / poseStats.detectedFrames) * 100)
@@ -2472,32 +2374,27 @@ export default function Home() {
   const recentCareLogs = userCareLogs.slice(0, 7);
   const careBaseline = computeBaseline(userCareLogs);
   const changeSignal = detectChangeSignal(recentCareLogs, careBaseline);
+  const cognitiveConcernDetected = shouldShowCognitiveSupport(
+    changeSignal,
+    recentCareLogs,
+    careBaseline,
+  );
   const todaySummary = userCareLogs[0] ? summarizeLog(userCareLogs[0]) : null;
   const activeNavItems = interfaceMode === "developer" ? developerNavItems : userNavItems;
-  const realChangeCount = todaySummary && careBaseline
-    ? [
-        todaySummary.safetyAlerts >= careBaseline.safetyAlerts + 1,
-        todaySummary.doubleChecks >= careBaseline.doubleChecks + 1,
-        todaySummary.dropRate >= careBaseline.dropRate + 0.15,
-        todaySummary.microDelayRate >= careBaseline.microDelayRate + 0.15,
-      ].filter(Boolean).length
-    : 0;
-  const realFlowScore = careBaseline ? Math.max(52, 94 - realChangeCount * 12) : null;
   const realHasNotice = changeSignal.level !== "none";
-  const realFlowBandLabel = realFlowScore === null
-    ? "기준선 만드는 중"
-    : realFlowScore >= 85
-      ? "평소와 비슷"
-      : realFlowScore >= 70
-        ? "조금 더 살펴보기"
-        : "변화가 함께 관찰됨";
-  const totalSafetyAlerts = recentCareLogs.reduce((sum, log) => sum + log.safetyAlerts, 0);
+  const realFlowMessage = !careBaseline
+    ? "평소 흐름을 알아가는 중이에요."
+    : changeSignal.level === "none"
+      ? "최근 일주일은 대체로 평소와 비슷했어요."
+      : changeSignal.reasons[0] ?? "평소와 다른 흐름이 조금 관찰됐어요.";
   const totalDoubleChecks = recentCareLogs.reduce((sum, log) => sum + log.doubleChecks, 0);
   const totalDroppedTasks = recentCareLogs.reduce(
     (sum, log) => sum + Math.max(0, log.tasksStarted - log.tasksCompleted),
     0,
   );
   const occupationTemplate = getOccupationTemplate(observationProfile.occupation);
+  const occupationDisplayName = observationProfile.occupationName.trim() || occupationTemplate.label;
+  const occupationDraftInference = inferOccupationContext(occupationInput);
   const zoneOptions = [...occupationTemplate.zones, ...observationProfile.customZones];
   const activeZoneGrid = zoneCameraSlot === 1
     ? observationProfile.zoneGrid
@@ -2578,14 +2475,14 @@ export default function Home() {
       );
       const next = matching
         ? learnedMotions.map((motion) => motion.id === matching.id
-            ? { ...motion, samples: [...motion.samples.filter((item) => item.sessionId !== sample.sessionId), sample] }
-            : motion)
+          ? { ...motion, samples: [...motion.samples.filter((item) => item.sessionId !== sample.sessionId), sample] }
+          : motion)
         : [...learnedMotions, {
-            id: `learned-${crypto.randomUUID()}`,
-            label: selectedLabel.taskLabel,
-            samples: [sample],
-            createdAt: nowMs(),
-          }];
+          id: `learned-${crypto.randomUUID()}`,
+          label: selectedLabel.taskLabel,
+          samples: [sample],
+          createdAt: nowMs(),
+        }];
       saveLearnedMotionActions(next);
       setLearnedMotions(next);
     }
@@ -2644,18 +2541,16 @@ export default function Home() {
       <video
         ref={processingVideoRef}
         className="processing-video"
+        hidden
         muted
         playsInline
         aria-hidden="true"
       />
       <aside className="sidebar">
         <div className="brand" aria-label="메모리 가드">
-          <span className="brand-mark" aria-hidden="true">
-            M
-          </span>
           <span>
-            <strong>메모리 가드</strong>
-            <small>Memory Guard</small>
+            <strong>Memory Guard</strong>
+            <small>메모리 가드</small>
           </span>
         </div>
 
@@ -2664,23 +2559,20 @@ export default function Home() {
             <button
               key={item.id}
               className={view === item.id ? "active" : ""}
-              onClick={() => setView(item.id)}
+              onClick={() => {
+                setView(item.id);
+                window.scrollTo({ top: 0, behavior: "auto" });
+              }}
               type="button"
               aria-current={view === item.id ? "page" : undefined}
             >
-              <span aria-hidden="true">{item.icon}</span>
-              {item.label}
-              {item.id === "closing" && heaterOn && (
-                <i aria-label="확인할 항목 1개">1</i>
-              )}
+              <NavIcon view={item.id} />
+              <span>{item.label}</span>
             </button>
           ))}
         </nav>
 
         <div className="sidebar-care">
-          <span className="care-sprout" aria-hidden="true">
-            {interfaceMode === "user" ? "♡" : "⌁"}
-          </span>
           <p>{interfaceMode === "user" ? "사장님의 하루를" : "개발자 전용 공간"}</p>
           <strong>{interfaceMode === "user" ? "조용히 지켜드릴게요." : "실험 기능을 확인해요."}</strong>
         </div>
@@ -2689,19 +2581,58 @@ export default function Home() {
           className="my-data-entry"
           onClick={() => setMyDataOpen(true)}
         >
-          <span aria-hidden="true">⚙</span> 내 데이터 관리
+          내 데이터 관리
         </button>
 
         <div className="profile">
-          <span className="avatar">김</span>
           <span>
-            <strong>김메모리 사장님</strong>
-            <small>오늘도 좋은 하루예요</small>
+            <strong>김메모리</strong>
+            <small>오늘도 좋은 하루입니다.</small>
           </span>
         </div>
       </aside>
 
       <section className="workspace">
+        <header className="mobile-brand-header">
+          <button
+            className="mobile-brand"
+            type="button"
+            onClick={() => {
+              setView(interfaceMode === "user" ? "home" : "today");
+              window.scrollTo({ top: 0, behavior: "auto" });
+            }}
+            aria-label={interfaceMode === "user" ? "메모리 가드 홈으로 이동" : "개발자 도구 홈으로 이동"}
+          >
+            Memory Guard
+          </button>
+          <div className="mobile-brand-actions">
+            {interfaceMode === "user" ? (
+              <>
+              <button
+                type="button"
+                className={`camera-pill ${cameraStatus}`}
+                onClick={() => cameraStatus === "connected" ? void stopCamera() : requestCameraStart()}
+                disabled={cameraStatus === "requesting"}
+                aria-label={cameraStatus === "connected" ? "카메라 연결 끄기" : "카메라 연결하기"}
+              >
+                <span aria-hidden="true" />
+                {cameraStatus === "connected" ? "연결됨" : cameraStatus === "requesting" ? "연결 중" : "카메라 연결"}
+              </button>
+              <button className="notification-button" type="button" onClick={() => setView("care")} aria-label="변화 알림 보기">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>
+                {realHasNotice && <span aria-hidden="true" />}
+              </button>
+              </>
+            ) : (
+              <>
+                <span className="developer-mode-pill"><i aria-hidden="true" />개발자 도구</span>
+                <button className="return-user-button" type="button" onClick={switchInterfaceMode} aria-label="사용자 모드로 돌아가기">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18-6-6 6-6" /><path d="M3 12h18" /></svg>
+                </button>
+              </>
+            )}
+          </div>
+        </header>
         <header className="topbar">
           <div>
             <span className={`interface-mode-badge ${interfaceMode}`}>
@@ -2709,28 +2640,28 @@ export default function Home() {
               {interfaceMode === "user" ? "사용자 모드" : "개발자 모드"}
             </span>
             <h1>
-              {view === "home" && "오늘의 케어"}
+              {view === "home" && (interfaceMode === "user" ? "안녕하세요, 김메모리 사장님" : "오늘의 케어")}
               {view === "today" && "카메라 기능 테스트"}
-              {view === "timeline" && "오늘의 메모리 타임라인"}
-              {view === "closing" && "스마트 마감"}
-              {view === "care" && (interfaceMode === "user" ? "나의 케어 기록" : "가상 케어 리포트")}
+              {view === "timeline" && "오늘의 기록"}
+              {view === "care" && (interfaceMode === "user" ? "이번 주 변화" : "가상 케어 리포트")}
               {view === "settings" && (interfaceMode === "user" ? "설정" : "테스트 설정")}
             </h1>
           </div>
           <div className="topbar-actions">
-            {interfaceMode === "developer" && (
-              <div className={`camera-pill ${cameraStatus}`}>
-                <span aria-hidden="true" />
-                {statusText}
-              </div>
-            )}
+            <div className={`camera-pill ${cameraStatus}`}>
+              <span aria-hidden="true" />
+              {interfaceMode === "user"
+                ? cameraStatus === "connected"
+                  ? secondaryCameraConnected ? "카메라 2대 연결됨" : "카메라 연결됨"
+                  : "카메라 연결 대기"
+                : statusText}
+            </div>
             <button
               type="button"
               className={`interface-mode-switch ${interfaceMode}`}
               onClick={switchInterfaceMode}
               aria-label={`${interfaceMode === "user" ? "개발자" : "사용자"} 모드로 전환`}
             >
-              <span aria-hidden="true">{interfaceMode === "user" ? "⌁" : "♡"}</span>
               <span>
                 <small>{interfaceMode === "user" ? "테스트 도구가 필요하신가요?" : "실제 화면으로 돌아가기"}</small>
                 <strong>{interfaceMode === "user" ? "개발자 모드" : "사용자 모드"}로 전환</strong>
@@ -2748,7 +2679,7 @@ export default function Home() {
                 <h2>사장님의 평소 업무 흐름부터 알아갈게요</h2>
                 <p>아직 연결된 기록이 없어요. 먼저 업종과 매장 구역을 확인한 뒤, 1~2주 동안 학습 모드로 평소 루틴을 익힙니다.</p>
                 <div className="first-user-steps" aria-label="초기 설정 순서">
-                  <span><i>1</i><strong>업종 선택</strong></span>
+                  <span><i>1</i><strong>업종 입력</strong></span>
                   <span><i>2</i><strong>매장 구역 설정</strong></span>
                   <span><i>3</i><strong>학습 시작</strong></span>
                 </div>
@@ -2757,139 +2688,127 @@ export default function Home() {
               </section>
             ) : (
               <>
-            <section className={`home-status-card ${realHasNotice ? "has-notice" : ""}`}>
-              <span className="home-status-icon" aria-hidden="true">{realHasNotice ? "!" : "✓"}</span>
-              <div>
-                <span className="section-kicker">오늘의 상태</span>
-                <h2>
-                  {userCareLogs.length === 0
-                    ? "첫 기록을 기다리고 있어요."
-                    : realHasNotice
-                      ? "평소와 다른 흐름이 조금 관찰됐어요."
-                      : "오늘은 평소와 비슷한 흐름이에요."}
-                </h2>
-                <p>
-                  {realHasNotice
-                    ? "한 장면만으로 판단하지 않고, 같은 변화가 반복되는지 차분히 살펴볼게요."
-                    : userCareLogs.length === 0
-                      ? "마감 체크와 동작 분석 기록이 쌓이면 개인의 평소 흐름과 비교해 드려요."
-                      : "필요한 변화가 생기면 이유와 함께 알려드릴게요."}
-                </p>
-              </div>
-            </section>
+                <section className={`home-status-card ${realHasNotice ? "has-notice" : ""}`}>
+                  <span className="home-status-icon" aria-hidden="true">{realHasNotice ? "!" : "✓"}</span>
+                  <div>
+                    <span className="section-kicker">오늘의 상태</span>
+                    <h2>
+                      {userCareLogs.length === 0
+                        ? "첫 기록을 기다리고 있어요."
+                        : realHasNotice
+                          ? "평소와 다른 흐름이 조금 관찰됐어요."
+                          : "오늘은 평소와 비슷한 흐름이에요."}
+                    </h2>
+                    <p>
+                      {realHasNotice
+                        ? "한 장면만으로 판단하지 않고, 같은 변화가 반복되는지 차분히 살펴볼게요."
+                        : userCareLogs.length === 0
+                          ? "마감 체크와 동작 분석 기록이 쌓이면 개인의 평소 흐름과 비교해 드려요."
+                          : "필요한 변화가 생기면 이유와 함께 알려드릴게요."}
+                    </p>
+                  </div>
+                </section>
 
-            <button className="home-observation-mode" type="button" onClick={() => setView("settings")}>
-              <span className={`home-mode-icon mode-${observationProfile.mode}`} aria-hidden="true">
-                {observationProfile.mode === "learning" ? "↻" : "⌁"}
-              </span>
-              <span>
-                <small>현재 관찰 방식</small>
-                <strong>{observationProfile.mode === "learning" ? "학습 모드" : "분석 모드"}</strong>
-                <em>
-                  {observationProfile.mode === "learning"
-                    ? "나의 평소 업무 흐름을 익히고 있어요."
-                    : "학습한 평소 흐름과 오늘의 동작을 비교해요."}
-                </em>
-              </span>
-              <i>변경하기 ›</i>
-            </button>
+                <button className="home-observation-mode" type="button" onClick={() => setView("settings")}>
+                  <span className={`home-mode-icon mode-${observationProfile.mode}`} aria-hidden="true">
+                    {observationProfile.mode === "learning" ? "↻" : "⌁"}
+                  </span>
+                  <span>
+                    <small>현재 관찰 방식</small>
+                    <strong>{observationProfile.mode === "learning" ? "학습 모드" : "분석 모드"}</strong>
+                    <em>
+                      {observationProfile.mode === "learning"
+                        ? "나의 평소 업무 흐름을 익히고 있어요."
+                        : "학습한 평소 흐름과 오늘의 동작을 비교해요."}
+                    </em>
+                  </span>
+                  <i>변경하기 ›</i>
+                </button>
 
-            {realHasNotice && (
-              <button className="home-notice-card" type="button" onClick={() => setView("care")}>
-                <span className="notice-dot" aria-hidden="true" />
-                <span>
-                  <small>확인할 기록</small>
-                  <strong>{changeSignal.reasons[0] ?? "평소와 다른 동작 흐름"}</strong>
-                  <em>왜 기록됐는지 보기 ›</em>
-                </span>
-              </button>
-            )}
+                {realHasNotice && (
+                  <button className="home-notice-card" type="button" onClick={() => setView("care")}>
+                    <span className="notice-dot" aria-hidden="true" />
+                    <span>
+                      <small>확인할 기록</small>
+                      <strong>{changeSignal.reasons[0] ?? "평소와 다른 동작 흐름"}</strong>
+                      <em>왜 기록됐는지 보기 ›</em>
+                    </span>
+                  </button>
+                )}
 
-            <section className={`home-checklist-card ${checklistReminderDue ? "reminder-due" : ""}`}>
-              <div className="home-checklist-heading">
-                <div>
-                  <span className="section-kicker">오늘의 마감 루틴</span>
-                  <h2>{closingTime}에 알려드릴게요</h2>
-                </div>
-                <span>{closingChecklist.filter((item) => item.done).length}/{closingChecklist.length}</span>
-              </div>
-              {checklistReminderDue && (
-                <p className="checklist-reminder-copy">마감 시간이 지났어요. 남은 항목을 천천히 확인해 보세요.</p>
-              )}
-              <div className="home-checklist-items">
-                {closingChecklist.map((item) => (
-                  <label key={item.id} className={item.done ? "done" : ""}>
-                    <input
-                      type="checkbox"
-                      checked={item.done}
-                      onChange={() => toggleChecklistItem(item.id)}
-                    />
-                    <span aria-hidden="true">{item.done ? "✓" : ""}</span>
-                    <strong>{item.label}</strong>
-                  </label>
-                ))}
-              </div>
-              <button className="checklist-settings-link" type="button" onClick={() => setView("settings")}>시간과 항목 수정하기</button>
-            </section>
+                <section className="home-checklist-card">
+                  <div className="home-checklist-heading">
+                    <div>
+                      <span className="section-kicker">오늘의 마감 루틴</span>
+                      <h2>필요할 때 직접 확인해 주세요</h2>
+                    </div>
+                    <span>{closingChecklist.filter((item) => item.done).length}/{closingChecklist.length}</span>
+                  </div>
+                  <div className="home-checklist-items">
+                    {closingChecklist.map((item) => (
+                      <label key={item.id} className={item.done ? "done" : ""}>
+                        <input
+                          type="checkbox"
+                          checked={item.done}
+                          onChange={() => toggleChecklistItem(item.id)}
+                        />
+                        <span aria-hidden="true">{item.done ? "✓" : ""}</span>
+                        <strong>{item.label}</strong>
+                      </label>
+                    ))}
+                  </div>
+                  <button className="checklist-settings-link" type="button" onClick={() => setView("settings")}>항목 수정하기</button>
+                </section>
 
-            <section className="home-flow-card">
-              <div className="home-flow-heading">
-                <div>
-                  <span className="section-kicker">최근 흐름</span>
-                  <h2>평소 흐름 일치도</h2>
-                </div>
-                <button type="button" className="text-button" onClick={() => setView("care")}>기록 보기</button>
-              </div>
-              <div className="flow-score-row">
-                <strong>{realFlowScore ?? "—"}{realFlowScore !== null && <small>점</small>}</strong>
-                <p><b>{realFlowBandLabel}</b><br />개인 기준선에서 달라진 관찰 항목 수를 같은 기준으로 환산한 참고 점수예요.</p>
-              </div>
-              <div className="flow-score-bands" aria-label="점수 상태 구간">
-                <span><i className="stable" />85–100 평소와 비슷</span>
-                <span><i className="watch" />70–84 살펴보기</span>
-                <span><i className="notice" />52–69 변화 관찰</span>
-              </div>
-              <div className="mini-flow-chart" aria-label="최근 7일 평소 흐름 일치도">
-                {[...recentCareLogs].reverse().map((day, index) => {
-                  const summary = summarizeLog(day);
-                  const changeCount = careBaseline
-                    ? [
-                        summary.safetyAlerts >= careBaseline.safetyAlerts + 1,
-                        summary.doubleChecks >= careBaseline.doubleChecks + 1,
-                        summary.dropRate >= careBaseline.dropRate + 0.15,
-                        summary.microDelayRate >= careBaseline.microDelayRate + 0.15,
-                      ].filter(Boolean).length
-                    : 0;
-                  const score = careBaseline ? Math.max(52, 94 - changeCount * 12) : 52;
-                  const date = new Date(`${day.date}T00:00:00`);
-                  const dayLabel = new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(date);
-                  return (
-                    <button
-                      type="button"
-                      key={day.date}
-                      className={index === recentCareLogs.length - 1 ? "selected" : ""}
-                      onClick={() => setView("care")}
-                      aria-label={`${dayLabel}, ${careBaseline ? `평소 흐름 일치도 ${score}점` : "기준선 학습 중"}`}
-                    >
-                      <i style={{ height: `${score}%` }} />
-                      <span>{dayLabel.replace("요일", "")}</span>
-                    </button>
-                  );
-                })}
-                {recentCareLogs.length === 0 && <p className="mini-flow-empty">기록이 쌓이면 여기에 흐름이 표시돼요.</p>}
-              </div>
-            </section>
+                <section className="home-flow-card">
+                  <div className="home-flow-heading">
+                    <div>
+                      <span className="section-kicker">최근 흐름</span>
+                      <h2>지난 일주일을 살펴봤어요</h2>
+                    </div>
+                    <button type="button" className="text-button" onClick={() => setView("care")}>기록 보기</button>
+                  </div>
+                  <p className="home-flow-narrative">{realFlowMessage}</p>
+                  <div className="mini-flow-chart" aria-label="최근 7일 평소 흐름 일치도">
+                    {[...recentCareLogs].reverse().map((day, index) => {
+                      const summary = summarizeLog(day);
+                      const changeCount = careBaseline
+                        ? [
+                          summary.doubleChecks >= careBaseline.doubleChecks + 1,
+                          summary.dropRate >= careBaseline.dropRate + 0.15,
+                          summary.microDelayRate >= careBaseline.microDelayRate + 0.15,
+                        ].filter(Boolean).length
+                        : 0;
+                      const score = careBaseline ? Math.max(52, 94 - changeCount * 12) : 52;
+                      const date = new Date(`${day.date}T00:00:00`);
+                      const dayLabel = new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(date);
+                      return (
+                        <button
+                          type="button"
+                          key={day.date}
+                          className={index === recentCareLogs.length - 1 ? "selected" : ""}
+                          onClick={() => setView("care")}
+                          aria-label={`${dayLabel}, ${careBaseline ? `평소 흐름 일치도 ${score}점` : "기준선 학습 중"}`}
+                        >
+                          <i />
+                          <span>{dayLabel.replace("요일", "")}</span>
+                        </button>
+                      );
+                    })}
+                    {recentCareLogs.length === 0 && <p className="mini-flow-empty">기록이 쌓이면 여기에 흐름이 표시돼요.</p>}
+                  </div>
+                </section>
 
-            <section className="home-report-card">
-              <div>
-                <span className="section-kicker">최근 케어 기록</span>
-                <h2>김메모리 사장님의 최근 요약</h2>
-                <p>{changeSignal.reasons[0] ?? "아직 비교할 만큼의 기록이 쌓이지 않았어요."}</p>
-              </div>
-              <button type="button" onClick={() => setView("care")}>자세히 보기 <span aria-hidden="true">›</span></button>
-            </section>
+                <section className="home-report-card">
+                  <div>
+                    <span className="section-kicker">최근 케어 기록</span>
+                    <h2>김메모리 사장님의 최근 요약</h2>
+                    <p>{changeSignal.reasons[0] ?? "아직 비교할 만큼의 기록이 쌓이지 않았어요."}</p>
+                  </div>
+                  <button type="button" onClick={() => setView("care")}>자세히 보기 <span aria-hidden="true">›</span></button>
+                </section>
 
-            <p className="home-disclaimer">이 결과는 진단이 아닌, 평소 업무 흐름의 변화를 알아차리기 위한 참고 정보예요.</p>
+                <p className="home-disclaimer">이 결과는 진단이 아닌, 평소 업무 흐름의 변화를 알아차리기 위한 참고 정보예요.</p>
               </>
             )}
           </div>
@@ -3075,19 +2994,26 @@ export default function Home() {
             <section className={`observation-mode-card mode-${observationProfile.mode}`}>
               <div className="mode-card-heading">
                 <div className="occupation-select-wrap">
-                  <span className="occupation-icon" aria-hidden="true">{occupationTemplate.icon}</span>
-                  <label>
-                    <span>나의 업무 환경</span>
-                    <select
-                      value={observationProfile.occupation}
-                      onChange={(event) => void changeOccupation(event.target.value as OccupationId)}
-                      aria-label="직업 선택"
-                    >
-                      {OCCUPATION_TEMPLATES.map((template) => (
-                        <option key={template.id} value={template.id}>{template.label}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <span className="occupation-icon"><StoreIcon /></span>
+                  <form onSubmit={saveOccupation}>
+                    <label>
+                      <span>업종 입력</span>
+                      <input
+                        value={occupationInput}
+                        onChange={(event) => setOccupationInput(event.target.value)}
+                        placeholder="예: 디저트 카페, 네일숍, 꽃 공방"
+                        aria-label="업종 입력"
+                      />
+                    </label>
+                    <button type="submit">저장</button>
+                    {occupationInput.trim() && (
+                      <small>
+                        {occupationDraftInference.matched
+                          ? `${occupationDraftInference.template.label} 업무 맥락으로 이해해요.`
+                          : "가장 가까운 기본 매장 업무 맥락으로 시작하고, 등록한 구역과 루틴으로 보완해요."}
+                      </small>
+                    )}
+                  </form>
                 </div>
                 <div className="mode-toggle" role="group" aria-label="관찰 모드">
                   <button
@@ -3129,7 +3055,7 @@ export default function Home() {
                 </div>
                 <div className="learning-progress" aria-label={`기준선 완성도 ${observationBaseline.confidence}%`}>
                   <div><span>개인 기준선 완성도</span><strong><NumberFlow value={observationBaseline.confidence} suffix="%" /></strong></div>
-                  <i><span style={{ transform: `scaleX(${observationBaseline.confidence / 100})` }} /></i>
+                  <i><span /></i>
                 </div>
                 <div className="mode-stats">
                   <span><small>학습 포함</small><strong>{acceptedObservationCount}건</strong></span>
@@ -3189,7 +3115,7 @@ export default function Home() {
                     </label>
                     {availableCameras.length > 1 && (
                       <label>
-                          <span>카메라 2</span>
+                        <span>카메라 2</span>
                         <select
                           value={secondaryCameraId}
                           onChange={(event) => void changeCameraSource("secondary", event.target.value)}
@@ -3300,7 +3226,7 @@ export default function Home() {
                   </button>
                 </div>
                 <TimelineList
-                  events={todayEvents}
+                  events={events}
                   onSelect={openTimelineEvent}
                   compact
                 />
@@ -3339,7 +3265,7 @@ export default function Home() {
             <div className="subpage-intro">
               <div>
                 <span className="section-kicker">하루의 기억을 한눈에</span>
-                <p>중요한 순간만 모았어요. 좌표 표시가 있는 항목은 당시 스켈레톤을 확인할 수 있어요.</p>
+                <p>좌표 표시가 있는 항목은 당시 스켈레톤을 확인할 수 있습니다.</p>
               </div>
               <span className="count-chip">오늘 {events.length}개 기록</span>
             </div>
@@ -3349,336 +3275,241 @@ export default function Home() {
           </div>
         )}
 
-        {view === "closing" && (
-          <div className="subpage closing-page">
-            <section className={`closing-hero ${closingStatus}`}>
-              <div className="closing-hero-icon" aria-hidden="true">
-                {closingStatus === "done" ? "✓" : closingStatus === "attention" ? "!" : "⌁"}
-              </div>
-              <div>
-                <span className="section-kicker">퇴근 전 자동 점검</span>
-                <h2>
-                  {closingStatus === "done"
-                    ? "오늘의 마감이 끝났어요"
-                    : closingStatus === "checking"
-                      ? "매장을 하나씩 확인하고 있어요"
-                      : closingStatus === "attention"
-                        ? "온열기 전원을 확인해 주세요"
-                        : "마지막으로 안전을 확인할까요?"}
-                </h2>
-                <p>
-                  {closingStatus === "done"
-                    ? "가스, 전기, 출입문 모두 안전해요. 편안히 퇴근하세요."
-                    : "연결된 센서가 가스, 전기, 출입문 상태를 확인해 드려요."}
-                </p>
-              </div>
-            </section>
-
-            <section className="panel closing-card">
-              <div className="panel-heading">
-                <div>
-                  <span className="section-kicker">연결된 안전 기기</span>
-                  <h2>마감 확인 항목</h2>
-                </div>
-                <span className="device-count">3개 연결됨</span>
-              </div>
-
-              <div className="device-list">
-                <div className={`device-row ${closingStep >= 1 || closingStatus === "idle" ? "checked" : ""}`}>
-                  <span className="device-icon gas" aria-hidden="true">G</span>
-                  <span className="device-copy">
-                    <strong>가스 밸브</strong>
-                    <small>주방 가스 차단기</small>
-                  </span>
-                  <span className="device-status safe"><i /> 닫혀 있어요</span>
-                </div>
-                <div className={`device-row ${!heaterOn ? "checked" : "warning"}`}>
-                  <span className="device-icon power" aria-hidden="true">P</span>
-                  <span className="device-copy">
-                    <strong>온열기 전원</strong>
-                    <small>카운터 스마트 플러그</small>
-                  </span>
-                  {heaterOn ? (
-                    <button className="device-action" type="button" onClick={turnOffHeater}>
-                      전원 끄기
-                    </button>
-                  ) : (
-                    <span className="device-status safe"><i /> 꺼져 있어요</span>
-                  )}
-                </div>
-                <div className={`device-row ${closingStep >= 3 || closingStatus === "idle" ? "checked" : ""}`}>
-                  <span className="device-icon lock" aria-hidden="true">D</span>
-                  <span className="device-copy">
-                    <strong>출입문</strong>
-                    <small>정문 도어락 센서</small>
-                  </span>
-                  <span className="device-status safe"><i /> 잠겨 있어요</span>
-                </div>
-              </div>
-
-              <div className="busy-level-picker">
-                <span>오늘 매장 분위기</span>
-                <div role="group" aria-label="오늘 매장 분위기">
-                  {(
-                    [
-                      { key: "quiet", label: "한산" },
-                      { key: "normal", label: "보통" },
-                      { key: "busy", label: "바쁨" },
-                    ] as const
-                  ).map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={todayBusyLevel === option.key ? "active" : ""}
-                      onClick={() => changeBusyLevel(option.key)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                <small>
-                  바쁜 날은 케어 리포트에서 따로 표시해, 손님이 많아 생긴
-                  변화와 패턴 변화를 구분하는 데 참고해요.
-                </small>
-              </div>
-
-              <button
-                className="closing-button"
-                type="button"
-                onClick={startClosingCheck}
-                disabled={closingStatus === "checking"}
-              >
-                {closingStatus === "checking"
-                  ? `안전 확인 중 ${closingStep}/3`
-                  : closingStatus === "done"
-                    ? "마감 완료 · 다시 확인하기"
-                    : "퇴근 전 자동 점검"}
-              </button>
-            </section>
-          </div>
-        )}
-
         {view === "settings" && (
           <div className="settings-page">
             {interfaceMode === "user" ? (
               <>
-            {!userInstall && (
-              <section className="first-user-settings-head">
-                <span>초기 설정</span>
-                <strong>아래 내용을 확인하면 새로운 학습을 시작할 수 있어요.</strong>
-              </section>
-            )}
-            <section className="settings-intro-card">
-              <span className="section-kicker">나의 업무 환경</span>
-              <h2>{occupationTemplate.icon} {occupationTemplate.label}로 설정되어 있어요</h2>
-              <p>직군과 매장 구역은 처음 설정한 뒤 필요할 때만 바꿀 수 있어요.</p>
-              <div className="settings-inline-actions">
-                <button type="button" onClick={() => setZoneSetupOpen(true)}>매장 구역 설정</button>
-                <label>
-                  <span className="sr-only">직군 선택</span>
-                  <select
-                    value={observationProfile.occupation}
-                    onChange={(event) => void changeOccupation(event.target.value as OccupationId)}
-                    aria-label="직군 선택"
-                  >
-                    {OCCUPATION_TEMPLATES.map((template) => (
-                      <option key={template.id} value={template.id}>{template.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </section>
+                {!userInstall && (
+                  <section className="first-user-settings-head">
+                    <span>초기 설정</span>
+                    <strong>아래 내용을 확인하면 새로운 학습을 시작할 수 있어요.</strong>
+                  </section>
+                )}
+                <section className="settings-intro-card">
+                  <span className="section-kicker">나의 업무 환경</span>
+                  <h2>{occupationDisplayName}</h2>
+                  <p>입력한 업종 이름을 로컬에서 가장 가까운 업무 맥락으로 해석해요.</p>
+                  <div className="settings-inline-actions">
+                    <button type="button" onClick={() => setZoneSetupOpen(true)}>매장 구역 설정</button>
+                    <form onSubmit={saveOccupation}>
+                      <label>
+                        <span>업종 입력</span>
+                        <input
+                          value={occupationInput}
+                          onChange={(event) => setOccupationInput(event.target.value)}
+                          placeholder="예: 디저트 카페, 네일숍, 꽃 공방"
+                          aria-label="업종 입력"
+                        />
+                      </label>
+                      <button type="submit">저장</button>
+                    </form>
+                  </div>
+                  {occupationInput.trim() && (
+                    <small>
+                      {occupationDraftInference.matched
+                        ? `${occupationDraftInference.template.label} 업무 맥락으로 연결됩니다.`
+                        : "정확히 일치하는 업종이 없어 기본 매장 맥락으로 시작합니다. 매장 구역과 업무 루틴을 입력하면 실제 환경에 맞게 보완됩니다."}
+                    </small>
+                  )}
+                </section>
 
-            <section className={`settings-observation-mode mode-${userInstall ? observationProfile.mode : "learning"}`}>
-              <div>
-                <span className="section-kicker">관찰 방식</span>
-                <h2>{!userInstall || observationProfile.mode === "learning" ? "평소 업무 흐름부터 학습해요" : "평소 흐름과 오늘의 동작을 비교하고 있어요"}</h2>
-                <p>
-                  {!userInstall || observationProfile.mode === "learning"
-                    ? "매장 설치 후 1~2주 동안 켜두는 방식이에요. 특이하거나 확정하기 어려운 동작은 평소 기준에 넣지 않아요."
-                    : "평소 업무 패턴 학습이 끝난 뒤 사용하는 방식이에요. 달라진 흐름이 반복될 때 케어 기록으로 알려드려요."}
-                </p>
-              </div>
-              <div className="user-mode-toggle" role="group" aria-label="학습 모드 또는 분석 모드 선택">
-                <button
-                  type="button"
-                  className={!userInstall || observationProfile.mode === "learning" ? "active" : ""}
-                  onClick={() => void changeObservationMode("learning")}
-                  aria-pressed={!userInstall || observationProfile.mode === "learning"}
-                  disabled={!userInstall}
-                >
-                  <span aria-hidden="true">↻</span>
-                  <strong>학습 모드</strong>
-                  <small>평소 루틴 익히기</small>
-                </button>
-                <button
-                  type="button"
-                  className={userInstall && observationProfile.mode === "analysis" ? "active" : ""}
-                  onClick={() => void changeObservationMode("analysis")}
-                  aria-pressed={Boolean(userInstall && observationProfile.mode === "analysis")}
-                  disabled={!userInstall}
-                >
-                  <span aria-hidden="true">⌁</span>
-                  <strong>분석 모드</strong>
-                  <small>평소와 비교하기</small>
-                </button>
-              </div>
-              <p className="mode-change-note">
-                {userInstall
-                  ? "모드를 바꿔도 기존에 학습한 기준선과 케어 기록은 삭제되지 않아요."
-                  : "처음 설정을 마치면 개발 테스트 기록과 분리된 새 학습 기준선이 만들어져요."}
-              </p>
-            </section>
-
-            {!userInstall && (
-              <button className="complete-user-setup" type="button" onClick={() => void completeFirstUserSetup()}>
-                설정 완료하고 학습 시작하기
-                <span>이전 개발 테스트 기록과 분리된 새 사용자 기준선이 만들어져요.</span>
-              </button>
-            )}
-
-            <section className="settings-checklist-card work-context-card">
-              <div>
-                <span className="section-kicker">업무 맥락 등록</span>
-                <h2>사장님의 실제 업무 루틴을 알려주세요</h2>
-                <p>직군 기본값 대신, 매장에서 실제로 반복되는 요일별 루틴과 정기 휴일을 등록하면 더 정확하게 비교할 수 있어요. 평일처럼 같은 루틴을 쓰는 요일은 하나의 루틴에 묶어서 지정할 수 있어요.</p>
-              </div>
-
-              <div className="work-context-week-overview">
-                <span className="section-kicker">요일별 배정 현황</span>
-                <div className="weekday-chip-row">
-                  {WEEKDAY_DISPLAY_ORDER.map((day) => (
-                    <span key={day} className={`weekday-overview-chip ${workContextConfig.closedDays.includes(day) ? "closed" : ""}`}>
-                      <strong>{WEEKDAY_LABELS[day]}</strong>
-                      <small>{routineNameForDay(workContextConfig, day)}</small>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="work-context-closed-days">
-                <span className="section-kicker">정기 휴일</span>
-                <div className="weekday-chip-row">
-                  {WEEKDAY_DISPLAY_ORDER.map((day) => (
+                <section className={`settings-observation-mode mode-${userInstall ? observationProfile.mode : "learning"}`}>
+                  <div>
+                    <span className="section-kicker">관찰 방식</span>
+                    <h2>{!userInstall || observationProfile.mode === "learning" ? "평소 업무 흐름부터 학습해요" : "평소 흐름과 오늘의 동작을 비교하고 있어요"}</h2>
+                    <p>
+                      {!userInstall || observationProfile.mode === "learning"
+                        ? "매장 설치 후 1~2주 동안 켜두는 방식이에요. 특이하거나 확정하기 어려운 동작은 평소 기준에 넣지 않아요."
+                        : "평소 업무 패턴 학습이 끝난 뒤 사용하는 방식이에요. 달라진 흐름이 반복될 때 케어 기록으로 알려드려요."}
+                    </p>
+                  </div>
+                  <div className="user-mode-toggle" role="group" aria-label="학습 모드 또는 분석 모드 선택">
                     <button
-                      key={day}
                       type="button"
-                      className={`weekday-toggle-chip ${workContextConfig.closedDays.includes(day) ? "active" : ""}`}
-                      onClick={() => toggleClosedDay(day)}
-                      aria-pressed={workContextConfig.closedDays.includes(day)}
+                      className={!userInstall || observationProfile.mode === "learning" ? "active" : ""}
+                      onClick={() => void changeObservationMode("learning")}
+                      aria-pressed={!userInstall || observationProfile.mode === "learning"}
+                      disabled={!userInstall}
                     >
-                      {WEEKDAY_LABELS[day]}
+                      <span aria-hidden="true">↻</span>
+                      <strong>학습 모드</strong>
+                      <small>평소 루틴 익히기</small>
                     </button>
+                    <button
+                      type="button"
+                      className={userInstall && observationProfile.mode === "analysis" ? "active" : ""}
+                      onClick={() => void changeObservationMode("analysis")}
+                      aria-pressed={Boolean(userInstall && observationProfile.mode === "analysis")}
+                      disabled={!userInstall}
+                    >
+                      <span aria-hidden="true">⌁</span>
+                      <strong>분석 모드</strong>
+                      <small>평소와 비교하기</small>
+                    </button>
+                  </div>
+                  <p className="mode-change-note">
+                    {userInstall
+                      ? "모드를 바꿔도 기존에 학습한 기준선과 케어 기록은 삭제되지 않아요."
+                      : "처음 설정을 마치면 개발 테스트 기록과 분리된 새 학습 기준선이 만들어져요."}
+                  </p>
+                </section>
+
+                {!userInstall && (
+                  <button className="complete-user-setup" type="button" onClick={() => void completeFirstUserSetup()}>
+                    설정 완료하고 학습 시작하기
+                    <span>이전 개발 테스트 기록과 분리된 새 사용자 기준선이 만들어져요.</span>
+                  </button>
+                )}
+
+                <section className="settings-checklist-card work-context-card">
+                  <div>
+                    <span className="section-kicker">업무 맥락 등록</span>
+                    <h2>사장님의 실제 업무 루틴을 알려주세요</h2>
+                    <p>업종의 기본 맥락에 더해, 매장에서 실제로 반복되는 요일별 루틴과 정기 휴일을 등록하면 더 정확하게 비교할 수 있어요. 평일처럼 같은 루틴을 쓰는 요일은 하나의 루틴에 묶어서 지정할 수 있어요.</p>
+                  </div>
+
+                  <div className="work-context-week-overview">
+                    <span className="section-kicker">요일별 배정 현황</span>
+                    <div className="weekday-chip-row">
+                      {WEEKDAY_DISPLAY_ORDER.map((day) => (
+                        <span key={day} className={`weekday-overview-chip ${workContextConfig.closedDays.includes(day) ? "closed" : ""}`}>
+                          <strong>{WEEKDAY_LABELS[day]}</strong>
+                          <small>{routineNameForDay(workContextConfig, day)}</small>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="work-context-closed-days">
+                    <span className="section-kicker">정기 휴일</span>
+                    <div className="weekday-chip-row">
+                      {WEEKDAY_DISPLAY_ORDER.map((day) => (
+                        <button
+                          key={day}
+                          type="button"
+                          className={`weekday-toggle-chip ${workContextConfig.closedDays.includes(day) ? "active" : ""}`}
+                          onClick={() => toggleClosedDay(day)}
+                          aria-pressed={workContextConfig.closedDays.includes(day)}
+                        >
+                          {WEEKDAY_LABELS[day]}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="work-context-hint">정기 휴일로 지정하면 그 요일은 어떤 루틴에도 속하지 않아요. 다시 누르면 첫 번째 루틴으로 돌아갑니다.</p>
+                  </div>
+
+                  {workContextConfig.routines.map((routine) => (
+                    <div className="work-routine-card" key={routine.id}>
+                      <div className="work-routine-head">
+                        <label className="work-routine-name-field">
+                          <span>루틴 이름</span>
+                          <input
+                            className="work-routine-name"
+                            value={routine.name}
+                            onChange={(event) => renameRoutine(routine.id, event.target.value)}
+                          />
+                        </label>
+                        {workContextConfig.routines.length > 1 && (
+                          <button type="button" className="work-routine-remove" onClick={() => removeRoutine(routine.id)}>
+                            루틴 삭제
+                          </button>
+                        )}
+                      </div>
+
+                      <fieldset className="work-routine-weekdays">
+                        <legend>이 루틴을 적용할 요일</legend>
+                        <div className="weekday-chip-row">
+                          {WEEKDAY_DISPLAY_ORDER.map((day) => (
+                            <button
+                              key={day}
+                              type="button"
+                              className={`weekday-toggle-chip ${routine.days.includes(day) ? "active" : ""}`}
+                              onClick={() => assignDayToRoutine(routine.id, day)}
+                              aria-pressed={routine.days.includes(day)}
+                            >
+                              {WEEKDAY_LABELS[day]}
+                            </button>
+                          ))}
+                        </div>
+                      </fieldset>
+
+                      <div className="work-context-times">
+                        <label>
+                          <span>출근·오픈 시각</span>
+                          <input
+                            type="time"
+                            value={routine.openTime}
+                            onChange={(event) => setRoutineTime(routine.id, "openTime", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>마감 시각</span>
+                          <input
+                            type="time"
+                            value={routine.closeTime}
+                            onChange={(event) => setRoutineTime(routine.id, "closeTime", event.target.value)}
+                          />
+                        </label>
+                      </div>
+
+                      <ul className="settings-checklist-items">
+                        {routine.schedule.map((item) => (
+                          <li key={item.id}>
+                            <span>{item.time} · {item.label}{item.repeats ? " · 반복" : ""}</span>
+                            <button type="button" onClick={() => removeRoutineScheduleItem(routine.id, item.id)} aria-label={`${item.label} 삭제`}>삭제</button>
+                          </li>
+                        ))}
+                      </ul>
+                      <form className="checklist-add-form" onSubmit={handleAddRoutineItem(routine.id)}>
+                        <label className="schedule-time-field">
+                          <span>업무 시간</span>
+                          <input type="time" name="time" defaultValue="08:30" />
+                        </label>
+                        <label className="schedule-label-field">
+                          <span>업무 이름</span>
+                          <input name="label" placeholder="예: 홀 청소" />
+                        </label>
+                        <label className="schedule-repeat-toggle">
+                          <input type="checkbox" name="repeats" />
+                          <span>시간대별 반복 업무</span>
+                        </label>
+                        <button type="submit">업무 추가</button>
+                      </form>
+
+                      <div className="work-context-summary">
+                        <span className="section-kicker">{routine.name} 요약</span>
+                        <p>{routineSummary(routine)}</p>
+                      </div>
+                    </div>
                   ))}
-                </div>
-                <p className="work-context-hint">정기 휴일로 지정하면 그 요일은 어떤 루틴에도 속하지 않아요. 다시 누르면 첫 번째 루틴으로 돌아갑니다.</p>
-              </div>
 
-              {workContextConfig.routines.map((routine) => (
-                <div className="work-routine-card" key={routine.id}>
-                  <div className="work-routine-head">
-                    <input
-                      className="work-routine-name"
-                      value={routine.name}
-                      onChange={(event) => renameRoutine(routine.id, event.target.value)}
-                      aria-label="루틴 이름"
-                    />
-                    {workContextConfig.routines.length > 1 && (
-                      <button type="button" className="work-routine-remove" onClick={() => removeRoutine(routine.id)}>
-                        루틴 삭제
-                      </button>
-                    )}
+                  <button type="button" className="work-routine-add" onClick={addRoutine}>+ 새 루틴 추가</button>
+                </section>
+
+                <section className="settings-checklist-card">
+                  <div>
+                    <span className="section-kicker">마감 체크리스트</span>
+                    <h2>필요한 항목을 직접 확인해요</h2>
+                    <p>자동 감지나 알림 없이, 사장님이 필요할 때 열어보는 체크리스트예요.</p>
                   </div>
-
-                  <div className="weekday-chip-row">
-                    {WEEKDAY_DISPLAY_ORDER.map((day) => (
-                      <button
-                        key={day}
-                        type="button"
-                        className={`weekday-toggle-chip ${routine.days.includes(day) ? "active" : ""}`}
-                        onClick={() => assignDayToRoutine(routine.id, day)}
-                        aria-pressed={routine.days.includes(day)}
-                      >
-                        {WEEKDAY_LABELS[day]}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="work-context-times">
-                    <label>
-                      <span>출근·오픈 시각</span>
-                      <input
-                        type="time"
-                        value={routine.openTime}
-                        onChange={(event) => setRoutineTime(routine.id, "openTime", event.target.value)}
-                      />
-                    </label>
-                    <label>
-                      <span>마감 시각</span>
-                      <input
-                        type="time"
-                        value={routine.closeTime}
-                        onChange={(event) => setRoutineTime(routine.id, "closeTime", event.target.value)}
-                      />
-                    </label>
-                  </div>
-
                   <ul className="settings-checklist-items">
-                    {routine.schedule.map((item) => (
+                    {closingChecklist.map((item) => (
                       <li key={item.id}>
-                        <span>{item.time} · {item.label}{item.repeats ? " · 반복" : ""}</span>
-                        <button type="button" onClick={() => removeRoutineScheduleItem(routine.id, item.id)} aria-label={`${item.label} 삭제`}>삭제</button>
+                        <span>{item.label}</span>
+                        <button type="button" onClick={() => removeChecklistItem(item.id)} aria-label={`${item.label} 삭제`}>삭제</button>
                       </li>
                     ))}
                   </ul>
-                  <form className="checklist-add-form" onSubmit={handleAddRoutineItem(routine.id)}>
-                    <input type="time" name="time" defaultValue="08:30" aria-label="업무 시간" />
-                    <input name="label" placeholder="예: 홀 청소" aria-label="업무 내용" />
-                    <label className="schedule-repeat-toggle">
-                      <input type="checkbox" name="repeats" />
-                      <span>시간대별 반복 업무</span>
-                    </label>
-                    <button type="submit">업무 추가</button>
+                  <form className="checklist-add-form" onSubmit={addChecklistItem}>
+                    <input
+                      value={newChecklistItem}
+                      onChange={(event) => setNewChecklistItem(event.target.value)}
+                      placeholder="예: 냉장고 문 확인하기"
+                      aria-label="새 체크리스트 항목"
+                    />
+                    <button type="submit">항목 추가</button>
                   </form>
-
-                  <div className="work-context-summary">
-                    <span className="section-kicker">{routine.name} 요약</span>
-                    <p>{routineSummary(routine)}</p>
-                  </div>
-                </div>
-              ))}
-
-              <button type="button" className="work-routine-add" onClick={addRoutine}>+ 새 루틴 추가</button>
-            </section>
-
-            <section className="settings-checklist-card">
-              <div>
-                <span className="section-kicker">반복 마감 체크리스트</span>
-                <h2>매일 같은 시간에 확인할 일을 알려드려요</h2>
-                <p>현재 MVP에서는 사장님이 직접 체크해요. 기기 상태 자동 확인은 향후 IoT 연동 단계에서 추가합니다.</p>
-              </div>
-              <label className="closing-time-field">
-                <span>알림 시간</span>
-                <input type="time" value={closingTime} onChange={(event) => setClosingTime(event.target.value)} />
-              </label>
-              <ul className="settings-checklist-items">
-                {closingChecklist.map((item) => (
-                  <li key={item.id}>
-                    <span>{item.label}</span>
-                    <button type="button" onClick={() => removeChecklistItem(item.id)} aria-label={`${item.label} 삭제`}>삭제</button>
-                  </li>
-                ))}
-              </ul>
-              <form className="checklist-add-form" onSubmit={addChecklistItem}>
-                <input
-                  value={newChecklistItem}
-                  onChange={(event) => setNewChecklistItem(event.target.value)}
-                  placeholder="예: 냉장고 문 확인하기"
-                  aria-label="새 체크리스트 항목"
-                />
-                <button type="submit">항목 추가</button>
-              </form>
-            </section>
+                </section>
 
               </>
             ) : (
@@ -3698,6 +3529,18 @@ export default function Home() {
                 <span><strong>내 데이터 관리</strong><small>저장된 테스트 기록을 확인하거나 삭제해요</small></span>
                 <i aria-hidden="true">›</i>
               </button>
+              <button type="button" onClick={switchInterfaceMode}>
+                <span className="settings-row-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 9 4 12l4 3M16 9l4 3-4 3M14 5l-4 14" />
+                  </svg>
+                </span>
+                <span>
+                  <strong>{interfaceMode === "user" ? "개발자 모드" : "사용자 모드로 돌아가기"}</strong>
+                  <small>{interfaceMode === "user" ? "카메라·동작 분석 테스트 도구를 열어요" : "실제 사용자 화면으로 전환해요"}</small>
+                </span>
+                <i aria-hidden="true">›</i>
+              </button>
               {interfaceMode === "developer" && (
                 <button type="button" onClick={() => setView("today")}>
                   <span aria-hidden="true">⌁</span>
@@ -3707,14 +3550,12 @@ export default function Home() {
               )}
             </section>
 
-            <section className="settings-note">
-              <strong>{interfaceMode === "user" ? "모바일 MVP 안내" : "개발자 모드 안내"}</strong>
-              <p>
-                {interfaceMode === "user"
-                  ? "사용자 모드에는 실제 케어 결과와 일상 설정만 표시돼요. 카메라·가상 데이터 검증 도구는 개발자 모드에서 확인할 수 있어요."
-                  : "현재는 내장 카메라와 웹캠을 이용한 짧은 동작 테스트와 카메라 간 인계 검증을 지원해요. IoT·POS 연동은 이후 단계에서 추가합니다."}
-              </p>
-            </section>
+            {interfaceMode === "developer" && (
+              <section className="settings-note">
+                <strong>개발자 모드 안내</strong>
+                <p>현재는 내장 카메라와 웹캠을 이용한 짧은 동작 테스트와 카메라 간 인계 검증을 지원해요. IoT·POS 연동은 이후 단계에서 추가합니다.</p>
+              </section>
+            )}
 
             <section className="factory-reset-card">
               <div>
@@ -3746,7 +3587,7 @@ export default function Home() {
 
             {interfaceMode === "user" && !userInstall ? (
               <section className="care-empty-state first-install-care">
-                <span className="care-summary-mark" aria-hidden="true">♡</span>
+                <CareMark />
                 <h2>아직 사용자 기록이 없어요</h2>
                 <p>초기 설정을 마치고 학습을 시작하면, 새로 쌓이는 기록만 이곳에 표시됩니다. 개발자 모드의 가상·테스트 기록은 포함되지 않아요.</p>
                 <button type="button" onClick={() => setView("settings")}>초기 설정 시작하기</button>
@@ -3813,7 +3654,7 @@ export default function Home() {
                   <div className="week-days" role="tablist" aria-label="가상 관찰 날짜">
                     {activePersona.week.map((day, index) => {
                       const intensity = Math.max(
-                        day.safetyAlerts * 2 + day.doubleChecks + day.unfinishedTasks + Math.round(day.microDelayRate / 6) - 1,
+                        day.doubleChecks + day.unfinishedTasks + Math.round(day.microDelayRate / 6) - 1,
                         0,
                       );
                       return (
@@ -3838,7 +3679,6 @@ export default function Home() {
                       <strong>{demoDay.note}</strong>
                     </div>
                     <div className="day-signal-grid">
-                      <article><span>마감 미확인 알림</span><strong>{demoDay.safetyAlerts}<small>회</small></strong></article>
                       <article><span>반복 확인</span><strong>{demoDay.doubleChecks}<small>회</small></strong></article>
                       <article><span>마무리 전 이탈</span><strong>{demoDay.unfinishedTasks}<small>건</small></strong></article>
                       <article><span>업무 흐름</span><strong className="word-value">{demoDay.microDelayRate >= 12 ? "변화 있음" : "평소와 비슷"}</strong></article>
@@ -3876,8 +3716,8 @@ export default function Home() {
                         <div className="insight-card-heading">
                           <span className="insight-icon" aria-hidden="true">{insight.icon}</span>
                           <div>
-                          <span className="section-kicker">{insight.kicker}</span>
-                          <h3>{insight.title}</h3>
+                            <span className="section-kicker">{insight.kicker}</span>
+                            <h3>{insight.title}</h3>
                           </div>
                         </div>
                         <p>{insight.body}</p>
@@ -3893,7 +3733,7 @@ export default function Home() {
               </>
             ) : !consent.observationConsent ? (
               <section className="care-empty-state">
-                <span className="care-summary-mark" aria-hidden="true">♡</span>
+                <CareMark />
                 <h2>아직 장기 관찰에 참여하고 있지 않아요</h2>
                 <p>
                   카메라를 연결할 때 &ldquo;동의하고 카메라 켜기&rdquo;를 선택하면, 실제
@@ -3906,7 +3746,7 @@ export default function Home() {
               </section>
             ) : recentCareLogs.length === 0 ? (
               <section className="care-empty-state">
-                <span className="care-summary-mark" aria-hidden="true">♡</span>
+                <CareMark />
                 <h2>아직 쌓인 기록이 없어요</h2>
                 <p>
                   마감 체크리스트를 사용하고 카메라 동작 테스트를 진행하면,
@@ -3917,7 +3757,7 @@ export default function Home() {
             ) : (
               <>
                 <section className="care-summary">
-                  <span className="care-summary-mark" aria-hidden="true">♡</span>
+                  <CareMark />
                   <div>
                     <span className="section-kicker">
                       최근 {recentCareLogs.length}일 케어 리포트 · 실제 기록
@@ -3945,14 +3785,6 @@ export default function Home() {
                 </section>
 
                 <div className="metric-grid">
-                  <article className="metric-card">
-                    <span>마감 미확인 알림</span>
-                    <strong>
-                      {totalSafetyAlerts}
-                      <small>회</small>
-                    </strong>
-                    <p>최근 {recentCareLogs.length}일 합계</p>
-                  </article>
                   <article className="metric-card">
                     <span>마감 반복 확인</span>
                     <strong>
@@ -3986,7 +3818,7 @@ export default function Home() {
                 <section className={`panel personal-pattern-panel mode-${observationProfile.mode}`}>
                   <div className="panel-heading">
                     <div>
-                      <span className="section-kicker">{occupationTemplate.icon} 개인 업무 패턴 · 기준선 v{observationProfile.baselineVersion}</span>
+                      <span className="section-kicker">개인 업무 패턴 · 기준선 v{observationProfile.baselineVersion}</span>
                       <h2>
                         {observationProfile.mode === "learning"
                           ? "평소 업무 흐름을 학습하고 있어요"
@@ -4052,6 +3884,7 @@ export default function Home() {
               </>
             )}
 
+            {interfaceMode === "user" && cognitiveConcernDetected && (
             <section className="panel care-connect-card">
               <div className="panel-heading">
                 <div>
@@ -4075,23 +3908,10 @@ export default function Home() {
                 <a className="care-connect-link" href="tel:1899-9988">상담전화 1899-9988</a>
               </div>
             </section>
+            )}
           </div>
         )}
       </section>
-
-      <nav className="mobile-nav" aria-label="모바일 주요 메뉴">
-        {activeNavItems.map((item) => (
-          <button
-            key={item.id}
-            className={view === item.id ? "active" : ""}
-            onClick={() => setView(item.id)}
-            type="button"
-          >
-            <span aria-hidden="true">{item.icon}</span>
-            {item.label}
-          </button>
-        ))}
-      </nav>
 
       <Modal
         open={multiCameraModalOpen}
@@ -4306,254 +4126,253 @@ export default function Home() {
         )}
       </Modal>
 
-      <Modal open={brainHealthOpen} onClose={() => setBrainHealthOpen(false)} labelledBy="brain-health-title" className="brain-health-modal">
+      <Modal open={brainHealthOpen && cognitiveConcernDetected} onClose={() => setBrainHealthOpen(false)} labelledBy="brain-health-title" className="brain-health-modal">
         <button className="modal-close" type="button" onClick={() => setBrainHealthOpen(false)} aria-label="닫기">×</button>
         <span className="section-kicker">뇌 건강 정보</span>
-            <h2 id="brain-health-title">한 번의 실수보다 반복되는 변화가 중요해요</h2>
-            <p>익숙한 업무가 평소보다 오래 걸리거나 확인 행동이 반복되는 데에는 피로, 수면 부족, 스트레스, 신체 컨디션 등 여러 이유가 있을 수 있어요. 메모리 가드는 원인을 진단하지 않고, 본인의 평소 흐름과 달라진 장면을 정리해 드립니다.</p>
-            <div className="brain-health-guide">
-              <article><strong>먼저 돌아보기</strong><span>최근 수면, 피로, 매장 혼잡도와 함께 확인해 보세요.</span></article>
-              <article><strong>며칠 더 살펴보기</strong><span>같은 변화가 여러 날 이어지는지 기록을 확인해 보세요.</span></article>
-              <article><strong>걱정되면 상담하기</strong><span>상담할 때 언제부터 어떤 업무가 달라졌는지 이 기록을 보여주세요.</span></article>
-            </div>
-            <div className="brain-health-actions">
-              <a href="https://www.nid.or.kr" target="_blank" rel="noreferrer">공식 정보와 센터 찾기</a>
-              <a href="tel:1899-9988">치매상담콜센터 연결</a>
-            </div>
-            <small>이 정보와 앱의 기록은 의료 진단을 대신하지 않습니다.</small>
+        <h2 id="brain-health-title">한 번의 실수보다 반복되는 변화가 중요해요</h2>
+        <p>익숙한 업무가 평소보다 오래 걸리거나 확인 행동이 반복되는 데에는 피로, 수면 부족, 스트레스, 신체 컨디션 등 여러 이유가 있을 수 있어요. 메모리 가드는 원인을 진단하지 않고, 본인의 평소 흐름과 달라진 장면을 정리해 드립니다.</p>
+        <div className="brain-health-guide">
+          <article><strong>먼저 돌아보기</strong><span>최근 수면, 피로, 매장 혼잡도와 함께 확인해 보세요.</span></article>
+          <article><strong>며칠 더 살펴보기</strong><span>같은 변화가 여러 날 이어지는지 기록을 확인해 보세요.</span></article>
+          <article><strong>걱정되면 상담하기</strong><span>상담할 때 언제부터 어떤 업무가 달라졌는지 이 기록을 보여주세요.</span></article>
+        </div>
+        <div className="brain-health-actions">
+          <a href="https://www.nid.or.kr" target="_blank" rel="noreferrer">공식 정보와 센터 찾기</a>
+          <a href="tel:1899-9988">치매상담콜센터 연결</a>
+        </div>
+        <small>이 정보와 앱의 기록은 의료 진단을 대신하지 않습니다.</small>
       </Modal>
 
       <Modal open={bookingOpen} onClose={() => setBookingOpen(false)} labelledBy="booking-title" className="booking-modal">
-            <button className="modal-close" type="button" onClick={() => setBookingOpen(false)} aria-label="닫기">×</button>
-            <span className="section-kicker">아까 하던 업무</span>
-            <h2 id="booking-title">예약 입력을 마무리할까요?</h2>
-            <p>작성했던 내용은 그대로 임시 저장되어 있어요.</p>
-            <form onSubmit={saveBooking}>
-              <label>
-                고객 이름
-                <input value={bookingName} onChange={(event) => setBookingName(event.target.value)} required />
-              </label>
-              <label>
-                서비스
-                <select value={bookingService} onChange={(event) => setBookingService(event.target.value)}>
-                  <option>커트</option>
-                  <option>염색</option>
-                  <option>펌</option>
-                </select>
-              </label>
-              <label>
-                예약 시간
-                <input value="8월 14일 오후 3:00" readOnly />
-              </label>
-              <button type="submit">예약 입력 완료</button>
-            </form>
+        <button className="modal-close" type="button" onClick={() => setBookingOpen(false)} aria-label="닫기">×</button>
+        <span className="section-kicker">아까 하던 업무</span>
+        <h2 id="booking-title">예약 입력을 마무리할까요?</h2>
+        <p>작성했던 내용은 그대로 임시 저장되어 있어요.</p>
+        <form onSubmit={saveBooking}>
+          <label>
+            고객 이름
+            <input value={bookingName} onChange={(event) => setBookingName(event.target.value)} required />
+          </label>
+          <label>
+            서비스
+            <select value={bookingService} onChange={(event) => setBookingService(event.target.value)}>
+              <option>커트</option>
+              <option>염색</option>
+              <option>펌</option>
+            </select>
+          </label>
+          <label>
+            예약 시간
+            <input value="8월 14일 오후 3:00" readOnly />
+          </label>
+          <button type="submit">예약 입력 완료</button>
+        </form>
       </Modal>
 
-      <Modal open={showConsentModal} onClose={() => {}} disableDismiss labelledBy="consent-title" className="consent-modal">
-            <span className="section-kicker">카메라를 켜기 전에 알려드려요</span>
-            <h2 id="consent-title">이 카메라는 두 가지 목적으로 쓰일 수 있어요</h2>
-            <ul className="consent-list">
-              <li>
-                <strong>① 기억 복원</strong> — 결제·출입 같은 순간의 몸·손
-                좌표를 짧게 저장해, 나중에 &ldquo;그때 무슨 일이 있었는지&rdquo;를
-                스켈레톤으로 다시 확인할 수 있게 해요.
-              </li>
-              <li>
-                <strong>② 장기 인지 건강 관찰(선택)</strong> — 동의하시면,
-                안전 알림 빈도·마감 반복 확인·업무 지연 같은 행동 패턴을
-                오랜 기간 관찰해 케어 리포트를 만드는 데도 사용해요. 이
-                데이터는 진단이 아니라 변화를 알아차리는 참고용이며, 언제든
-                내 데이터 관리에서 철회하고 전부 삭제할 수 있어요.
-              </li>
-            </ul>
-            <p className="consent-note">
-              얼굴·영상·음성은 저장하지 않고, 좌표 데이터는 이 브라우저에만
-              남아요. 동의하지 않아도 타임라인·스마트 마감 같은 매장 안전
-              기능은 카메라 없이 그대로 사용할 수 있어요.
-            </p>
-            <div className="consent-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => handleConsentDecision(false)}
-              >
-                매장 안전 기능만 사용할게요
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => handleConsentDecision(true)}
-              >
-                동의하고 카메라 켜기
-              </button>
-            </div>
+      <Modal open={showConsentModal} onClose={() => { }} disableDismiss labelledBy="consent-title" className="consent-modal">
+        <span className="section-kicker">카메라를 켜기 전에 알려드려요</span>
+        <h2 id="consent-title">이 카메라는 두 가지 목적으로 쓰일 수 있어요</h2>
+        <ul className="consent-list">
+          <li>
+            <strong>① 기억 복원</strong> — 업무 중 특정 순간의 몸·손
+            좌표를 짧게 저장해, 나중에 &ldquo;그때 무슨 일이 있었는지&rdquo;를
+            스켈레톤으로 다시 확인할 수 있게 해요.
+          </li>
+          <li>
+            <strong>② 장기 업무 패턴 관찰(선택)</strong> — 동의하시면,
+            반복 확인·업무 지연 같은 행동 패턴을
+            오랜 기간 관찰해 케어 리포트를 만드는 데도 사용해요. 이
+            데이터는 진단이 아니라 변화를 알아차리는 참고용이며, 언제든
+            내 데이터 관리에서 철회하고 전부 삭제할 수 있어요.
+          </li>
+        </ul>
+        <p className="consent-note">
+          얼굴·영상·음성은 저장하지 않고, 좌표 데이터는 이 브라우저에만
+          남아요. 동의하지 않아도 기록과 수동 체크리스트는 그대로 사용할 수 있어요.
+        </p>
+        <div className="consent-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => handleConsentDecision(false)}
+          >
+            장기 관찰 없이 사용할게요
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => handleConsentDecision(true)}
+          >
+            동의하고 카메라 켜기
+          </button>
+        </div>
       </Modal>
 
       <Modal open={myDataOpen} onClose={() => setMyDataOpen(false)} labelledBy="my-data-title" className="my-data-modal">
-            <button
-              className="modal-close"
-              type="button"
-              onClick={() => setMyDataOpen(false)}
-              aria-label="닫기"
-            >
-              ×
+        <button
+          className="modal-close"
+          type="button"
+          onClick={() => setMyDataOpen(false)}
+          aria-label="닫기"
+        >
+          ×
+        </button>
+        <span className="section-kicker">내 데이터 관리</span>
+        <h2 id="my-data-title">저장된 데이터를 확인하고 관리하세요</h2>
+
+        <div className="my-data-grid">
+          <article>
+            <span>저장된 동작 좌표 세션</span>
+            <strong>{sessionCount}개</strong>
+          </article>
+          <article>
+            <span>케어 관찰 기록</span>
+            <strong>{careLogs.length}일치</strong>
+          </article>
+          <article>
+            <span>저장된 동작 좌표</span>
+            <strong>{formatBytes(storedMotionBytes)} 사용 중</strong>
+          </article>
+          <article>
+            <span>장기 관찰 동의 상태</span>
+            <strong>
+              {consent.decided
+                ? consent.observationConsent
+                  ? "동의함"
+                  : "동의 안 함"
+                : "아직 결정 안 함"}
+            </strong>
+          </article>
+        </div>
+
+        <p className="my-data-note">
+          얼굴·영상·음성은 저장되지 않으며, 모든 데이터는 이 브라우저
+          안에만 있어요. 다른 기기에서는 보이지 않고, 브라우저 데이터를
+          지우면 함께 사라져요.
+        </p>
+
+        {recentSessions.length > 0 && (
+          <div className="my-data-sessions">
+            <span className="section-kicker">개발용 · 최근 좌표 세션 리플레이</span>
+            <ul>
+              {recentSessions.map((session) => (
+                <li key={session.id}>
+                  <span>
+                    {formatSessionTime(session.startedAt)} · {session.frameCount}프레임
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setReplaySessionId(session.id)}
+                    disabled={session.frameCount === 0}
+                  >
+                    리플레이
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="my-data-actions">
+          {consent.observationConsent ? (
+            <button type="button" onClick={withdrawObservationConsent}>
+              장기 관찰 참여 철회하기
             </button>
-            <span className="section-kicker">내 데이터 관리</span>
-            <h2 id="my-data-title">저장된 데이터를 확인하고 관리하세요</h2>
-
-            <div className="my-data-grid">
-              <article>
-                <span>저장된 동작 좌표 세션</span>
-                <strong>{sessionCount}개</strong>
-              </article>
-              <article>
-                <span>케어 관찰 기록</span>
-                <strong>{careLogs.length}일치</strong>
-              </article>
-              <article>
-                <span>저장된 동작 좌표</span>
-                <strong>{formatBytes(storedMotionBytes)} 사용 중</strong>
-              </article>
-              <article>
-                <span>장기 관찰 동의 상태</span>
-                <strong>
-                  {consent.decided
-                    ? consent.observationConsent
-                      ? "동의함"
-                      : "동의 안 함"
-                    : "아직 결정 안 함"}
-                </strong>
-              </article>
-            </div>
-
-            <p className="my-data-note">
-              얼굴·영상·음성은 저장되지 않으며, 모든 데이터는 이 브라우저
-              안에만 있어요. 다른 기기에서는 보이지 않고, 브라우저 데이터를
-              지우면 함께 사라져요.
-            </p>
-
-            {recentSessions.length > 0 && (
-              <div className="my-data-sessions">
-                <span className="section-kicker">개발용 · 최근 좌표 세션 리플레이</span>
-                <ul>
-                  {recentSessions.map((session) => (
-                    <li key={session.id}>
-                      <span>
-                        {formatSessionTime(session.startedAt)} · {session.frameCount}프레임
-                      </span>
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={() => setReplaySessionId(session.id)}
-                        disabled={session.frameCount === 0}
-                      >
-                        리플레이
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="my-data-actions">
-              {consent.observationConsent ? (
-                <button type="button" onClick={withdrawObservationConsent}>
-                  장기 관찰 참여 철회하기
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => handleConsentDecision(true)}
-                >
-                  장기 관찰에 참여하기
-                </button>
-              )}
-              <button
-                type="button"
-                className="danger-button"
-                onClick={() => void deleteAllMyData()}
-              >
-                내 데이터 전체 삭제
-              </button>
-            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleConsentDecision(true)}
+            >
+              장기 관찰에 참여하기
+            </button>
+          )}
+          <button
+            type="button"
+            className="danger-button"
+            onClick={() => void deleteAllMyData()}
+          >
+            내 데이터 전체 삭제
+          </button>
+        </div>
       </Modal>
 
       <Modal open={zoneSetupOpen} onClose={() => setZoneSetupOpen(false)} labelledBy="zone-setup-title" className="zone-setup-modal">
-            <button className="modal-close" type="button" onClick={() => setZoneSetupOpen(false)} aria-label="닫기">×</button>
-            <span className="section-kicker">{occupationTemplate.icon} {occupationTemplate.label} 관찰 맥락</span>
-            <h2 id="zone-setup-title">카메라 화면에 매장 구역을 표시해 주세요</h2>
-            <p>카메라를 고르고, 실제 화면에서 구역에 가까운 칸을 눌러주세요. 카메라 위치가 바뀌면 다시 설정해야 해요.</p>
-            <div className="zone-camera-tabs" role="tablist" aria-label="편집할 카메라">
-              {[1, 2].map((slot) => (
-                <button
-                  key={slot}
-                  type="button"
-                  role="tab"
-                  aria-selected={zoneCameraSlot === slot}
-                  className={zoneCameraSlot === slot ? "active" : ""}
-                  onClick={() => setZoneCameraSlot(slot as 1 | 2)}
-                >
-                  <strong>카메라 {slot}</strong>
-                  <span>{slot === 1
-                    ? availableCameras.find((camera) => camera.deviceId === primaryCameraId)?.label || "기본 카메라"
-                    : availableCameras.find((camera) => camera.deviceId === secondaryCameraId)?.label || "두 번째 카메라"}</span>
-                </button>
-              ))}
-            </div>
-            <label className="zone-picker">
-              <span>지정할 구역</span>
-              <select value={selectedZoneId} onChange={(event) => setSelectedZoneId(event.target.value)}>
-                <optgroup label="추천 구역">
-                  {occupationTemplate.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
-                </optgroup>
-                {observationProfile.customZones.length > 0 && (
-                  <optgroup label="직접 추가한 구역">
-                    {observationProfile.customZones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
-                  </optgroup>
-                )}
-              </select>
-            </label>
-            <div className="custom-zone-box">
-              <label htmlFor="custom-zone-name">목록에 없는 구역인가요?</label>
-              <div className="custom-zone-entry">
-                <input
-                  id="custom-zone-name"
-                  value={customZoneName}
-                  maxLength={24}
-                  placeholder="예: 테라스, 포장대, 직원 휴게실"
-                  onChange={(event) => setCustomZoneName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void addCustomZone();
-                    }
-                  }}
-                />
-                <button type="button" disabled={!customZoneName.trim()} onClick={() => void addCustomZone()}>구역 추가</button>
-              </div>
-            </div>
-            {(draftZoneContext || selectedCustomZone) && (
-              <p className="zone-context-hint">
-                {draftZoneContext || selectedZoneContext
-                  ? `‘${(draftZoneContext ?? selectedZoneContext)!.label}’ 맥락으로 이해해요.`
-                  : "새 구역으로 기록하고 행동·시간대와 함께 학습해요."}
-              </p>
+        <button className="modal-close" type="button" onClick={() => setZoneSetupOpen(false)} aria-label="닫기">×</button>
+        <span className="section-kicker">{occupationDisplayName} 관찰 맥락</span>
+        <h2 id="zone-setup-title">카메라 화면에 매장 구역을 표시해 주세요</h2>
+        <p>카메라를 고르고, 실제 화면에서 구역에 가까운 칸을 눌러주세요. 카메라 위치가 바뀌면 다시 설정해야 해요.</p>
+        <div className="zone-camera-tabs" role="tablist" aria-label="편집할 카메라">
+          {[1, 2].map((slot) => (
+            <button
+              key={slot}
+              type="button"
+              role="tab"
+              aria-selected={zoneCameraSlot === slot}
+              className={zoneCameraSlot === slot ? "active" : ""}
+              onClick={() => setZoneCameraSlot(slot as 1 | 2)}
+            >
+              <strong>카메라 {slot}</strong>
+              <span>{slot === 1
+                ? availableCameras.find((camera) => camera.deviceId === primaryCameraId)?.label || "기본 카메라"
+                : availableCameras.find((camera) => camera.deviceId === secondaryCameraId)?.label || "두 번째 카메라"}</span>
+            </button>
+          ))}
+        </div>
+        <label className="zone-picker">
+          <span>지정할 구역</span>
+          <select value={selectedZoneId} onChange={(event) => setSelectedZoneId(event.target.value)}>
+            <optgroup label="추천 구역">
+              {occupationTemplate.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
+            </optgroup>
+            {observationProfile.customZones.length > 0 && (
+              <optgroup label="직접 추가한 구역">
+                {observationProfile.customZones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
+              </optgroup>
             )}
-            <div className="zone-camera-grid" aria-label={`카메라 ${zoneCameraSlot} 화면 3×3 구역 설정`}>
-              {activeZoneGrid.map((zoneId, index) => {
-                const zone = zoneOptions.find((item) => item.id === zoneId);
-                return (
-                  <button key={index} type="button" className={zoneId ? "mapped" : ""} onClick={() => void assignZoneCell(index)}>
-                    <small>{index + 1}</small>
-                    <strong>{zone?.label ?? "구역 지정"}</strong>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="zone-setup-footer">
-              <span>카메라 {zoneCameraSlot}에 {mappedZoneCount}개 구역 설정됨 · 화면상 위치를 사용해요.</span>
-              <button type="button" onClick={() => setZoneSetupOpen(false)}>설정 완료</button>
-            </div>
+          </select>
+        </label>
+        <div className="custom-zone-box">
+          <label htmlFor="custom-zone-name">목록에 없는 구역인가요?</label>
+          <div className="custom-zone-entry">
+            <input
+              id="custom-zone-name"
+              value={customZoneName}
+              maxLength={24}
+              placeholder="예: 테라스, 포장대, 직원 휴게실"
+              onChange={(event) => setCustomZoneName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void addCustomZone();
+                }
+              }}
+            />
+            <button type="button" disabled={!customZoneName.trim()} onClick={() => void addCustomZone()}>구역 추가</button>
+          </div>
+        </div>
+        {(draftZoneContext || selectedCustomZone) && (
+          <p className="zone-context-hint">
+            {draftZoneContext || selectedZoneContext
+              ? `‘${(draftZoneContext ?? selectedZoneContext)!.label}’ 맥락으로 이해해요.`
+              : "새 구역으로 기록하고 행동·시간대와 함께 학습해요."}
+          </p>
+        )}
+        <div className="zone-camera-grid" aria-label={`카메라 ${zoneCameraSlot} 화면 3×3 구역 설정`}>
+          {activeZoneGrid.map((zoneId, index) => {
+            const zone = zoneOptions.find((item) => item.id === zoneId);
+            return (
+              <button key={index} type="button" className={zoneId ? "mapped" : ""} onClick={() => void assignZoneCell(index)}>
+                <small>{index + 1}</small>
+                <strong>{zone?.label ?? "구역 지정"}</strong>
+              </button>
+            );
+          })}
+        </div>
+        <div className="zone-setup-footer">
+          <span>카메라 {zoneCameraSlot}에 {mappedZoneCount}개 구역 설정됨 · 화면상 위치를 사용해요.</span>
+          <button type="button" onClick={() => setZoneSetupOpen(false)}>설정 완료</button>
+        </div>
       </Modal>
 
       {replaySessionId && (
@@ -4567,8 +4386,8 @@ export default function Home() {
           sessionLabel={
             recentSessions.find((session) => session.id === replaySessionId)
               ? `${formatSessionTime(
-                  recentSessions.find((session) => session.id === replaySessionId)!.startedAt,
-                )} 세션`
+                recentSessions.find((session) => session.id === replaySessionId)!.startedAt,
+              )} 세션`
               : undefined
           }
           feedbackEventId={
@@ -4590,9 +4409,9 @@ export default function Home() {
             globalSessionId: selectedReviewEpisode.globalSessionId,
             window: selectedReviewEpisode.motionSlice
               ? {
-                  startMs: selectedReviewEpisode.motionSlice.startMs,
-                  endMs: selectedReviewEpisode.motionSlice.endMs,
-                }
+                startMs: selectedReviewEpisode.motionSlice.startMs,
+                endMs: selectedReviewEpisode.motionSlice.endMs,
+              }
               : undefined,
           }}
           sessionLabel={`${formatSessionTime(selectedReviewEpisode.recordedAt)} · 업무 라벨 검토`}

@@ -23,25 +23,34 @@ export type PrimitiveMotionLabel =
   | "PUSH_PULL"
   | "STATIC_PAUSE"
   | "REPETITIVE_ARM"
-  | "ZONE_TRANSITION";
-
-export const PRIMITIVE_MOTION_LABELS: Record<PrimitiveMotionLabel, string> = {
-  WALK: "이동",
-  STAND: "서 있기",
-  SIT: "앉기",
-  BEND_FORWARD: "상체 숙이기",
-  BEND_DOWN: "아래로 굽히기",
-  REACH_UP: "위로 손 뻗기",
-  REACH_DOWN: "아래로 손 뻗기",
-  REACH_FORWARD: "앞으로 손 뻗기",
-  ARM_ELEVATED: "팔 들기",
-  TURN_BODY: "몸통 돌리기",
-  CARRY: "물건 들고 이동",
-  PUSH_PULL: "밀고 당기기",
-  STATIC_PAUSE: "잠시 멈춤",
-  REPETITIVE_ARM: "팔 반복 움직임",
-  ZONE_TRANSITION: "구역 간 이동",
-};
+  | "ZONE_TRANSITION"
+  | "CHECK"
+  | "CLOSE"
+  | "DRY"
+  | "GRASP"
+  | "LIFT"
+  | "LOWER"
+  | "MIX"
+  | "OPEN"
+  | "PLACE"
+  | "POUR"
+  | "PRESS"
+  | "PULL"
+  | "PUSH"
+  | "REACH_SIDE"
+  | "RELEASE"
+  | "RINSE"
+  | "ROTATE"
+  | "SCOOP"
+  | "SCRUB"
+  | "SHAKE"
+  | "SORT"
+  | "STEAM"
+  | "STIR"
+  | "TAMP"
+  | "TRANSFER"
+  | "WASH"
+  | "WIPE";
 
 export type TaskTemplate = {
   id: string;
@@ -80,6 +89,137 @@ const task = (
   fallbackLabel?: string,
 ): TaskTemplate => ({ id, label, phase, zones, motions, priority, fallbackLabel });
 
+type CafeTaskSpec = readonly [
+  label: string,
+  phase: WorkPhase,
+  zones: string[],
+  motions: PrimitiveMotionLabel[],
+];
+
+const CAFE_TASK_ID_OVERRIDES: Record<string, string> = {
+  "머신 전원 켜기": "MACHINE_SETUP",
+  "컵 보충": "BAR_RESTOCK",
+  "고객 주문 받기": "ORDER_ZONE",
+  "냉장 재료 꺼내기": "FETCH_INGREDIENT",
+  "음료 재료 혼합": "DRINK_PREP_TASK",
+  "고객에게 음료 전달": "SERVE_ORDER",
+  "테이블 닦기": "CLEAR_TABLE",
+  "식기 세척": "DISHWASH",
+  "머신 표면 닦기": "MACHINE_CLEAN",
+  "매장 전체 최종 점검": "CLOSING_ROUTINE",
+  "앉아서 휴식": "REST",
+};
+
+const CAFE_TASK_SPECS: CafeTaskSpec[] = [
+  ["머신 전원 켜기", "open", ["ESPRESSO_MACHINE"], ["STAND", "REACH_FORWARD", "GRASP", "PRESS", "RELEASE"]],
+  ["머신 예열 상태 확인", "open", ["ESPRESSO_MACHINE"], ["STAND", "STATIC_PAUSE", "CHECK"]],
+  ["그라인더 준비", "open", ["ESPRESSO_MACHINE"], ["STAND", "REACH_FORWARD", "GRASP", "LIFT", "PLACE", "PRESS", "RELEASE"]],
+  ["원두통 확인", "open", ["ESPRESSO_MACHINE", "INGREDIENT_STORAGE"], ["REACH_FORWARD", "GRASP", "OPEN", "CHECK", "CLOSE", "RELEASE"]],
+  ["포터필터 준비", "open", ["ESPRESSO_MACHINE"], ["REACH_FORWARD", "GRASP", "LIFT", "TRANSFER", "PLACE", "RELEASE"]],
+  ["머신 주변 작업공간 정리", "open", ["ESPRESSO_MACHINE", "DRINK_PREP"], ["REACH_FORWARD", "GRASP", "LIFT", "TRANSFER", "PLACE", "RELEASE"]],
+  ["컵 보충", "open", ["INGREDIENT_STORAGE", "DRINK_PREP"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "PLACE", "RELEASE"]],
+  ["뚜껑 보충", "open", ["INGREDIENT_STORAGE", "DRINK_PREP"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "PLACE", "RELEASE"]],
+  ["빨대 보충", "open", ["INGREDIENT_STORAGE", "DRINK_PREP"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "PLACE", "RELEASE"]],
+  ["냅킨·소모품 보충", "open", ["INGREDIENT_STORAGE", "DRINK_PREP"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "PLACE", "RELEASE"]],
+  ["원두 보충", "open", ["INGREDIENT_STORAGE", "ESPRESSO_MACHINE"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "POUR", "PLACE", "RELEASE"]],
+  ["시럽·소스 보충", "open", ["INGREDIENT_STORAGE", "DRINK_PREP"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "PLACE", "RELEASE"]],
+  ["우유·음료 재료 보충", "open", ["FRIDGE", "DRINK_PREP"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "PLACE", "RELEASE"]],
+  ["고객 주문 받기", "business", ["POS"], ["STAND", "TURN_BODY", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["주문 내용 확인", "business", ["POS"], ["STAND", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["POS 주문 입력", "business", ["POS"], ["STAND", "REACH_FORWARD", "PRESS", "RELEASE", "CHECK"]],
+  ["결제 처리", "business", ["POS"], ["STAND", "REACH_FORWARD", "GRASP", "PRESS", "RELEASE", "CHECK"]],
+  ["영수증 출력", "business", ["POS"], ["STAND", "REACH_FORWARD", "GRASP", "PULL", "LIFT", "RELEASE"]],
+  ["주문 내역 확인", "business", ["POS"], ["STAND", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["고객에게 주문 완료 안내", "business", ["POS"], ["STAND", "TURN_BODY", "REACH_FORWARD", "CHECK"]],
+  ["냉장 재료 꺼내기", "business", ["FRIDGE"], ["BEND_FORWARD", "REACH_FORWARD", "GRASP", "LIFT", "CLOSE", "CARRY"]],
+  ["냉장 재료 제조대로 이동", "business", ["FRIDGE", "DRINK_PREP"], ["WALK", "CARRY", "ZONE_TRANSITION", "PLACE", "RELEASE"]],
+  ["상온 재료 꺼내기", "business", ["INGREDIENT_STORAGE"], ["REACH_FORWARD", "GRASP", "LIFT", "CARRY"]],
+  ["상온 재료 제조대로 이동", "business", ["INGREDIENT_STORAGE", "DRINK_PREP"], ["WALK", "CARRY", "ZONE_TRANSITION", "PLACE", "RELEASE"]],
+  ["원두 가져오기", "business", ["INGREDIENT_STORAGE", "ESPRESSO_MACHINE"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "ZONE_TRANSITION", "PLACE", "RELEASE"]],
+  ["우유 가져오기", "business", ["FRIDGE", "DRINK_PREP"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "ZONE_TRANSITION", "PLACE", "RELEASE"]],
+  ["재료를 제조대에 배치하기", "business", ["DRINK_PREP"], ["REACH_FORWARD", "GRASP", "LIFT", "TRANSFER", "PLACE", "RELEASE"]],
+  ["주문 음료 확인", "business", ["POS", "DRINK_PREP"], ["WALK", "ZONE_TRANSITION", "REACH_FORWARD", "CHECK"]],
+  ["컵 준비", "business", ["DRINK_PREP"], ["REACH_FORWARD", "GRASP", "LIFT", "TRANSFER", "PLACE", "RELEASE"]],
+  ["컵에 얼음 담기", "business", ["DRINK_PREP"], ["GRASP", "LIFT", "SCOOP", "TRANSFER", "PLACE", "RELEASE"]],
+  ["원두 준비", "business", ["ESPRESSO_MACHINE"], ["REACH_FORWARD", "GRASP", "LIFT", "PLACE", "RELEASE"]],
+  ["원두 분쇄", "business", ["ESPRESSO_MACHINE"], ["GRASP", "PLACE", "PRESS", "RELEASE", "STATIC_PAUSE"]],
+  ["포터필터에 원두 담기", "business", ["ESPRESSO_MACHINE"], ["GRASP", "LIFT", "SCOOP", "TRANSFER", "PLACE", "RELEASE"]],
+  ["원두 탬핑", "business", ["ESPRESSO_MACHINE"], ["GRASP", "PRESS", "TAMP", "RELEASE"]],
+  ["포터필터 장착", "business", ["ESPRESSO_MACHINE"], ["GRASP", "LIFT", "REACH_FORWARD", "ROTATE", "PLACE", "RELEASE"]],
+  ["에스프레소 추출 시작", "business", ["ESPRESSO_MACHINE"], ["REACH_FORWARD", "PRESS", "RELEASE"]],
+  ["에스프레소 추출 대기", "business", ["ESPRESSO_MACHINE"], ["STAND", "STATIC_PAUSE", "CHECK"]],
+  ["우유 준비", "business", ["FRIDGE", "DRINK_PREP"], ["REACH_FORWARD", "GRASP", "LIFT", "CARRY", "PLACE", "RELEASE"]],
+  ["우유 스팀", "business", ["ESPRESSO_MACHINE"], ["GRASP", "PLACE", "PRESS", "ROTATE", "STEAM", "RELEASE"]],
+  ["우유 붓기", "business", ["DRINK_PREP"], ["GRASP", "LIFT", "POUR", "ROTATE", "LOWER", "RELEASE"]],
+  ["시럽 첨가", "business", ["DRINK_PREP"], ["GRASP", "LIFT", "REACH_FORWARD", "PRESS", "POUR", "RELEASE"]],
+  ["소스 첨가", "business", ["DRINK_PREP"], ["GRASP", "LIFT", "REACH_FORWARD", "PRESS", "POUR", "RELEASE"]],
+  ["음료 재료 혼합", "business", ["DRINK_PREP"], ["GRASP", "LIFT", "POUR", "MIX", "STIR", "PLACE", "RELEASE"]],
+  ["음료 저어 섞기", "business", ["DRINK_PREP"], ["GRASP", "STIR", "ROTATE", "RELEASE"]],
+  ["음료 상태 확인", "business", ["DRINK_PREP"], ["STAND", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["컵 뚜껑 닫기", "business", ["DRINK_PREP"], ["GRASP", "LIFT", "PLACE", "PRESS", "RELEASE"]],
+  ["음료 포장", "business", ["DRINK_PREP"], ["GRASP", "LIFT", "PLACE", "PULL", "CLOSE", "RELEASE"]],
+  ["완성 음료 픽업대로 이동", "business", ["DRINK_PREP", "SERVING"], ["GRASP", "LIFT", "CARRY", "WALK", "ZONE_TRANSITION", "PLACE", "RELEASE"]],
+  ["완성 음료 확인", "business", ["SERVING"], ["STAND", "REACH_FORWARD", "CHECK"]],
+  ["픽업대에 음료 배치", "business", ["SERVING"], ["GRASP", "LIFT", "REACH_FORWARD", "PLACE", "RELEASE"]],
+  ["주문 번호 확인", "business", ["SERVING"], ["STAND", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["고객에게 음료 전달", "business", ["SERVING", "HALL"], ["GRASP", "LIFT", "CARRY", "REACH_FORWARD", "TRANSFER", "RELEASE"]],
+  ["테이크아웃 음료 전달", "business", ["SERVING"], ["GRASP", "LIFT", "CARRY", "REACH_FORWARD", "TRANSFER", "RELEASE"]],
+  ["음료 전달 후 작업대로 복귀", "business", ["SERVING", "DRINK_PREP"], ["WALK", "ZONE_TRANSITION"]],
+  ["빈 컵 수거", "business", ["HALL"], ["WALK", "REACH_FORWARD", "GRASP", "LIFT", "CARRY"]],
+  ["사용한 식기 수거", "business", ["HALL"], ["BEND_FORWARD", "REACH_FORWARD", "GRASP", "LIFT", "CARRY"]],
+  ["테이블 위 쓰레기 수거", "business", ["HALL", "WASTE"], ["BEND_FORWARD", "REACH_FORWARD", "GRASP", "LIFT", "CARRY", "ZONE_TRANSITION", "RELEASE"]],
+  ["테이블 닦기", "business", ["HALL"], ["STAND", "GRASP", "REACH_FORWARD", "WIPE", "SCRUB", "REACH_SIDE", "RELEASE"]],
+  ["테이블 위 물품 정리", "business", ["HALL"], ["REACH_FORWARD", "GRASP", "LIFT", "TRANSFER", "PLACE", "RELEASE"]],
+  ["의자 정돈", "business", ["HALL"], ["GRASP", "PUSH", "PULL", "PLACE", "RELEASE"]],
+  ["테이블 상태 확인", "business", ["HALL"], ["STAND", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["사용 식기 분류", "business", ["SINK"], ["GRASP", "LIFT", "SORT", "PLACE", "RELEASE"]],
+  ["식기 불리기", "business", ["SINK"], ["GRASP", "LIFT", "PLACE", "POUR", "RELEASE", "STATIC_PAUSE"]],
+  ["컵 세척", "business", ["SINK"], ["GRASP", "LIFT", "WASH", "SCRUB", "ROTATE", "RINSE", "PLACE", "RELEASE"]],
+  ["접시 세척", "business", ["SINK"], ["GRASP", "LIFT", "WASH", "SCRUB", "ROTATE", "RINSE", "PLACE", "RELEASE"]],
+  ["식기 세척", "business", ["SINK"], ["GRASP", "LIFT", "WASH", "SCRUB", "ROTATE", "RINSE", "PLACE", "RELEASE"]],
+  ["컵 헹구기", "business", ["SINK"], ["GRASP", "RINSE", "ROTATE", "RELEASE"]],
+  ["식기 헹구기", "business", ["SINK"], ["GRASP", "RINSE", "ROTATE", "RELEASE"]],
+  ["세척한 식기 물기 제거", "business", ["SINK"], ["GRASP", "SHAKE", "ROTATE", "DRY", "PLACE", "RELEASE"]],
+  ["식기 건조", "business", ["SINK", "DRINK_PREP"], ["GRASP", "LIFT", "CARRY", "WALK", "PLACE", "RELEASE"]],
+  ["컵·식기 제자리 정리", "business", ["DRINK_PREP", "INGREDIENT_STORAGE"], ["GRASP", "LIFT", "CARRY", "REACH_FORWARD", "PLACE", "RELEASE"]],
+  ["머신 표면 닦기", "close", ["ESPRESSO_MACHINE"], ["STAND", "GRASP", "REACH_FORWARD", "WIPE", "SCRUB", "REACH_SIDE", "RELEASE"]],
+  ["추출구 세척", "close", ["ESPRESSO_MACHINE", "SINK"], ["GRASP", "LIFT", "WIPE", "SCRUB", "RINSE", "PLACE", "RELEASE"]],
+  ["포터필터 세척", "close", ["ESPRESSO_MACHINE", "SINK"], ["GRASP", "LIFT", "CARRY", "WASH", "SCRUB", "RINSE", "PLACE", "RELEASE"]],
+  ["그룹헤드 세척", "close", ["ESPRESSO_MACHINE"], ["REACH_FORWARD", "GRASP", "WASH", "SCRUB", "RINSE", "RELEASE"]],
+  ["스팀 노즐 세척", "close", ["ESPRESSO_MACHINE", "SINK"], ["GRASP", "REACH_FORWARD", "WIPE", "SCRUB", "RINSE", "RELEASE"]],
+  ["스팀 노즐 닦기", "close", ["ESPRESSO_MACHINE"], ["GRASP", "REACH_FORWARD", "WIPE", "ROTATE", "RELEASE"]],
+  ["머신 주변 물기 제거", "close", ["ESPRESSO_MACHINE", "DRINK_PREP"], ["GRASP", "REACH_FORWARD", "WIPE", "DRY", "REACH_SIDE", "RELEASE"]],
+  ["그라인더 주변 정리", "close", ["ESPRESSO_MACHINE"], ["GRASP", "REACH_FORWARD", "WIPE", "SCRUB", "PLACE", "RELEASE"]],
+  ["머신 청소 상태 확인", "close", ["ESPRESSO_MACHINE"], ["STAND", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["남은 재료 확인", "close", ["DRINK_PREP", "INGREDIENT_STORAGE"], ["WALK", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["냉장 재료 정리", "close", ["FRIDGE"], ["GRASP", "LIFT", "CARRY", "REACH_FORWARD", "PLACE", "CLOSE", "RELEASE"]],
+  ["원재료 보관", "close", ["DRINK_PREP", "INGREDIENT_STORAGE"], ["GRASP", "LIFT", "CARRY", "WALK", "PLACE", "RELEASE"]],
+  ["재고 상태 확인", "close", ["INGREDIENT_STORAGE"], ["STAND", "REACH_FORWARD", "CHECK", "STATIC_PAUSE"]],
+  ["설거지 마무리", "close", ["SINK"], ["GRASP", "WASH", "SCRUB", "RINSE", "DRY", "PLACE", "RELEASE"]],
+  ["작업대 정리", "close", ["DRINK_PREP"], ["GRASP", "LIFT", "TRANSFER", "WIPE", "PLACE", "RELEASE"]],
+  ["머신 주변 정리", "close", ["ESPRESSO_MACHINE"], ["GRASP", "LIFT", "TRANSFER", "WIPE", "PLACE", "RELEASE"]],
+  ["홀 테이블 정리", "close", ["HALL"], ["WALK", "GRASP", "LIFT", "TRANSFER", "WIPE", "PLACE", "RELEASE"]],
+  ["쓰레기 수거", "close", ["HALL", "WASTE"], ["GRASP", "LIFT", "CARRY", "WALK", "ZONE_TRANSITION", "RELEASE"]],
+  ["분리수거", "close", ["WASTE"], ["BEND_FORWARD", "GRASP", "LIFT", "SORT", "PLACE", "RELEASE"]],
+  ["바닥 상태 확인", "close", ["HALL", "DRINK_PREP"], ["WALK", "BEND_DOWN", "CHECK", "STATIC_PAUSE"]],
+  ["매장 전체 최종 점검", "close", ["ENTRANCE", "POS", "ESPRESSO_MACHINE", "DRINK_PREP", "HALL"], ["WALK", "ZONE_TRANSITION", "TURN_BODY", "CHECK", "STATIC_PAUSE"]],
+  ["출입구 정리", "close", ["ENTRANCE"], ["GRASP", "PUSH", "PULL", "WIPE", "PLACE", "RELEASE"]],
+  ["영업 종료", "close", ["ENTRANCE", "POS"], ["WALK", "REACH_FORWARD", "GRASP", "PRESS", "CLOSE", "RELEASE"]],
+  ["휴게 공간으로 이동", "break", ["REST"], ["WALK", "ZONE_TRANSITION"]],
+  ["앉아서 휴식", "break", ["REST"], ["SIT", "STATIC_PAUSE"]],
+  ["서서 대기", "break", ["REST"], ["STAND", "STATIC_PAUSE"]],
+  ["업무 재개 전 대기", "break", ["REST", "DRINK_PREP"], ["STATIC_PAUSE", "STAND", "WALK", "ZONE_TRANSITION"]],
+];
+
+const CAFE_TASKS = CAFE_TASK_SPECS.map(([label, phase, zones, motions], index) => task(
+  CAFE_TASK_ID_OVERRIDES[label] ?? `CAFE_${phase.toUpperCase()}_${String(index + 1).padStart(3, "0")}`,
+  label,
+  phase,
+  zones,
+  motions,
+  label === "식기 세척" || label === "앉아서 휴식" ? 2 : 1,
+));
+
 export const OCCUPATION_TEMPLATES: OccupationTemplate[] = [
   {
     id: "cafe",
@@ -92,22 +232,15 @@ export const OCCUPATION_TEMPLATES: OccupationTemplate[] = [
       ["SINK", "설거지·세척"], ["SERVING", "픽업·서빙대"], ["HALL", "고객 좌석"],
       ["WASTE", "쓰레기 처리"], ["REST", "휴식"],
     ].map(([id, label]) => ({ id, label })),
-    tasks: [
-      task("MACHINE_SETUP", "머신 준비", "open", ["ESPRESSO_MACHINE"], ["STAND", "REPETITIVE_ARM"]),
-      task("BAR_RESTOCK", "바 재고 보충", "open", ["INGREDIENT_STORAGE", "DRINK_PREP"], ["CARRY", "REACH_FORWARD"]),
-      task("ORDER_ZONE", "주문·결제", "business", ["POS"], ["STAND", "REACH_FORWARD"]),
-      task("FETCH_INGREDIENT", "재료 가져오기", "business", ["FRIDGE", "INGREDIENT_STORAGE", "DRINK_PREP"], ["WALK", "CARRY"]),
-      task("DRINK_PREP_TASK", "음료 제조", "business", ["ESPRESSO_MACHINE", "DRINK_PREP"], ["REPETITIVE_ARM", "REACH_FORWARD"]),
-      task("SERVE_ORDER", "음료 전달", "business", ["SERVING", "HALL"], ["CARRY", "WALK"]),
-      task("CLEAR_TABLE", "테이블 정리", "business", ["HALL"], ["BEND_FORWARD", "CARRY"]),
-      task("DISHWASH", "설거지", "business", ["SINK"], ["REPETITIVE_ARM", "BEND_FORWARD"], 2),
-      task("MACHINE_CLEAN", "머신 청소", "close", ["ESPRESSO_MACHINE", "SINK"], ["REPETITIVE_ARM", "BEND_FORWARD"]),
-      task("CLOSING_ROUTINE", "카페 마감", "close", ["SINK", "INGREDIENT_STORAGE", "HALL", "WASTE", "ENTRANCE"], ["ZONE_TRANSITION", "CARRY"]),
-      task("REST", "휴식", "break", ["REST"], ["SIT", "STATIC_PAUSE"], 2),
-    ],
+    tasks: CAFE_TASKS,
     sequences: [
-      { id: "CAFE_ORDER_LOOP", label: "주문 처리 루프", phases: ["business"], zones: ["POS", "FRIDGE", "DRINK_PREP", "SERVING", "HALL", "DRINK_PREP"] },
-      { id: "CAFE_CLOSE", label: "카페 마감 루틴", phases: ["close"], zones: ["SINK", "INGREDIENT_STORAGE", "HALL", "WASTE", "ENTRANCE"] },
+      { id: "CAFE_OPEN", label: "카페 오픈 루틴", phases: ["open"], zones: ["ENTRANCE", "POS", "INGREDIENT_STORAGE", "FRIDGE", "DRINK_PREP", "ESPRESSO_MACHINE", "HALL"] },
+      { id: "CAFE_ORDER_LOOP", label: "주문 처리 루프", phases: ["business"], zones: ["POS", "FRIDGE", "INGREDIENT_STORAGE", "DRINK_PREP", "ESPRESSO_MACHINE", "SERVING", "HALL"] },
+      { id: "CAFE_DRINK_PREP", label: "음료 제조 루틴", phases: ["business"], zones: ["POS", "DRINK_PREP", "ESPRESSO_MACHINE", "FRIDGE", "SERVING"] },
+      { id: "CAFE_TABLE_RESET", label: "테이블 정리 루틴", phases: ["business"], zones: ["HALL", "WASTE", "SINK", "DRINK_PREP"] },
+      { id: "CAFE_DISHWASH", label: "설거지 루틴", phases: ["business"], zones: ["HALL", "SINK", "DRINK_PREP"] },
+      { id: "CAFE_MACHINE_CLEAN", label: "머신 청소 루틴", phases: ["close"], zones: ["ESPRESSO_MACHINE", "SINK", "DRINK_PREP"] },
+      { id: "CAFE_CLOSE", label: "카페 마감 루틴", phases: ["close"], zones: ["SINK", "INGREDIENT_STORAGE", "FRIDGE", "DRINK_PREP", "ESPRESSO_MACHINE", "HALL", "WASTE", "ENTRANCE"] },
     ],
   },
   {
@@ -243,6 +376,36 @@ export const OCCUPATION_TEMPLATES: OccupationTemplate[] = [
 
 export function getOccupationTemplate(id: OccupationId): OccupationTemplate {
   return OCCUPATION_TEMPLATES.find((item) => item.id === id) ?? OCCUPATION_TEMPLATES[0];
+}
+
+const OCCUPATION_NAME_HINTS: Array<[RegExp, OccupationId]> = [
+  [/카페|커피|음료|디저트|베이커리|제과|빵집|coffee|cafe|bakery/i, "cafe"],
+  [/미용|헤어|살롱|이발|바버|네일|뷰티|피부|hair|salon|barber|nail/i, "hair_salon"],
+  [/식당|음식|요리|주방|분식|한식|중식|일식|밥집|덮밥|국밥|치킨|피자|레스토랑|술집|포차|restaurant|kitchen/i, "restaurant"],
+  [/공방|클래스|작업실|도예|공예|꽃집|플라워|스튜디오|수리|제작|workshop|studio/i, "workshop"],
+  [/편의점|마트|슈퍼|잡화|소매|무인점|convenience|mart|retail/i, "convenience_store"],
+  [/옷|의류|패션|부티크|쇼핑몰|clothing|fashion|boutique/i, "clothing_store"],
+];
+
+export type OccupationContextInference = {
+  template: OccupationTemplate;
+  matched: boolean;
+};
+
+/** Maps a user-entered business name to the closest built-in local context. */
+export function inferOccupationContext(label: string): OccupationContextInference {
+  const normalized = label.trim().replace(/\s|[·\-_]/g, "");
+  const direct = OCCUPATION_TEMPLATES.find((template) => {
+    const templateLabel = template.label.replace(/\s|[·\-_]/g, "");
+    return normalized.includes(templateLabel) || templateLabel.includes(normalized);
+  });
+  if (direct && normalized) return { template: direct, matched: true };
+
+  const hintedId = OCCUPATION_NAME_HINTS.find(([pattern]) => pattern.test(normalized))?.[1];
+  return {
+    template: getOccupationTemplate(hintedId ?? "cafe"),
+    matched: Boolean(hintedId),
+  };
 }
 
 const ZONE_NAME_HINTS: Array<[RegExp, string[]]> = [

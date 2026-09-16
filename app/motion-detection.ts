@@ -2,13 +2,11 @@
 // sequence of positions over time, from either a real recorded camera
 // session or a procedurally generated demo clip), decides whether it
 // contains a "마감 반복 확인" (went somewhere and came back, twice), a
-// "미세 지연" (a stall in the middle of an otherwise-moving task), and/or a
-// "안전 알림" (a sharp, reactive burst) - purely from the coordinates
-// themselves, no label or intended category given as input.
+// "미세 지연" (a stall in the middle of an otherwise-moving task) purely
+// from the coordinates themselves, no label or intended category given as input.
 //
-// This is the piece that was missing before: safetyAlerts/doubleChecks/
-// microDelaySeconds used to only come from UI button clicks and timers
-// (recordDoubleCheck/recordSafetyAlert/task timers in page.tsx), with the
+// This is the piece that was missing before: doubleChecks and
+// microDelaySeconds used to only come from UI actions and task timers, with the
 // camera's variability/smoothness numbers shown as a disconnected FYI stat.
 // This module makes the skeleton motion itself a real input to those counts
 // - see recordMotionDetections() in page.tsx, which runs this on a finished
@@ -27,7 +25,7 @@ export type MotionSample = {
 };
 
 export type DetectedMotionEvent = {
-  type: "double_check" | "micro_delay" | "safety_alert";
+  type: "double_check" | "micro_delay";
   startMs: number;
   endMs: number;
   /** Plain-language, numbers-included explanation of what was actually measured. */
@@ -51,16 +49,6 @@ export const FREEZE_SPEED_THRESHOLD = 0.01; // units/sec
 export const MOTION_PRESENCE_THRESHOLD = 0.02; // units/sec (speed) / units (distance)
 /** A still run shorter than this isn't a meaningful pause - could just be noise. */
 export const FREEZE_MIN_DURATION_MS = 1000;
-/**
- * Peak jerk (rate of change of speed, i.e. acceleration - units/sec^2) at/
- * above this = a sharp reactive motion. Deliberately normalized by time
- * (not just "speed delta between two consecutive samples") so this stays
- * correct no matter how finely spaced the samples are - a real camera
- * session and a synthetic demo clip can be sampled at different rates
- * without one becoming artificially harder or easier to flag.
- */
-export const SAFETY_JERK_THRESHOLD = 18;
-
 /**
  * How far (in the same normalized-coordinate units) the hand has to get
  * from where the clip started to count as "went to do something", for
@@ -203,33 +191,6 @@ function detectDoubleCheck(samples: MotionSample[]): DetectedMotionEvent[] {
   ];
 }
 
-function detectSafetyAlert(steps: Step[]): DetectedMotionEvent[] {
-  let peakJerk = 0;
-  let peakIndex = -1;
-  for (let i = 1; i < steps.length; i += 1) {
-    // dt between the MIDPOINTS of two consecutive steps - true acceleration
-    // (speed change per second), not a raw per-sample delta, so this reads
-    // the same whether samples are 200ms apart (real camera) or much finer
-    // (a smooth-playback synthetic clip).
-    const dtSec = ((steps[i].startMs + steps[i].endMs) / 2 - (steps[i - 1].startMs + steps[i - 1].endMs) / 2) / 1000;
-    if (dtSec <= 0) continue;
-    const jerk = Math.abs(steps[i].speed - steps[i - 1].speed) / dtSec;
-    if (jerk > peakJerk) {
-      peakJerk = jerk;
-      peakIndex = i;
-    }
-  }
-  if (peakIndex < 0 || peakJerk < SAFETY_JERK_THRESHOLD) return [];
-  return [
-    {
-      type: "safety_alert",
-      startMs: steps[Math.max(0, peakIndex - 1)].startMs,
-      endMs: steps[peakIndex].endMs,
-      evidence: `속도가 급격히 변하는 반응성 동작(저크 ${peakJerk.toFixed(2)})이 감지됐어요 (기준: ${SAFETY_JERK_THRESHOLD.toFixed(2)} 이상).`,
-    },
-  ];
-}
-
 /**
  * Analyzes a hand trajectory and returns every motion pattern it actually
  * contains - a clip can contain more than one (or none). Detection is
@@ -251,7 +212,7 @@ export function detectMotionEvents(samples: MotionSample[]): DetectedMotionEvent
       !doubleChecks.some((check) => delay.startMs >= check.startMs && delay.endMs <= check.endMs),
   );
 
-  return [...detectSafetyAlert(steps), ...doubleChecks, ...microDelaysNotExplainedByDoubleCheck];
+  return [...doubleChecks, ...microDelaysNotExplainedByDoubleCheck];
 }
 
 /**

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateEventMotion, DEMO_MOTION_LABELS, DEMO_SAMPLE_RATE, type DemoMotionType } from "../app/demo-motion.ts";
 import { parseSessionFrame } from "../app/pose-store.ts";
-import { computeHandMotionVariability, computeMovementSmoothness, type Point3D } from "../app/motion-analysis.ts";
+import { computeHandMotionVariability, type Point3D } from "../app/motion-analysis.ts";
 
 // These synthetic clips are what a developer sees when replaying a demo
 // persona's flagged event ("마감 반복 확인", "미세 지연", ...). The point of
@@ -13,7 +13,6 @@ import { computeHandMotionVariability, computeMovementSmoothness, type Point3D }
 const ALL_TYPES: DemoMotionType[] = [
   "double_check",
   "micro_delay",
-  "safety_alert",
   "normal_task",
   "fine_hand_task",
   "register_tap",
@@ -65,8 +64,8 @@ test("generateEventMotion: parses cleanly and both hands are marked detected", (
 });
 
 test("generateEventMotion: deterministic - same type+seed always returns the same clip", () => {
-  const a = generateEventMotion("safety_alert", 3);
-  const b = generateEventMotion("safety_alert", 3);
+  const a = generateEventMotion("normal_task", 3);
+  const b = generateEventMotion("normal_task", 3);
   assert.deepEqual(a, b);
 });
 
@@ -118,19 +117,6 @@ test("micro_delay motion: freezes in the middle, moves before and after", () => 
   assert.ok(frozenVariability < 1e-6, `expected ~0 variability during the freeze, got ${frozenVariability}`);
   assert.ok(rampUpVariability > 0, "expected motion before the freeze");
   assert.ok(rampDownVariability > 0, "expected motion after the freeze resumes");
-});
-
-// -- safety_alert: fast/jerky vs a steady baseline task -------------------
-
-test("safety_alert motion: jerkier (less smooth) than a routine task", () => {
-  const alertPoints = rightWristPoints(generateEventMotion("safety_alert", 0));
-  const taskPoints = rightWristPoints(generateEventMotion("normal_task", 0));
-  const alertSmoothness = computeMovementSmoothness(alertPoints)!;
-  const taskSmoothness = computeMovementSmoothness(taskPoints)!;
-  assert.ok(
-    alertSmoothness > taskSmoothness,
-    `expected a reactive safety-alert motion (${alertSmoothness}) to be jerkier than a routine task (${taskSmoothness})`,
-  );
 });
 
 // -- register_tap: a repeated-tap burst that stalls mid-sequence ----------

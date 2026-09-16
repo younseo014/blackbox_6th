@@ -241,5 +241,764 @@
         "accessCount": 0
       }
     ]
+  },
+  {
+    "timestamp": 1789030569246,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.55
+    ],
+    "accessCounts": [
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.55,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 1
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.55,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 1
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.55,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 1
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.55,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 1
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.55,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 1
+      }
+    ]
+  },
+  {
+    "timestamp": 1789088675442,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.495,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.5,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.5,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.495,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789159040559,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.495,
+      0.495,
+      0.495,
+      0.495,
+      0.495
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.495,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.495,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.495,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.495,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.495,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789334208657,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.48,
+      0.48,
+      0.48,
+      0.48,
+      0.48
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.48,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.48,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.48,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.48,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.48,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789335466297,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.485,
+      0.485,
+      0.485,
+      0.485,
+      0.485
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.485,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789344527887,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.485,
+      0.485,
+      0.485,
+      0.485,
+      0.485
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.485,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789344697422,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.485,
+      0.485,
+      0.485,
+      0.485,
+      0.485
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.485,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789344772325,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.485,
+      0.485,
+      0.485,
+      0.485,
+      0.485
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.485,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789345016627,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.485,
+      0.485,
+      0.485,
+      0.485,
+      0.485
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.485,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789345133009,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.485,
+      0.485,
+      0.485,
+      0.485,
+      0.485
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.485,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.485,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789345166571,
+    "nodes": 5,
+    "edges": 6,
+    "pageRankSum": 1.0000000000000002,
+    "confidences": [
+      0.47,
+      0.47,
+      0.47,
+      0.47,
+      0.47
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.47,
+        "pageRank": 0.39824362344420194,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.47,
+        "pageRank": 0.21526686907457687,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.47,
+        "pageRank": 0.15106444983988296,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.47,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.47,
+        "pageRank": 0.11771252882066918,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789350752485,
+    "nodes": 6,
+    "edges": 10,
+    "pageRankSum": 1,
+    "confidences": [
+      0.48,
+      0.485,
+      0.485,
+      0.485,
+      0.485,
+      0.5
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789350752483-0vng",
+        "summary": "Frequently edited: DESIGN.md (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.3699593019001777,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.19997804345602838,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.485,
+        "pageRank": 0.14033546603447106,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.485,
+        "pageRank": 0.10935229648623004,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.485,
+        "pageRank": 0.0901874460615465,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.48,
+        "pageRank": 0.0901874460615465,
+        "accessCount": 0
+      }
+    ]
+  },
+  {
+    "timestamp": 1789351070395,
+    "nodes": 6,
+    "edges": 10,
+    "pageRankSum": 1,
+    "confidences": [
+      0.45999999999999996,
+      0.47,
+      0.47,
+      0.47,
+      0.47,
+      0.5
+    ],
+    "accessCounts": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789350752483-0vng",
+        "summary": "Frequently edited: DESIGN.md (3x)",
+        "confidence": 0.5,
+        "pageRank": 0.3699593019001777,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.47,
+        "pageRank": 0.19997804345602838,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.47,
+        "pageRank": 0.14033546603447106,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.47,
+        "pageRank": 0.10935229648623004,
+        "accessCount": 0
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.47,
+        "pageRank": 0.0901874460615465,
+        "accessCount": 0
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.45999999999999996,
+        "pageRank": 0.0901874460615465,
+        "accessCount": 0
+      }
+    ]
   }
 ]

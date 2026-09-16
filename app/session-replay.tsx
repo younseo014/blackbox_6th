@@ -161,11 +161,6 @@ export function SessionReplayPanel({
     () => cameraStreams.length > 1 ? analyzeCameraContinuity(cameraStreams) : null,
     [cameraStreams],
   );
-  const continuityDurationMs = useMemo(() => Math.max(
-    1,
-    ...cameraStreams.flatMap((stream) => stream.frames.map((frame) => frame[0] ?? 0)),
-  ), [cameraStreams]);
-
   function selectCamera(slot: CameraSlot) {
     const stream = cameraStreams.find((item) => item.cameraSlot === slot);
     if (!stream) return;
@@ -346,11 +341,8 @@ export function SessionReplayPanel({
                 <div className="continuity-track-row" key={stream.cameraSlot}>
                   <span>카메라 {stream.cameraSlot}</span>
                   <div>
-                    {cameraPresenceSegments(stream.frames).map((segment, index) => (
-                      <i key={index} style={{
-                        left: `${segment.startMs / continuityDurationMs * 100}%`,
-                        width: `${Math.max(1, (segment.endMs - segment.startMs + 100) / continuityDurationMs * 100)}%`,
-                      }} />
+                    {cameraPresenceSegments(stream.frames).map((_, index) => (
+                      <i key={index} />
                     ))}
                   </div>
                 </div>

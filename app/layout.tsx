@@ -1,14 +1,9 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import "./globals.css";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? "https";
-  const origin = host ? `${protocol}://${host}` : "http://localhost:3000";
+export function generateMetadata(): Metadata {
   const description =
-    "40~60대 1인 사업자를 위한 매장 건강·안전 스마트 케어 시스템";
+    "1인 사업자의 업무 흐름을 기록하고 비교하는 로컬 관찰 도구";
 
   return {
     title: "메모리 가드 | 매장 안전 스마트 케어",
@@ -16,15 +11,13 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: "메모리 가드",
       description,
-      images: [{ url: `${origin}/og.png`, width: 1672, height: 941 }],
       locale: "ko_KR",
       type: "website",
     },
     twitter: {
-      card: "summary_large_image",
+      card: "summary",
       title: "메모리 가드",
       description,
-      images: [`${origin}/og.png`],
     },
   };
 }

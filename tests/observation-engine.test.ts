@@ -9,7 +9,7 @@ import {
   safeZScore,
   type ObservationEpisode,
 } from "../app/observation-engine.ts";
-import { OCCUPATION_TEMPLATES, getOccupationTemplate, inferZoneContext } from "../app/occupation-templates.ts";
+import { OCCUPATION_TEMPLATES, getOccupationTemplate, inferOccupationContext, inferZoneContext } from "../app/occupation-templates.ts";
 
 test("occupation templates: all six requested occupations have zones, tasks and sequences", () => {
   assert.deepEqual(
@@ -23,12 +23,44 @@ test("occupation templates: all six requested occupations have zones, tasks and 
   }
 });
 
+test("cafe context includes the expanded teammate dataset and valid references", () => {
+  const cafe = getOccupationTemplate("cafe");
+  const zoneIds = new Set(cafe.zones.map((zone) => zone.id));
+  assert.equal(cafe.tasks.length, 98);
+  assert.equal(new Set(cafe.tasks.map((task) => task.id)).size, cafe.tasks.length);
+  assert.equal(cafe.sequences.length, 7);
+  assert.ok(cafe.tasks.some((task) => task.label === "포터필터 장착" && task.motions.includes("ROTATE")));
+  assert.ok(cafe.tasks.some((task) => task.label === "스팀 노즐 세척" && task.motions.includes("RINSE")));
+  assert.ok(cafe.sequences.some((sequence) => sequence.label === "음료 제조 루틴"));
+  for (const task of cafe.tasks) {
+    assert.ok(task.zones.every((zone) => zoneIds.has(zone)), `${task.label} has an unknown zone`);
+  }
+  for (const sequence of cafe.sequences) {
+    assert.ok(sequence.zones.every((zone) => zoneIds.has(zone)), `${sequence.label} has an unknown zone`);
+  }
+});
+
 test("custom zone names inherit the closest occupation context", () => {
   const cafe = getOccupationTemplate("cafe");
   assert.equal(inferZoneContext(cafe, "테라스 좌석")?.id, "HALL");
   assert.equal(inferZoneContext(cafe, "포스 옆")?.id, "POS");
   assert.equal(inferZoneContext(cafe, "포장대")?.id, "SERVING");
   assert.equal(inferZoneContext(cafe, "반려견 공간"), null);
+});
+
+test("free-form occupation names map to the closest local work context", () => {
+  assert.equal(inferOccupationContext("디저트 카페").template.id, "cafe");
+  assert.equal(inferOccupationContext("1인 네일숍").template.id, "hair_salon");
+  assert.equal(inferOccupationContext("작은 꽃 공방").template.id, "workshop");
+  assert.equal(inferOccupationContext("여성 의류 부티크").template.id, "clothing_store");
+  assert.equal(inferOccupationContext("동네 슈퍼마켓").template.id, "convenience_store");
+  assert.equal(inferOccupationContext("수제 덮밥집").template.id, "restaurant");
+});
+
+test("unknown occupation names fall back locally without pretending to be an exact match", () => {
+  const inferred = inferOccupationContext("새로운 형태의 매장");
+  assert.equal(inferred.matched, false);
+  assert.equal(inferred.template.id, "cafe");
 });
 
 test("safeZScore: uses personal mean and SD and defers when SD is too small", () => {

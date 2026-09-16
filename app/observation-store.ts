@@ -1,8 +1,6 @@
 import {
   DEFAULT_PROFILE,
-  buildBaseline,
   type AnalysisFeedback,
-  type BaselineSnapshot,
   type ObservationEpisode,
   type ObservationProfile,
 } from "./observation-engine";
@@ -90,17 +88,6 @@ export async function saveObservationEpisode(episode: ObservationEpisode) {
   return episode;
 }
 
-export async function saveObservationEpisodes(episodes: ObservationEpisode[]) {
-  if (episodes.length === 0) return episodes;
-  const database = await openObservationDatabase();
-  const transaction = database.transaction(EPISODE_STORE, "readwrite");
-  const store = transaction.objectStore(EPISODE_STORE);
-  episodes.forEach((episode) => store.put(episode));
-  await transactionDone(transaction);
-  database.close();
-  return episodes;
-}
-
 export async function listObservationEpisodes(limit = 200): Promise<ObservationEpisode[]> {
   const database = await openObservationDatabase();
   const transaction = database.transaction(EPISODE_STORE, "readonly");
@@ -110,11 +97,6 @@ export async function listObservationEpisodes(limit = 200): Promise<ObservationE
   await transactionDone(transaction);
   database.close();
   return episodes.sort((a, b) => b.recordedAt - a.recordedAt).slice(0, limit);
-}
-
-export async function getObservationBaseline(version = 1): Promise<BaselineSnapshot> {
-  const episodes = await listObservationEpisodes(500);
-  return buildBaseline(episodes, version);
 }
 
 export async function saveAnalysisFeedback(feedback: AnalysisFeedback) {
@@ -137,17 +119,6 @@ export async function saveAnalysisFeedback(feedback: AnalysisFeedback) {
   await transactionDone(transaction);
   database.close();
   return feedback;
-}
-
-export async function getFeedbackForEvent(eventId: string): Promise<AnalysisFeedback | null> {
-  const database = await openObservationDatabase();
-  const transaction = database.transaction(FEEDBACK_STORE, "readonly");
-  const records = await requestResult<AnalysisFeedback[]>(
-    transaction.objectStore(FEEDBACK_STORE).index("eventId").getAll(eventId),
-  );
-  await transactionDone(transaction);
-  database.close();
-  return records.sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
 }
 
 export async function deleteAllObservationData() {

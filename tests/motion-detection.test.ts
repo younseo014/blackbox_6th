@@ -95,26 +95,6 @@ test("detectMotionEvents: going away once and staying there is NOT a double_chec
   assert.equal(events.filter((e) => e.type === "double_check").length, 0);
 });
 
-test("detectMotionEvents: a sharp jerk above the safety threshold is flagged", () => {
-  // A slow drift, then one huge single-step jump, then slow drift again -
-  // a large, sudden change in speed (jerk), not a gradual acceleration.
-  const points: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i < 5; i += 1) points.push({ x: 0.5 + i * 0.001, y: 0.5 });
-  points.push({ x: 1.3, y: 1.3 }); // sudden large jump
-  for (let i = 0; i < 5; i += 1) points.push({ x: 1.3 + i * 0.001, y: 1.3 });
-  const events = detectMotionEvents(samplesFrom(points));
-  assert.ok(events.some((e) => e.type === "safety_alert"));
-});
-
-test("detectMotionEvents: gentle continuous motion stays under the safety jerk threshold", () => {
-  const points: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i < 30; i += 1) {
-    points.push({ x: 0.5 + Math.sin(i * 0.2) * 0.02, y: 0.5 });
-  }
-  const events = detectMotionEvents(samplesFrom(points));
-  assert.equal(events.filter((e) => e.type === "safety_alert").length, 0);
-});
-
 test("motionSamplesFromRawFrames + detectMotionEvents: null (undetected) frames don't crash the detector", () => {
   // Sparse detection shouldn't throw - just skip the gaps.
   const raw: number[][] = [];
@@ -140,7 +120,6 @@ test("motionSamplesFromRawFrames + detectMotionEvents: null (undetected) frames 
 const EXPECTED_TYPES: Record<DemoMotionType, string[]> = {
   double_check: ["double_check"],
   micro_delay: ["micro_delay"],
-  safety_alert: ["safety_alert"],
   register_tap: ["micro_delay"],
   normal_task: [],
   fine_hand_task: [],

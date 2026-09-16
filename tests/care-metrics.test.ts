@@ -5,6 +5,7 @@ import {
   summarizeLog,
   computeBaseline,
   detectChangeSignal,
+  shouldShowCognitiveSupport,
   type DailyLog,
 } from "../app/care-metrics.ts";
 
@@ -49,27 +50,27 @@ test("computeBaseline: null until there are at least 3 days of history", () => {
 
 test("computeBaseline: averages quiet/normal days once there are 3+", () => {
   const logs = [
-    log(dateNDaysAgo(1), { safetyAlerts: 0 }),
-    log(dateNDaysAgo(2), { safetyAlerts: 2 }),
-    log(dateNDaysAgo(3), { safetyAlerts: 1 }),
+    log(dateNDaysAgo(1), { doubleChecks: 0 }),
+    log(dateNDaysAgo(2), { doubleChecks: 2 }),
+    log(dateNDaysAgo(3), { doubleChecks: 1 }),
   ];
   const baseline = computeBaseline(logs);
   assert.ok(baseline);
-  assert.equal(baseline!.safetyAlerts, 1);
+  assert.equal(baseline!.doubleChecks, 1);
 });
 
 // -- Persona 4: busy-day confound ------------------------------------------
 
 test("computeBaseline: excludes 'busy' days by default so a hectic Saturday doesn't skew the baseline", () => {
   const logs = [
-    log(dateNDaysAgo(1), { safetyAlerts: 0, busyLevel: "normal" }),
-    log(dateNDaysAgo(2), { safetyAlerts: 0, busyLevel: "normal" }),
-    log(dateNDaysAgo(3), { safetyAlerts: 0, busyLevel: "normal" }),
-    log(dateNDaysAgo(4), { safetyAlerts: 5, busyLevel: "busy" }), // outlier, busy day
+    log(dateNDaysAgo(1), { doubleChecks: 0, busyLevel: "normal" }),
+    log(dateNDaysAgo(2), { doubleChecks: 0, busyLevel: "normal" }),
+    log(dateNDaysAgo(3), { doubleChecks: 0, busyLevel: "normal" }),
+    log(dateNDaysAgo(4), { doubleChecks: 5, busyLevel: "busy" }), // outlier, busy day
   ];
   const baseline = computeBaseline(logs);
   assert.ok(baseline);
-  assert.equal(baseline!.safetyAlerts, 0, "busy day should be excluded from the baseline");
+  assert.equal(baseline!.doubleChecks, 0, "busy day should be excluded from the baseline");
 });
 
 test("detectChangeSignal: flags a confound note when most recent days were busy", () => {
@@ -152,12 +153,46 @@ test("detectChangeSignal: 'notable' when several indicators rise together (synth
 
 test("detectChangeSignal: never returns a diagnostic label, only soft levels", () => {
   const baseline = computeBaseline(
-    Array.from({ length: 5 }, (_, i) => log(dateNDaysAgo(i + 1), { safetyAlerts: 5 })),
+    Array.from({ length: 5 }, (_, i) => log(dateNDaysAgo(i + 1), { doubleChecks: 5 })),
   );
-  const recent = [log(dateNDaysAgo(1), { safetyAlerts: 9 })];
+  const recent = [log(dateNDaysAgo(1), { doubleChecks: 9 })];
   const signal = detectChangeSignal(recent, baseline);
   assert.ok(["none", "watch", "notable"].includes(signal.level));
   for (const reason of signal.reasons) {
     assert.doesNotMatch(reason, /치매|진단|질환/);
   }
+});
+
+test("shouldShowCognitiveSupport: stays hidden for ordinary or insufficient change reports", () => {
+  const baselineLogs = Array.from({ length: 4 }, (_, index) =>
+    log(dateNDaysAgo(index + 10), { doubleChecks: 0, tasksStarted: 4, tasksCompleted: 4 }),
+  );
+  const baseline = computeBaseline(baselineLogs);
+  assert.ok(baseline);
+  const recent = [
+    log(dateNDaysAgo(1), { doubleChecks: 2, tasksStarted: 4, tasksCompleted: 1, microDelaySeconds: [180] }),
+  ];
+  const signal = detectChangeSignal(recent, baseline);
+  assert.equal(signal.level, "notable");
+  assert.equal(shouldShowCognitiveSupport(signal, recent, baseline), false);
+});
+
+test("shouldShowCognitiveSupport: appears only for a sustained notable report without a busy-day confound", () => {
+  const baselineLogs = Array.from({ length: 4 }, (_, index) =>
+    log(dateNDaysAgo(index + 10), { doubleChecks: 0, tasksStarted: 4, tasksCompleted: 4 }),
+  );
+  const baseline = computeBaseline(baselineLogs);
+  assert.ok(baseline);
+  const recent = [
+    log(dateNDaysAgo(1), { doubleChecks: 2, tasksStarted: 4, tasksCompleted: 1, microDelaySeconds: [180] }),
+    log(dateNDaysAgo(2), { doubleChecks: 2, tasksStarted: 4, tasksCompleted: 2, microDelaySeconds: [160] }),
+  ];
+  const signal = detectChangeSignal(recent, baseline);
+  assert.equal(signal.level, "notable");
+  assert.equal(shouldShowCognitiveSupport(signal, recent, baseline), true);
+
+  const busyRecent = recent.map((entry) => ({ ...entry, busyLevel: "busy" as const }));
+  const busySignal = detectChangeSignal(busyRecent, baseline);
+  assert.ok(busySignal.confoundNote);
+  assert.equal(shouldShowCognitiveSupport(busySignal, busyRecent, baseline), false);
 });

@@ -1,7 +1,6 @@
 // Browser-local persistence for the care/observation metrics and for the
-// user's consent choice. Mirrors the pattern already used in pose-store.ts
-// (IndexedDB, local-only, nothing sent off the device unless the optional
-// server sync in app/api/metrics/route.ts is explicitly enabled and used).
+// user's consent choice. Mirrors the IndexedDB-only pattern in pose-store.ts;
+// nothing is sent off the device.
 import {
   type BusyLevel,
   type DailyLog,
@@ -80,10 +79,6 @@ async function updateToday(mutate: (log: DailyLog) => DailyLog): Promise<DailyLo
   return next;
 }
 
-export async function recordSafetyAlert(): Promise<DailyLog> {
-  return updateToday((log) => ({ ...log, safetyAlerts: log.safetyAlerts + 1 }));
-}
-
 export async function recordDoubleCheck(): Promise<DailyLog> {
   return updateToday((log) => ({ ...log, doubleChecks: log.doubleChecks + 1 }));
 }
@@ -127,7 +122,7 @@ export async function deleteAllCareLogs(): Promise<void> {
 
 // --- Consent -----------------------------------------------------------
 // Two things are always true regardless of consent:
-//  1. Store-safety features (타임라인, 스마트 마감) work with no consent at all.
+//  1. Manual records and checklists work with no consent at all.
 //  2. Camera-based long-term observation (오늘 탭의 좌표 기록, 케어 기록의 실제
 //     지표 계산) only turns on after an explicit, revocable opt-in.
 

@@ -143,13 +143,6 @@ test("페르소나: 카메라 권한 거부 - 에러 메시지가 뜨고 다른 
       .getByRole("button", { name: "확인 완료", exact: true })
       .click();
 
-    // Store-safety features must keep working with no camera at all.
-    await page.getByRole("button", { name: "스마트 마감", exact: false }).first().click();
-    await assert.doesNotReject(
-      page.getByRole("button", { name: "퇴근 전 자동 점검", exact: true }).waitFor(),
-      "스마트 마감 should stay usable without a camera",
-    );
-
     await page.getByRole("button", { name: "케어 기록", exact: false }).first().click();
     await assert.doesNotReject(
       page.getByText("가상 페르소나의 일주일 관찰 결과").waitFor(),
@@ -158,14 +151,14 @@ test("페르소나: 카메라 권한 거부 - 에러 메시지가 뜨고 다른 
   });
 });
 
-// --- Persona: 관찰에 동의하지 않고 매장 안전 기능만 쓰는 사용자 -------
+// --- Persona: 관찰에 동의하지 않고 수동 기능만 쓰는 사용자 -------
 
 test("페르소나: 관찰 비동의 - 카메라는 꺼진 채로 남고 케어 리포트는 참여 유도 상태를 보여준다", async () => {
   await withPage({}, async (page) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
 
     await openDeveloperCamera(page);
-    await page.getByRole("button", { name: "매장 안전 기능만 사용할게요", exact: true }).click();
+    await page.getByRole("button", { name: "장기 관찰 없이 사용할게요", exact: true }).click();
     await page.waitForTimeout(500);
 
     await assert.doesNotReject(
@@ -179,46 +172,6 @@ test("페르소나: 관찰 비동의 - 카메라는 꺼진 채로 남고 케어 
       page.getByText("아직 장기 관찰에 참여하고 있지 않아요").waitFor(),
       "declining observation consent should show the opt-in empty state, not fabricated numbers",
     );
-  });
-});
-
-// --- Persona: 아주 바쁜 성수기 매장, 마감 반복 확인 (혼란 변수 인지) ---
-
-test("페르소나: 바쁜 날 첫 사용 - 기준 데이터가 없을 땐 비교 없이 안내만 하고, 안전/반복확인 지표는 실제 조작대로 기록된다", async () => {
-  await withPage({}, async (page, context) => {
-    await context.grantPermissions(["camera"], { origin: BASE_URL });
-    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-    await acceptObservationConsent(page);
-
-    await page.getByRole("button", { name: "스마트 마감", exact: false }).first().click();
-    await page.getByRole("button", { name: "바쁨", exact: true }).click();
-    await page.getByRole("button", { name: "퇴근 전 자동 점검", exact: true }).click();
-    await page.waitForTimeout(2200);
-    const heaterOff = page.getByRole("button", { name: "전원 끄기", exact: true });
-    if (await heaterOff.count()) await heaterOff.click();
-    await page.getByRole("button", { name: "퇴근 전 자동 점검", exact: true }).click();
-    await page.waitForTimeout(2200);
-    // Re-run once more while already done today -> counts as a double-check.
-    await page.getByRole("button", { name: "마감 완료 · 다시 확인하기", exact: true }).click();
-    await page.waitForTimeout(2200);
-
-    await page.getByRole("button", { name: "케어 기록", exact: false }).first().click();
-    await page.locator(".demo-switcher button").click();
-    await page.waitForTimeout(500);
-
-    // On day one there isn't enough history for a fair personal baseline
-    // yet, so the app should say so plainly instead of fabricating a
-    // "평소보다 늘었어요" comparison against nothing.
-    await assert.doesNotReject(
-      page.getByText("아직 평소 기준을 만들 만큼", { exact: false }).waitFor({ timeout: 8000 }),
-      "expected the 'not enough baseline yet' notice on a fresh profile",
-    );
-
-    const metricCards = page.locator(".metric-card strong");
-    const safetyAlerts = Number.parseInt((await metricCards.nth(0).innerText()).trim(), 10);
-    const doubleChecks = Number.parseInt((await metricCards.nth(1).innerText()).trim(), 10);
-    assert.ok(safetyAlerts >= 1, `expected at least 1 recorded safety alert, got ${safetyAlerts}`);
-    assert.ok(doubleChecks >= 1, `expected at least 1 recorded double-check, got ${doubleChecks}`);
   });
 });
 

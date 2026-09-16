@@ -1,43 +1,50 @@
 {
   "version": 1,
-  "updatedAt": 1789016484401,
-  "nodeCount": 5,
-  "contentFingerprint": "ab59f861_a05f4b66_257",
+  "updatedAt": 1789351070394,
+  "nodeCount": 6,
+  "contentFingerprint": "836223a8_9875b469_306",
   "nodes": {
     "mem-feedback_functional_scope_only-----0": {
       "id": "mem-feedback_functional_scope_only-----0",
       "category": "feedback_functional_scope_only",
-      "confidence": 0.5,
+      "confidence": 0.45999999999999996,
       "accessCount": 0,
       "createdAt": 1789001111677
     },
     "insight-1789006052149-bns2": {
       "id": "insight-1789006052149-bns2",
       "category": "insights",
-      "confidence": 0.5,
+      "confidence": 0.47,
       "accessCount": 0,
       "createdAt": 1789006052149
     },
     "insight-1789006052149-d1yv": {
       "id": "insight-1789006052149-d1yv",
       "category": "insights",
-      "confidence": 0.5,
+      "confidence": 0.47,
       "accessCount": 0,
       "createdAt": 1789006052149
     },
     "insight-1789006052149-x69i": {
       "id": "insight-1789006052149-x69i",
       "category": "insights",
-      "confidence": 0.5,
+      "confidence": 0.47,
       "accessCount": 0,
       "createdAt": 1789006052149
     },
     "insight-1789016484400-iqbl": {
       "id": "insight-1789016484400-iqbl",
       "category": "insights",
-      "confidence": 0.5,
+      "confidence": 0.47,
       "accessCount": 0,
       "createdAt": 1789016484400
+    },
+    "insight-1789350752483-0vng": {
+      "id": "insight-1789350752483-0vng",
+      "category": "insights",
+      "confidence": 0.5,
+      "accessCount": 0,
+      "createdAt": 1789350752483
     }
   },
   "edges": [
@@ -60,6 +67,12 @@
       "weight": 0.8636363636363636
     },
     {
+      "sourceId": "insight-1789006052149-bns2",
+      "targetId": "insight-1789350752483-0vng",
+      "type": "similar",
+      "weight": 0.8888888888888888
+    },
+    {
       "sourceId": "insight-1789006052149-d1yv",
       "targetId": "insight-1789006052149-x69i",
       "type": "similar",
@@ -72,17 +85,36 @@
       "weight": 0.75
     },
     {
+      "sourceId": "insight-1789006052149-d1yv",
+      "targetId": "insight-1789350752483-0vng",
+      "type": "similar",
+      "weight": 0.7671232876712328
+    },
+    {
       "sourceId": "insight-1789006052149-x69i",
       "targetId": "insight-1789016484400-iqbl",
       "type": "similar",
       "weight": 0.7402597402597403
+    },
+    {
+      "sourceId": "insight-1789006052149-x69i",
+      "targetId": "insight-1789350752483-0vng",
+      "type": "similar",
+      "weight": 0.7567567567567568
+    },
+    {
+      "sourceId": "insight-1789016484400-iqbl",
+      "targetId": "insight-1789350752483-0vng",
+      "type": "similar",
+      "weight": 0.8484848484848485
     }
   ],
   "pageRanks": {
-    "mem-feedback_functional_scope_only-----0": 0.11771252882066918,
-    "insight-1789006052149-bns2": 0.11771252882066918,
-    "insight-1789006052149-d1yv": 0.15106444983988296,
-    "insight-1789006052149-x69i": 0.21526686907457687,
-    "insight-1789016484400-iqbl": 0.39824362344420194
+    "mem-feedback_functional_scope_only-----0": 0.0901874460615465,
+    "insight-1789006052149-bns2": 0.0901874460615465,
+    "insight-1789006052149-d1yv": 0.10935229648623004,
+    "insight-1789006052149-x69i": 0.14033546603447106,
+    "insight-1789016484400-iqbl": 0.19997804345602838,
+    "insight-1789350752483-0vng": 0.3699593019001777
   }
 }

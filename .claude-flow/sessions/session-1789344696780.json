@@ -1,0 +1,14 @@
+{
+  "id": "session-1789344696780",
+  "startedAt": "2026-09-14T00:11:36.780Z",
+  "cwd": "/Users/younseoyeon/Desktop/work/인재림/blackbox",
+  "context": {},
+  "metrics": {
+    "edits": 0,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "endedAt": "2026-09-14T00:11:37.423Z",
+  "duration": 643
+}

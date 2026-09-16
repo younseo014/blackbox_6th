@@ -38,11 +38,11 @@ test("server-renders the Memory Guard app shell", async () => {
   assert.match(html, /class="app-shell interface-user"/);
 });
 
-test("renders only the three user-mode navigation tabs", async () => {
+test("renders the four user-mode navigation tabs", async () => {
   const response = await render();
   const html = await response.text();
 
-  for (const label of ["홈", "기록", "설정"]) {
+  for (const label of ["홈", "기록", "변화", "설정"]) {
     assert.ok(
       html.includes(label),
       `expected nav label "${label}" to be present in server-rendered HTML`,

@@ -82,10 +82,10 @@ test("explainDemoEvent: a routine (uncounted) event is labeled as not contributi
   const persona = findPersona("stable");
   const day = persona.week[0];
   const routineEvent = day.examples.find(
-    (event) => !["double_check", "safety_alert", "micro_delay", "register_tap"].includes(event.motionType),
+    (event) => !["double_check", "micro_delay", "register_tap"].includes(event.motionType),
   );
   assert.ok(routineEvent, "expected at least one routine example on this day");
-  const explanation = explainDemoEvent(persona, 0, day, routineEvent, framesFor(routineEvent));
+  const explanation = explainDemoEvent(persona, 0, day, framesFor(routineEvent));
   assert.equal(explanation.metricLine, null);
   assert.equal(explanation.contributesToSignal, false);
   assert.match(explanation.rule, /집계되지 않는 일반 업무 장면이에요/);
@@ -97,7 +97,7 @@ test("explainDemoEvent: a counted event cites its baseline comparison", () => {
   const day = persona.week[dayIndex];
   const doubleCheckEvent = day.examples.find((event) => event.motionType === "double_check");
   assert.ok(doubleCheckEvent, "expected a double_check example on this day");
-  const explanation = explainDemoEvent(persona, dayIndex, day, doubleCheckEvent, framesFor(doubleCheckEvent));
+  const explanation = explainDemoEvent(persona, dayIndex, day, framesFor(doubleCheckEvent));
   assert.match(explanation.rule, /마감 반복 확인/);
   assert.ok(explanation.metricLine && /마감 반복 확인/.test(explanation.metricLine));
   // This day is part of the baseline itself, not the recent window used to
@@ -109,10 +109,10 @@ test("explainDemoEvent: contributesToSignal exactly matches whether this recent 
   const persona = findPersona("decline");
   const dayIndex = 5; // 토 - one of the two "recent" days behind signal.reasons
   const day = persona.week[dayIndex];
-  const safetyEvent = day.examples.find((event) => event.motionType === "safety_alert");
-  assert.ok(safetyEvent, "expected a safety_alert example on this day");
-  const explanation = explainDemoEvent(persona, dayIndex, day, safetyEvent, framesFor(safetyEvent));
-  const expectedFlag = persona.signal.reasons.includes("최근 안전 알림 빈도가 평소보다 늘었어요.");
+  const delayedEvent = day.examples.find((event) => event.motionType === "micro_delay");
+  assert.ok(delayedEvent, "expected a micro_delay example on this day");
+  const explanation = explainDemoEvent(persona, dayIndex, day, framesFor(delayedEvent));
+  const expectedFlag = persona.signal.reasons.includes("반복 업무 처리 시간이 평소보다 늘어난 날이 많았어요.");
   assert.equal(explanation.contributesToSignal, expectedFlag);
 });
 
@@ -120,7 +120,7 @@ test("explainDemoEvent: every example across every persona/day produces a well-f
   for (const persona of DEMO_PERSONAS) {
     persona.week.forEach((day, dayIndex) => {
       for (const event of day.examples) {
-        const explanation = explainDemoEvent(persona, dayIndex, day, event, framesFor(event));
+        const explanation = explainDemoEvent(persona, dayIndex, day, framesFor(event));
         assert.ok(explanation.rule.length > 0, `${persona.id} day ${dayIndex} "${event.label}" needs a rule`);
         assert.ok(
           explanation.metricLine === null || explanation.metricLine.length > 0,

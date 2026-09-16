@@ -11,26 +11,29 @@ Drizzle support.
 
 ### 참여 동의와 내 데이터 관리
 
-- 카메라를 처음 켤 때 목적(① 기억 복원, ② 선택적 장기 인지 건강 관찰)을 밝히는
-  동의 모달이 뜹니다. 동의하지 않아도 타임라인·스마트 마감 같은 매장 안전
-  기능은 카메라 없이 그대로 사용할 수 있어요.
+- 카메라를 처음 켤 때 목적(① 기억 복원, ② 선택적 장기 업무 패턴 관찰)을 밝히는
+  동의 모달이 뜹니다. 동의하지 않아도 기록과 수동 체크리스트는 카메라 없이
+  그대로 사용할 수 있어요.
 - 사이드바의 "내 데이터 관리"에서 저장된 세션 수, 케어 기록 일수, 브라우저
   저장 용량, 동의 상태를 확인하고, 관찰 참여를 철회하거나 데이터를 전부 삭제할
   수 있습니다. (`app/metrics-store.ts`, `app/pose-store.ts`)
 
 ### 실제 케어 지표 파이프라인
 
-- `app/care-metrics.ts`: 안전 알림/마감 반복 확인/업무 누락율/미세 지연율을
+- `app/care-metrics.ts`: 반복 확인/업무 누락율/미세 지연율을
   계산하고, "바쁜 날"을 제외한 개인 기준선(baseline) 대비 변화를 감지합니다.
   진단 표현 없이 `none`/`watch`/`notable` 수준과 이유만 반환합니다.
-- 케어 기록 탭의 "실제 리포트"는 더 이상 하드코딩된 숫자가 아니라, 스마트
-  마감·세이브포인트 등 실제 사용자 조작에서 쌓인 기록으로 계산됩니다. 기록이
+- 치매·인지 건강 안내와 관련 기관 연결은 개인 기준선이 있고, 최근 기록이
+  최소 이틀 이상이며, 세 행동 지표가 함께 `notable` 수준으로 변하고, 바쁜 날로
+  설명되지 않을 때만 사용자 리포트에 표시됩니다.
+- 케어 기록 탭의 "실제 리포트"는 더 이상 하드코딩된 숫자가 아니라,
+  세이브포인트 등 실제 사용자 조작에서 쌓인 기록으로 계산됩니다. 기록이
   부족하면 가짜 숫자 대신 빈 상태 안내를 보여줍니다.
 - 카메라 세션의 손 좌표에서 "동작 변동성/매끄러움" 참고 지표를 계산합니다
   (`app/motion-analysis.ts`). `MOTION_SAMPLE_RATE`(10FPS) 샘플링 특성상 실제 임상적 손 떨림(4~12Hz)은
   측정할 수 없어 검증되지 않은 참고용임을 UI에 명시합니다.
-- `app/motion-detection.ts`: 스켈레톤 좌표 궤적 자체에서 마감 반복
-  확인(`double_check`)·미세 지연(`micro_delay`)·안전 알림(`safety_alert`)
+- `app/motion-detection.ts`: 스켈레톤 좌표 궤적 자체에서 반복
+  확인(`double_check`)·미세 지연(`micro_delay`)
   패턴을 판정하는 순수 계산 엔진입니다. UI 버튼이나 타이머가 아니라 좌표의
   속도·이동 거리만으로 판정합니다:
   - `micro_delay`: 실제로 움직이던 손이 `FREEZE_MIN_DURATION_MS`(1초) 이상
@@ -40,15 +43,12 @@ Drizzle support.
     반복되면 감지. (순간 속도가 아니라 시작점 기준 누적 이동 거리로 판정 —
     동작의 정점에서 속도가 0에 가까워지는 raised-cosine 곡선 특성 때문에
     순간 속도 기반 판정은 오탐이 많았습니다.)
-  - `safety_alert`: 프레임 간 속도 변화(jerk)가 `SAFETY_JERK_THRESHOLD`를
-    넘는 급격하고 반응적인 움직임이 있으면 감지.
   - 한 구간이 `double_check`로 감지되면 그 구간과 겹치는 `micro_delay`는
     중복 집계하지 않도록 걸러냅니다(반복 확인 동작 특성상 중간에 완전히
     멈추는 구간이 자연스럽게 생기기 때문).
   - 실제 카메라 세션이 끝나면(`page.tsx`의 `recordMotionDetections`) 저장된
-    좌표를 이 엔진으로 분석해, 감지된 이벤트를 **기존 마감 확인 버튼
-    재실행·온열기 타이머 기반 집계와 나란히, 추가로** 같은 카운터에
-    기록합니다(대체가 아니라 합산). 관찰 동의가 있고 세션 프레임 수가
+    좌표를 이 엔진으로 분석해 반복 확인과 업무 지연을 기록합니다. 관찰
+    동의가 있고 세션 프레임 수가
     충분할 때만 실행되는 best-effort 분석이라, 분석이 실패해도 세션 종료
     자체는 막지 않습니다.
   - `tests/motion-detection.test.ts`가 손으로 만든 궤적으로 각 판정 로직을
@@ -129,8 +129,6 @@ Drizzle support.
     확인하고 그 사이에는 완전히 멈추는 반복 확인 동작
   - `micro_delay`: 손을 뻗다가 완전히 멈춰서(속도 0) 오래 머뭇거린 뒤,
     다른 지점으로 이어서 마무리하는 동작
-  - `safety_alert`: 무릎을 굽혀 낮은 곳(콘센트 등)까지 빠르게 반응하고
-    바로 일어서는 급박한 동작
   - `normal_task`: 가슴 높이에서 좌우로 오가는 평범한 반복 업무 동작
   - `register_tap`: 짧게 여러 번 두드리다가 중간에 멈춘 채(재입력·결제
     지연) 정지했다가 마지막에 한 번 더 눌러 마무리하는 동작
@@ -158,15 +156,12 @@ Drizzle support.
 
 - 이 패널은 미리 써둔 설명이 아니라, 리플레이 중인 클립의 좌표를
   `detectMotionEvents()`에 실제로 통과시켜 나온 결과입니다. 마감 반복
-  확인·미세 지연·안전 알림 중 무엇이 감지됐는지, 그리고 그 근거가 된
+  반복 확인·미세 지연 중 무엇이 감지됐는지, 그리고 그 근거가 된
   구체적인 수치(예: "1.4초간 멈춰 있었어요", "서로 떨어진 접근이 2번
   있었어요")를 그대로 보여줍니다. 아무것도 감지되지 않은 클립(일반 업무
   동작)은 "패턴이 감지되지 않았어요"로 정직하게 표시됩니다.
-- 실제 서비스에서는 이 동작 분석 결과가 기존의 마감 확인 버튼
-  재실행(`recordDoubleCheck`)·온열기 켜짐(`recordSafetyAlert`)·업무 소요
-  시간(`SLOW_DELAY_SECONDS`, `care-metrics.ts`) 같은 버튼/타이머 기반
-  규칙과 **함께** 같은 카운터에 집계됩니다(하나가 다른 하나를 대체하지
-  않음) — 패널의 규칙 설명 문구에도 두 가지 경로를 모두 명시했습니다.
+- 실제 서비스에서는 반복 확인(`recordDoubleCheck`)과 업무 소요 시간
+  (`SLOW_DELAY_SECONDS`, `care-metrics.ts`)을 같은 기준으로 집계합니다.
 - 패널은 네 부분으로 구성됩니다: (1) 이 클립의 좌표에서 실제로 감지된
   구체적 근거 문장(들), (2) 그 유형이 실제로 어떤 규칙으로 집계되는지
   (버튼/타이머 경로와 동작 분석 경로를 함께 설명), (3) 이 날의 수치를
@@ -180,18 +175,6 @@ Drizzle support.
   `tests/motion-detection.test.ts`는 감지 엔진 자체와, 이 엔진이
   `app/demo-motion.ts`의 각 합성 이벤트 유형을 의도한 대로 분류하는지를
   검증합니다.
-
-### 선택적 서버 동기화 (기본 비활성)
-
-- `db/schema.ts`의 `dailyCareMetrics` 테이블과 `app/api/metrics/route.ts`는
-  일별 요약 지표를 위한 준비된 스캐폴딩입니다. **기본적으로 꺼져 있으며 지금은
-  UI에서 호출되지 않습니다.**
-- 활성화하려면: `.openai/hosting.json`의 `d1` 값을 실제 바인딩 이름(예:
-  `"DB"`)으로 설정 → `npm run db:generate`로 마이그레이션 생성 → 배포. 그
-  전까지 `getDb()`는 명확한 안내 메시지와 함께 에러를 반환합니다.
-- 원본 pose/hand 좌표 프레임은 이 서버 동기화 대상에 포함되지 않습니다. 일별
-  요약 카운트만 동기화 대상이며, 브라우저 로컬(IndexedDB) 저장이 여전히
-  기본입니다.
 
 ### 테스트
 
@@ -226,71 +209,8 @@ This starter does not use `wrangler.jsonc`.
 ## Included Shape
 
 - edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+- `.openai/hosting.json` contains the Sites deployment metadata
+- `vite.config.ts` configures local development and the production build
 
 ## Useful Commands
 
@@ -300,9 +220,7 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm run test:unit`: fast unit tests for the pure motion/care-metrics logic
 - `npm run test:e2e`: Playwright persona tests (needs `npx playwright install
   chromium` once; see "메모리 가드" section above)
-- `npm run db:generate`: generate Drizzle migrations after schema changes
 
 ## Learn More
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
