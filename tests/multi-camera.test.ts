@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateEventMotion } from "../app/demo-motion.ts";
 import { compareSkeletonMotions } from "../app/motion-classifier.ts";
-import { analyzeCameraContinuity, mergeCameraFrameStreams } from "../app/multi-camera.ts";
+import { analyzeCameraContinuity, isExternalCamera, mergeCameraFrameStreams, selectExternalCameraSlots } from "../app/multi-camera.ts";
 import { BODY_LANDMARK_COUNT, HAND_LANDMARK_COUNT, MOTION_FRAME_STRIDE } from "../app/pose-store.ts";
 
 function frame(timeMs: number, { body = true, full = true, hands = 0, centerX = 0.5, facing = "front" } = {}) {
@@ -77,4 +77,47 @@ test("front/back horizontal reversal keeps the same motion distance", () => {
     return next;
   });
   assert.ok((compareSkeletonMotions(mirrored, original) ?? 1) < 1e-6);
+});
+
+test("external camera slots exclude the laptop camera and restore saved order", () => {
+  const device = (deviceId: string, label: string, groupId = "") => ({ deviceId, label, groupId });
+  const cameras = [
+    device("laptop", "FaceTime HD Camera"),
+    device("new-c", "Webcam C", "port-c"),
+    device("new-a", "Webcam A", "port-a"),
+    device("new-b", "Webcam B", "port-b"),
+  ];
+  const saved = [
+    device("old-b", "Webcam B", "port-b"),
+    device("old-a", "Webcam A", "port-a"),
+    device("old-c", "Webcam C", "port-c"),
+  ];
+  assert.deepEqual(selectExternalCameraSlots(cameras, saved).map((camera) => camera.deviceId), ["new-b", "new-a", "new-c"]);
+});
+
+test("identical webcams keep their slots across app restarts", () => {
+  const cameras = ["webcam-3", "webcam-1", "webcam-2"].map((deviceId) => ({
+    deviceId,
+    groupId: deviceId,
+    label: "USB Camera",
+  }));
+  const saved = [cameras[2], cameras[0], cameras[1]];
+  assert.deepEqual(selectExternalCameraSlots(cameras, saved).map((camera) => camera.deviceId), ["webcam-2", "webcam-3", "webcam-1"]);
+});
+
+test("a newly selected camera overrides the saved slot", () => {
+  const cameras = ["3D5F", "camera-b", "camera-c"].map((deviceId) => ({ deviceId, groupId: deviceId, label: deviceId }));
+  const saved = [cameras[0], cameras[1], cameras[2]];
+  assert.deepEqual(
+    selectExternalCameraSlots(cameras, saved, ["camera-c", "camera-b", "3D5F"]).map((camera) => camera.deviceId),
+    ["camera-c", "camera-b", "3D5F"],
+  );
+});
+
+test("built-in and Continuity cameras stay out of external-camera slots", () => {
+  const camera = (label: string) => ({ deviceId: label, groupId: label, label });
+  assert.equal(isExternalCamera(camera("‘서연’ 카메라")), false);
+  assert.equal(isExternalCamera(camera("‘서연’ 데스크뵰 카메라")), false);
+  assert.equal(isExternalCamera(camera("‘서연’ 데스크뷰 카메라")), false);
+  assert.equal(isExternalCamera(camera("SNAP U2")), true);
 });

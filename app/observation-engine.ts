@@ -27,6 +27,7 @@ export type ObservationProfile = {
   bodyProportionProfile?: BodyProportionProfile | null;
   zoneGrid: ZoneGrid;
   secondaryZoneGrid: ZoneGrid;
+  tertiaryZoneGrid: ZoneGrid;
   customZones: CustomZone[];
   updatedAt: number;
 };
@@ -114,6 +115,7 @@ export const DEFAULT_PROFILE: ObservationProfile = {
   bodyProportionProfile: null,
   zoneGrid: Array(9).fill(null),
   secondaryZoneGrid: Array(9).fill(null),
+  tertiaryZoneGrid: Array(9).fill(null),
   customZones: [],
   updatedAt: 0,
 };

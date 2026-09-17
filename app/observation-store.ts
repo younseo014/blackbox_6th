@@ -61,6 +61,7 @@ export async function getObservationProfile(): Promise<ObservationProfile> {
     ...DEFAULT_PROFILE,
     ...record,
     secondaryZoneGrid: record.secondaryZoneGrid ?? Array(9).fill(null),
+    tertiaryZoneGrid: record.tertiaryZoneGrid ?? Array(9).fill(null),
     customZones: record.customZones ?? [],
   };
   const now = Date.now();

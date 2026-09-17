@@ -42,6 +42,7 @@ next-env.d.ts
 /outputs/
 /work/
 /data/external/
+/data/delete-candidates-*/
 /graphify-out/
 
 # ui-craft

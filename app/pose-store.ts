@@ -1,4 +1,4 @@
-import { mergeCameraFrameStreams } from "./multi-camera";
+import { mergeCameraFrameStreams, type CameraSlot } from "./multi-camera";
 
 export const BODY_LANDMARK_COUNT = 22;
 export const HAND_LANDMARK_COUNT = 21;
@@ -76,7 +76,7 @@ export type MotionSessionRecord = {
   faceLandmarksStored: false;
   globalSessionId?: string;
   cameraId?: string;
-  cameraSlot?: 1 | 2;
+  cameraSlot?: CameraSlot;
   timelineOriginMs?: number;
 };
 

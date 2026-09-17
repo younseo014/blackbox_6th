@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import NumberFlow from "@number-flow/react";
 import { Dialog } from "@base-ui-components/react/dialog";
@@ -98,7 +98,14 @@ import {
   type LearnedMotionSample,
 } from "./custom-motion-training";
 import { sliceTargetMotion } from "./motion-segmentation";
-import { createGlobalCaptureSession, type GlobalCaptureSession } from "./multi-camera";
+import {
+  createGlobalCaptureSession,
+  isExternalCamera,
+  selectExternalCameraSlots,
+  type CameraDeviceIdentity,
+  type CameraSlot,
+  type GlobalCaptureSession,
+} from "./multi-camera";
 import {
   ACTION_AMBIGUITY_REASON_LABELS,
   applyManualActionLabel,
@@ -118,7 +125,9 @@ import {
   type PoseTargetLock,
 } from "./pose-target-lock";
 
-type View = "home" | "settings" | "today" | "timeline" | "care";
+type View = "home" | "settings" | "today" | "timeline" | "care" | "onboarding";
+type OnboardingStep = 1 | 2 | 3 | 4;
+type SettingsSection = "occupation" | "observation" | "context" | "checklist" | null;
 type InterfaceMode = "user" | "developer";
 type CameraStatus = "idle" | "requesting" | "connected" | "error";
 type PoseStatus = "idle" | "loading" | "searching" | "holding" | "partial" | "full" | "error";
@@ -151,12 +160,48 @@ type HandState = {
   rightScore: number;
 };
 
-function cameraDisplayName(camera: MediaDeviceInfo, index: number) {
-  return camera.label || `카메라 ${index + 1}`;
+function ShimmerText({ children }: { children: string }) {
+  return (
+    <span className="t-shimmer" data-text={children}>
+      {children}
+    </span>
+  );
 }
 
-function isBuiltInCamera(camera: MediaDeviceInfo) {
-  return /built-in|facetime|integrated|internal|내장/i.test(camera.label);
+function cameraDisplayName(camera: MediaDeviceInfo, index: number) {
+  return camera.label ? `${camera.label} · ${camera.deviceId.slice(0, 4)}` : `카메라 ${index + 1}`;
+}
+
+async function receivesVideoFrames(stream: MediaStream, timeoutMs = 4_000) {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+
+  try {
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (received: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        resolve(received);
+      };
+      const timeout = window.setTimeout(() => finish(false), timeoutMs);
+
+      if ("requestVideoFrameCallback" in video) {
+        video.requestVideoFrameCallback(() => finish(true));
+      } else {
+        const onFrame = () => finish(video.videoWidth > 0 && video.videoHeight > 0);
+        video.addEventListener("loadeddata", onFrame, { once: true });
+        video.addEventListener("timeupdate", onFrame, { once: true });
+      }
+      void video.play().catch(() => finish(false));
+    });
+  } finally {
+    video.pause();
+    video.srcObject = null;
+  }
 }
 
 type ClosingChecklistItem = {
@@ -218,6 +263,7 @@ const DEFAULT_WORK_CONTEXT_CONFIG: WorkContextConfig = {
 };
 const INTERFACE_MODE_STORAGE_KEY = "memory-guard-interface-mode-v1";
 const USER_INSTALL_STORAGE_KEY = "memory-guard-user-install-v1";
+const CAMERA_SLOT_STORAGE_KEY = "memory-guard-external-camera-slots-v1";
 const POSE_DISPLAY_HOLD_MS = 450;
 
 function loadInterfaceMode(): InterfaceMode {
@@ -234,6 +280,15 @@ function loadUserInstallState(): UserInstallState | null {
     return stored ? JSON.parse(stored) as UserInstallState : null;
   } catch {
     return null;
+  }
+}
+
+function loadCameraAssignments(): CameraDeviceIdentity[] {
+  try {
+    const stored = window.localStorage.getItem(CAMERA_SLOT_STORAGE_KEY);
+    return stored ? JSON.parse(stored) as CameraDeviceIdentity[] : [];
+  } catch {
+    return [];
   }
 }
 
@@ -556,6 +611,7 @@ export default function Home() {
   );
   const [poseStatus, setPoseStatus] = useState<PoseStatus>("idle");
   const [secondaryPoseStatus, setSecondaryPoseStatus] = useState<PoseStatus>("idle");
+  const [tertiaryPoseStatus, setTertiaryPoseStatus] = useState<PoseStatus>("idle");
   const [poseStats, setPoseStats] = useState<PoseStats>({
     frames: 0,
     detectedFrames: 0,
@@ -575,7 +631,9 @@ export default function Home() {
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [primaryCameraId, setPrimaryCameraId] = useState("");
   const [secondaryCameraId, setSecondaryCameraId] = useState("");
+  const [tertiaryCameraId, setTertiaryCameraId] = useState("");
   const [secondaryCameraConnected, setSecondaryCameraConnected] = useState(false);
+  const [tertiaryCameraConnected, setTertiaryCameraConnected] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionCount, setSessionCount] = useState(0);
   const [latestSession, setLatestSession] = useState<MotionSessionRecord | null>(null);
@@ -600,11 +658,13 @@ export default function Home() {
   const [selectedDemoDay, setSelectedDemoDay] = useState(6);
   const [observationProfile, setObservationProfile] = useState<ObservationProfile>(DEFAULT_PROFILE);
   const [occupationInput, setOccupationInput] = useState("");
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>(1);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(null);
   const [observationEpisodes, setObservationEpisodes] = useState<ObservationEpisode[]>([]);
   const [observationBaseline, setObservationBaseline] = useState<BaselineSnapshot>(() => buildBaseline([], 1));
   const [zoneSetupOpen, setZoneSetupOpen] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string>("DRINK_PREP");
-  const [zoneCameraSlot, setZoneCameraSlot] = useState<1 | 2>(1);
+  const [zoneCameraSlot, setZoneCameraSlot] = useState<CameraSlot>(1);
   const [customZoneName, setCustomZoneName] = useState("");
   const [closingChecklist, setClosingChecklist] = useState<ClosingChecklistItem[]>(
     loadChecklistSettings,
@@ -622,6 +682,12 @@ export default function Home() {
   const [quickMotionBusy, setQuickMotionBusy] = useState(false);
   const [quickMotionCameraOpen, setQuickMotionCameraOpen] = useState(false);
   const [multiCameraModalOpen, setMultiCameraModalOpen] = useState(false);
+  const mainNavRef = useRef<HTMLElement>(null);
+  const mainNavPillRef = useRef<HTMLSpanElement>(null);
+  const navPillReadyRef = useRef(false);
+  const previousNavModeRef = useRef<InterfaceMode>(interfaceMode);
+  const pageMotionReadyRef = useRef(false);
+  const [animatedPageKey, setAnimatedPageKey] = useState<string | null>(null);
 
   // --- Consent, real observation metrics, and data controls ---
   // Lazy initializer instead of an effect: getConsent() is SSR-safe (it
@@ -671,15 +737,20 @@ export default function Home() {
   const quickMotionVideoRef = useRef<HTMLVideoElement>(null);
   const secondaryVideoRef = useRef<HTMLVideoElement>(null);
   const secondaryOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const tertiaryVideoRef = useRef<HTMLVideoElement>(null);
+  const tertiaryOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const processingVideoRef = useRef<HTMLVideoElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const cameraFrameRef = useRef<HTMLDivElement>(null);
   const cameraFeedLayoutRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const secondaryStreamRef = useRef<MediaStream | null>(null);
+  const tertiaryStreamRef = useRef<MediaStream | null>(null);
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const secondaryPoseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  const tertiaryPoseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const secondaryHandLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const tertiaryHandLandmarkerRef = useRef<HandLandmarker | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const poseAnimationRef = useRef<number | null>(null);
   const trackingActiveRef = useRef(false);
@@ -690,6 +761,7 @@ export default function Home() {
   const lastPoseSeenAtRef = useRef(0);
   const poseTargetLockRef = useRef<PoseTargetLock | null>(null);
   const secondaryPoseTargetLockRef = useRef<PoseTargetLock | null>(null);
+  const tertiaryPoseTargetLockRef = useRef<PoseTargetLock | null>(null);
   const lastHandsRef = useRef<HandState>({
     left: null,
     right: null,
@@ -703,9 +775,11 @@ export default function Home() {
   const chunkHandFramesRef = useRef(0);
   const poseSessionRef = useRef<MotionSessionRecord | null>(null);
   const secondaryPoseSessionRef = useRef<MotionSessionRecord | null>(null);
+  const tertiaryPoseSessionRef = useRef<MotionSessionRecord | null>(null);
   const globalCaptureSessionRef = useRef<GlobalCaptureSession | null>(null);
   const poseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const secondaryPoseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const tertiaryPoseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sessionPerformanceStartRef = useRef(0);
   const lastStatsUpdateRef = useRef(0);
   const lastVideoTimeRef = useRef(-1);
@@ -713,11 +787,20 @@ export default function Home() {
   const lastSecondaryDetectionTimeRef = useRef(0);
   const lastSecondaryHandDetectionTimeRef = useRef(0);
   const lastSecondarySampleTimeRef = useRef(0);
+  const lastTertiaryVideoTimeRef = useRef(-1);
+  const lastTertiaryDetectionTimeRef = useRef(0);
+  const lastTertiaryHandDetectionTimeRef = useRef(0);
+  const lastTertiarySampleTimeRef = useRef(0);
   const secondaryHandsRef = useRef<HandState>({ left: null, right: null, leftScore: 0, rightScore: 0 });
+  const tertiaryHandsRef = useRef<HandState>({ left: null, right: null, leftScore: 0, rightScore: 0 });
   const secondaryPoseBufferRef = useRef<number[]>([]);
   const secondaryChunkDetectedFramesRef = useRef(0);
   const secondaryChunkFullBodyFramesRef = useRef(0);
   const secondaryChunkHandFramesRef = useRef(0);
+  const tertiaryPoseBufferRef = useRef<number[]>([]);
+  const tertiaryChunkDetectedFramesRef = useRef(0);
+  const tertiaryChunkFullBodyFramesRef = useRef(0);
+  const tertiaryChunkHandFramesRef = useRef(0);
   const poseStatusRef = useRef<PoseStatus>("idle");
   const poseStatsRef = useRef<PoseStats>({
     frames: 0,
@@ -767,6 +850,10 @@ export default function Home() {
         secondaryVideoRef.current.srcObject = secondaryStreamRef.current;
         secondaryVideoRef.current.play().catch(() => undefined);
       }
+      if (tertiaryVideoRef.current) {
+        tertiaryVideoRef.current.srcObject = tertiaryStreamRef.current;
+        tertiaryVideoRef.current.play().catch(() => undefined);
+      }
     }
   }, [cameraStatus, view, quickMotionCameraOpen, multiCameraModalOpen]);
 
@@ -777,7 +864,7 @@ export default function Home() {
   useEffect(() => {
     listMotionSessions()
       .then((sessions) => {
-        const captureSessions = sessions.filter((session) => session.cameraSlot !== 2);
+        const captureSessions = sessions.filter((session) => !session.cameraSlot || session.cameraSlot === 1);
         setSessionCount(captureSessions.length);
         setLatestSession(captureSessions[0] ?? null);
         setRecentSessions(captureSessions.slice(0, 5));
@@ -902,9 +989,13 @@ export default function Home() {
         cancelAnimationFrame(poseAnimationRef.current);
       }
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      secondaryStreamRef.current?.getTracks().forEach((track) => track.stop());
+      tertiaryStreamRef.current?.getTracks().forEach((track) => track.stop());
       poseLandmarkerRef.current?.close();
       secondaryPoseLandmarkerRef.current?.close();
+      tertiaryPoseLandmarkerRef.current?.close();
       secondaryHandLandmarkerRef.current?.close();
+      tertiaryHandLandmarkerRef.current?.close();
       handLandmarkerRef.current?.close();
     };
   }, []);
@@ -952,7 +1043,7 @@ export default function Home() {
     setShowConsentModal(false);
     if (observationConsent && pendingCameraStartRef.current) {
       if (!quickMotionCameraRequestedRef.current) setMultiCameraModalOpen(true);
-      void startCamera(undefined, undefined, quickMotionCameraRequestedRef.current);
+      void startCamera(undefined, undefined, undefined, quickMotionCameraRequestedRef.current);
     } else if (pendingCameraStartRef.current && !quickMotionCameraRequestedRef.current) {
       setMultiCameraModalOpen(false);
     }
@@ -962,6 +1053,7 @@ export default function Home() {
   async function startCamera(
     requestedPrimaryCameraId?: string,
     requestedSecondaryCameraId?: string,
+    requestedTertiaryCameraId?: string,
     primaryOnly = false,
   ) {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -974,33 +1066,43 @@ export default function Home() {
     setCameraMessage("카메라 연결을 기다리고 있어요…");
 
     try {
-      // Ask once before enumerating devices so Safari exposes useful camera names.
-      const permissionStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: false,
-      });
-      permissionStream.getTracks().forEach((track) => track.stop());
-
-      const cameras = (await navigator.mediaDevices.enumerateDevices())
+      const savedAssignments = loadCameraAssignments();
+      let cameras = (await navigator.mediaDevices.enumerateDevices())
         .filter((device) => device.kind === "videoinput");
+      if (cameras.some((camera) => !camera.label)) {
+        const savedDevice = cameras.find((camera) =>
+          savedAssignments.some((saved) => saved.deviceId === camera.deviceId),
+        );
+        // Reuse a known external device for permission discovery. Opening
+        // plain `video: true` here would make the browser select the laptop camera.
+        const permissionStream = await navigator.mediaDevices.getUserMedia({
+          video: savedDevice ? { deviceId: { exact: savedDevice.deviceId } } : true,
+          audio: false,
+        });
+        permissionStream.getTracks().forEach((track) => track.stop());
+        cameras = (await navigator.mediaDevices.enumerateDevices())
+          .filter((device) => device.kind === "videoinput");
+      }
       if (cameras.length === 0) throw new Error("No video input devices found");
 
-      const savedPrimary = requestedPrimaryCameraId ?? primaryCameraId;
-      const savedSecondary = requestedSecondaryCameraId ?? secondaryCameraId;
-      const preferredPrimary = primaryOnly
-        ? cameras.find(isBuiltInCamera) ?? cameras[0]
-        : cameras.find((camera) => camera.deviceId === savedPrimary)
-        ?? cameras.find(isBuiltInCamera)
-        ?? cameras[0];
-      const preferredSecondary = primaryOnly
-        ? undefined
-        : cameras.find(
-          (camera) => camera.deviceId === savedSecondary && camera.deviceId !== preferredPrimary.deviceId,
-        ) ?? cameras.find((camera) => camera.deviceId !== preferredPrimary.deviceId);
+      const externalCameras = cameras.filter(isExternalCamera);
+      const selected = selectExternalCameraSlots(
+        externalCameras,
+        savedAssignments,
+        [
+          requestedPrimaryCameraId ?? primaryCameraId,
+          requestedSecondaryCameraId ?? secondaryCameraId,
+          requestedTertiaryCameraId ?? tertiaryCameraId,
+        ],
+      );
+      const [preferredPrimary, preferredSecondary, preferredTertiary] = selected;
+      if (!preferredPrimary) throw new Error("No external video input devices found");
 
-      setAvailableCameras(cameras);
+      setAvailableCameras(externalCameras);
       setPrimaryCameraId(preferredPrimary.deviceId);
       setSecondaryCameraId(preferredSecondary?.deviceId ?? "");
+      setTertiaryCameraId(preferredTertiary?.deviceId ?? "");
+      window.localStorage.setItem(CAMERA_SLOT_STORAGE_KEY, JSON.stringify(selected));
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -1012,7 +1114,8 @@ export default function Home() {
       });
 
       let secondaryStream: MediaStream | null = null;
-      if (preferredSecondary) {
+      let tertiaryStream: MediaStream | null = null;
+      if (!primaryOnly && preferredSecondary) {
         try {
           secondaryStream = await navigator.mediaDevices.getUserMedia({
             video: {
@@ -1027,19 +1130,62 @@ export default function Home() {
           secondaryStream = null;
         }
       }
+      if (!primaryOnly && preferredTertiary) {
+        try {
+          tertiaryStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: preferredTertiary.deviceId },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          });
+        } catch {
+          tertiaryStream = null;
+        }
+      }
+
+      const [primaryHasFrames, secondaryHasFrames, tertiaryHasFrames] = await Promise.all([
+        receivesVideoFrames(stream),
+        secondaryStream ? receivesVideoFrames(secondaryStream) : Promise.resolve(false),
+        tertiaryStream ? receivesVideoFrames(tertiaryStream) : Promise.resolve(false),
+      ]);
+      const camerasWithoutFrames: string[] = [];
+      if (!primaryHasFrames) {
+        stream.getTracks().forEach((track) => track.stop());
+        secondaryStream?.getTracks().forEach((track) => track.stop());
+        tertiaryStream?.getTracks().forEach((track) => track.stop());
+        setCameraStatus("error");
+        setCameraMessage(`${cameraDisplayName(preferredPrimary, 0)}에서 영상 프레임을 받지 못했어요. 카메라를 다른 USB 포트에 직접 연결한 뒤 다시 연결해 주세요.`);
+        return;
+      }
+      if (secondaryStream && !secondaryHasFrames) {
+        camerasWithoutFrames.push(cameraDisplayName(preferredSecondary!, 1));
+        secondaryStream.getTracks().forEach((track) => track.stop());
+        secondaryStream = null;
+      }
+      if (tertiaryStream && !tertiaryHasFrames) {
+        camerasWithoutFrames.push(cameraDisplayName(preferredTertiary!, 2));
+        tertiaryStream.getTracks().forEach((track) => track.stop());
+        tertiaryStream = null;
+      }
 
       if (primaryOnly && !quickMotionCameraRequestedRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         secondaryStream?.getTracks().forEach((track) => track.stop());
+        tertiaryStream?.getTracks().forEach((track) => track.stop());
         setCameraStatus("idle");
         return;
       }
 
       streamRef.current?.getTracks().forEach((track) => track.stop());
       secondaryStreamRef.current?.getTracks().forEach((track) => track.stop());
+      tertiaryStreamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = stream;
       secondaryStreamRef.current = secondaryStream;
+      tertiaryStreamRef.current = tertiaryStream;
       setSecondaryCameraConnected(Boolean(secondaryStream));
+      setTertiaryCameraConnected(Boolean(tertiaryStream));
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
@@ -1056,17 +1202,27 @@ export default function Home() {
         secondaryVideoRef.current.srcObject = secondaryStream;
         await secondaryVideoRef.current.play();
       }
+      if (tertiaryVideoRef.current && tertiaryStream) {
+        tertiaryVideoRef.current.srcObject = tertiaryStream;
+        await tertiaryVideoRef.current.play();
+      }
       setCameraStatus("connected");
-      setCameraMessage(
-        secondaryStream
-          ? "두 카메라를 연결했어요. 한 명의 작업 흐름으로 통합해요."
-          : "카메라 1은 연결됐어요. 카메라 2는 다른 앱에서 사용 중인지 확인해 주세요.",
-      );
+      const connectedCount = 1 + Number(Boolean(secondaryStream)) + Number(Boolean(tertiaryStream));
+      const connectionMessage = camerasWithoutFrames.length > 0
+        ? `${camerasWithoutFrames.join(", ")}이(가) 연결됐지만 영상 프레임이 오지 않아 제외했어요. 여러 카메라가 같은 USB 허브를 공유하면 대역폭이 부족할 수 있어요. 해당 카메라를 노트북의 다른 USB 포트에 직접 연결한 뒤 다시 연결해 주세요.`
+        : connectedCount < 3
+        ? `외장 웹캠 ${connectedCount}대만 연결됐어요. 나머지 웹캠이 다른 앱에서 사용 중인지 확인해 주세요.`
+        : savedAssignments.length < 3
+          ? "새 노트북의 첫 연결이에요. 세 화면의 순서를 확인해 주세요. 이후부터 같은 순서로 연결해요."
+          : "";
       await startPoseTracking(
         preferredPrimary.deviceId,
         secondaryStream ? preferredSecondary?.deviceId : undefined,
+        tertiaryStream ? preferredTertiary?.deviceId : undefined,
+        connectionMessage,
       );
-    } catch {
+    } catch (error) {
+      console.error("Camera connection failed", error);
       setCameraStatus("error");
       setCameraMessage(
         "카메라 권한을 허용한 뒤 다시 연결해 주세요. 영상은 외부로 전송되지 않아요.",
@@ -1081,7 +1237,12 @@ export default function Home() {
   }
 
   async function ensureMotionLandmarkers() {
-    if (poseLandmarkerRef.current && handLandmarkerRef.current && (!secondaryStreamRef.current || secondaryPoseLandmarkerRef.current)) return;
+    if (
+      poseLandmarkerRef.current &&
+      handLandmarkerRef.current &&
+      (!secondaryStreamRef.current || secondaryPoseLandmarkerRef.current) &&
+      (!tertiaryStreamRef.current || tertiaryPoseLandmarkerRef.current)
+    ) return;
     updatePoseStatus("loading");
     const {
       FilesetResolver,
@@ -1108,96 +1269,76 @@ export default function Home() {
       try {
         poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
           vision,
-          {
-            baseOptions: { ...poseBaseOptions, delegate: "GPU" },
-            ...poseTrackingOptions,
-          },
-        );
-      } catch {
-        poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
-          vision,
-          {
-            baseOptions: poseBaseOptions,
-            ...poseTrackingOptions,
-          },
-        );
-      }
-    }
-
-    if (secondaryStreamRef.current && !secondaryPoseLandmarkerRef.current) {
-      try {
-        secondaryPoseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
-          vision,
           { baseOptions: { ...poseBaseOptions, delegate: "GPU" }, ...poseTrackingOptions },
         );
       } catch {
-        secondaryPoseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
+        poseLandmarkerRef.current = await PoseLandmarkerClass.createFromOptions(
           vision,
           { baseOptions: poseBaseOptions, ...poseTrackingOptions },
         );
       }
     }
 
-    if (!handLandmarkerRef.current) {
+    const createPoseLandmarker = async () => {
       try {
-        handLandmarkerRef.current = await HandLandmarkerClass.createFromOptions(
+        return await PoseLandmarkerClass.createFromOptions(
           vision,
-          {
-            baseOptions: { ...handBaseOptions, delegate: "GPU" },
-            runningMode: "VIDEO",
-            numHands: 2,
-            minHandDetectionConfidence: 0.45,
-            minHandPresenceConfidence: 0.45,
-            minTrackingConfidence: 0.45,
-          },
+          { baseOptions: { ...poseBaseOptions, delegate: "GPU" }, ...poseTrackingOptions },
         );
       } catch {
-        try {
-          handLandmarkerRef.current = await HandLandmarkerClass.createFromOptions(
-            vision,
-            {
-              baseOptions: handBaseOptions,
-              runningMode: "VIDEO",
-              numHands: 2,
-              minHandDetectionConfidence: 0.45,
-              minHandPresenceConfidence: 0.45,
-              minTrackingConfidence: 0.45,
-            },
-          );
-        } catch {
-          // Finger tracking is an enhancement. Keep body tracking available
-          // when the heavier hand model cannot initialize on this device.
-          handLandmarkerRef.current = null;
-        }
+        return PoseLandmarkerClass.createFromOptions(
+          vision,
+          { baseOptions: poseBaseOptions, ...poseTrackingOptions },
+        );
       }
+    };
+    if (secondaryStreamRef.current && !secondaryPoseLandmarkerRef.current) {
+      secondaryPoseLandmarkerRef.current = await createPoseLandmarker();
+    }
+    if (tertiaryStreamRef.current && !tertiaryPoseLandmarkerRef.current) {
+      tertiaryPoseLandmarkerRef.current = await createPoseLandmarker();
     }
 
-    if (secondaryStreamRef.current && !secondaryHandLandmarkerRef.current) {
+    const createHandLandmarker = async () => {
+      const options = {
+        runningMode: "VIDEO" as const,
+        numHands: 2,
+        minHandDetectionConfidence: 0.45,
+        minHandPresenceConfidence: 0.45,
+        minTrackingConfidence: 0.45,
+      };
       try {
-        secondaryHandLandmarkerRef.current = await HandLandmarkerClass.createFromOptions(
+        return await HandLandmarkerClass.createFromOptions(
           vision,
-          { baseOptions: { ...handBaseOptions, delegate: "GPU" }, runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.45, minHandPresenceConfidence: 0.45, minTrackingConfidence: 0.45 },
+          { baseOptions: { ...handBaseOptions, delegate: "GPU" }, ...options },
         );
       } catch {
         try {
-          secondaryHandLandmarkerRef.current = await HandLandmarkerClass.createFromOptions(
+          return await HandLandmarkerClass.createFromOptions(
             vision,
-            { baseOptions: handBaseOptions, runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.45, minHandPresenceConfidence: 0.45, minTrackingConfidence: 0.45 },
+            { baseOptions: handBaseOptions, ...options },
           );
         } catch {
-          secondaryHandLandmarkerRef.current = null;
+          return null;
         }
       }
+    };
+    if (!handLandmarkerRef.current) handLandmarkerRef.current = await createHandLandmarker();
+    if (secondaryStreamRef.current && !secondaryHandLandmarkerRef.current) {
+      secondaryHandLandmarkerRef.current = await createHandLandmarker();
+    }
+    if (tertiaryStreamRef.current && !tertiaryHandLandmarkerRef.current) {
+      tertiaryHandLandmarkerRef.current = await createHandLandmarker();
     }
   }
 
-  function flushPoseFrames(cameraSlot: 1 | 2 = 1) {
-    const bufferRef = cameraSlot === 1 ? poseBufferRef : secondaryPoseBufferRef;
-    const sessionRef = cameraSlot === 1 ? poseSessionRef : secondaryPoseSessionRef;
-    const writeQueueRef = cameraSlot === 1 ? poseWriteQueueRef : secondaryPoseWriteQueueRef;
-    const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : secondaryChunkDetectedFramesRef;
-    const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : secondaryChunkFullBodyFramesRef;
-    const handRef = cameraSlot === 1 ? chunkHandFramesRef : secondaryChunkHandFramesRef;
+  function flushPoseFrames(cameraSlot: CameraSlot = 1) {
+    const bufferRef = cameraSlot === 1 ? poseBufferRef : cameraSlot === 2 ? secondaryPoseBufferRef : tertiaryPoseBufferRef;
+    const sessionRef = cameraSlot === 1 ? poseSessionRef : cameraSlot === 2 ? secondaryPoseSessionRef : tertiaryPoseSessionRef;
+    const writeQueueRef = cameraSlot === 1 ? poseWriteQueueRef : cameraSlot === 2 ? secondaryPoseWriteQueueRef : tertiaryPoseWriteQueueRef;
+    const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : cameraSlot === 2 ? secondaryChunkDetectedFramesRef : tertiaryChunkDetectedFramesRef;
+    const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : cameraSlot === 2 ? secondaryChunkFullBodyFramesRef : tertiaryChunkFullBodyFramesRef;
+    const handRef = cameraSlot === 1 ? chunkHandFramesRef : cameraSlot === 2 ? secondaryChunkHandFramesRef : tertiaryChunkHandFramesRef;
     if (bufferRef.current.length === 0 || !sessionRef.current) return writeQueueRef.current;
     const values = new Float32Array(bufferRef.current);
     const detectedFrames = detectedRef.current;
@@ -1233,13 +1374,13 @@ export default function Home() {
     fullBody: boolean,
     head: HeadDirection | null,
     hands: HandState,
-    cameraSlot: 1 | 2 = 1,
+    cameraSlot: CameraSlot = 1,
   ) {
     if (!landmarks) return;
-    const bufferRef = cameraSlot === 1 ? poseBufferRef : secondaryPoseBufferRef;
-    const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : secondaryChunkDetectedFramesRef;
-    const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : secondaryChunkFullBodyFramesRef;
-    const handRef = cameraSlot === 1 ? chunkHandFramesRef : secondaryChunkHandFramesRef;
+    const bufferRef = cameraSlot === 1 ? poseBufferRef : cameraSlot === 2 ? secondaryPoseBufferRef : tertiaryPoseBufferRef;
+    const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : cameraSlot === 2 ? secondaryChunkDetectedFramesRef : tertiaryChunkDetectedFramesRef;
+    const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : cameraSlot === 2 ? secondaryChunkFullBodyFramesRef : tertiaryChunkFullBodyFramesRef;
+    const handRef = cameraSlot === 1 ? chunkHandFramesRef : cameraSlot === 2 ? secondaryChunkHandFramesRef : tertiaryChunkHandFramesRef;
     const buffer = bufferRef.current;
     buffer.push(timestamp - sessionPerformanceStartRef.current);
     buffer.push(landmarks ? 1 : 0);
@@ -1436,33 +1577,44 @@ export default function Home() {
             liveLandmarks ? recordingHands : { left: null, right: null, leftScore: 0, rightScore: 0 },
           );
         }
-      } catch {
+      } catch (error) {
+        console.error("Primary camera pose tracking failed", error);
         updatePoseStatus("error");
       }
     }
-    trackSecondaryPose(timestamp);
+    trackAuxiliaryPose(timestamp, 2);
+    trackAuxiliaryPose(timestamp, 3);
     poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
   }
 
-  function trackSecondaryPose(timestamp: number) {
-    const video = secondaryVideoRef.current;
-    const landmarker = secondaryPoseLandmarkerRef.current;
-    if (!video || !landmarker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.currentTime === lastSecondaryVideoTimeRef.current || timestamp - lastSecondaryDetectionTimeRef.current < 100) return;
-    lastSecondaryVideoTimeRef.current = video.currentTime;
-    lastSecondaryDetectionTimeRef.current = timestamp;
+  function trackAuxiliaryPose(timestamp: number, cameraSlot: 2 | 3) {
+    const video = cameraSlot === 2 ? secondaryVideoRef.current : tertiaryVideoRef.current;
+    const canvas = cameraSlot === 2 ? secondaryOverlayCanvasRef.current : tertiaryOverlayCanvasRef.current;
+    const landmarker = cameraSlot === 2 ? secondaryPoseLandmarkerRef.current : tertiaryPoseLandmarkerRef.current;
+    const handLandmarker = cameraSlot === 2 ? secondaryHandLandmarkerRef.current : tertiaryHandLandmarkerRef.current;
+    const targetLockRef = cameraSlot === 2 ? secondaryPoseTargetLockRef : tertiaryPoseTargetLockRef;
+    const handsRef = cameraSlot === 2 ? secondaryHandsRef : tertiaryHandsRef;
+    const lastVideoTimeRef = cameraSlot === 2 ? lastSecondaryVideoTimeRef : lastTertiaryVideoTimeRef;
+    const lastDetectionRef = cameraSlot === 2 ? lastSecondaryDetectionTimeRef : lastTertiaryDetectionTimeRef;
+    const lastHandDetectionRef = cameraSlot === 2 ? lastSecondaryHandDetectionTimeRef : lastTertiaryHandDetectionTimeRef;
+    const lastSampleRef = cameraSlot === 2 ? lastSecondarySampleTimeRef : lastTertiarySampleTimeRef;
+    const setStatus = cameraSlot === 2 ? setSecondaryPoseStatus : setTertiaryPoseStatus;
+    if (!video || !landmarker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.currentTime === lastVideoTimeRef.current || timestamp - lastDetectionRef.current < 100) return;
+    lastVideoTimeRef.current = video.currentTime;
+    lastDetectionRef.current = timestamp;
     try {
       const result = landmarker.detectForVideo(video, timestamp);
       const targetSelection = selectLockedPose(
         result.landmarks,
-        secondaryPoseTargetLockRef.current,
+        targetLockRef.current,
         timestamp,
       );
-      secondaryPoseTargetLockRef.current = targetSelection.lock;
+      targetLockRef.current = targetSelection.lock;
       const landmarks = targetSelection.landmarks;
-      if (landmarks && secondaryHandLandmarkerRef.current && timestamp - lastSecondaryHandDetectionTimeRef.current >= 100) {
-        lastSecondaryHandDetectionTimeRef.current = timestamp;
+      if (landmarks && handLandmarker && timestamp - lastHandDetectionRef.current >= 100) {
+        lastHandDetectionRef.current = timestamp;
         const hands: HandState = { left: null, right: null, leftScore: 0, rightScore: 0 };
-        const handResult = secondaryHandLandmarkerRef.current.detectForVideo(video, timestamp + 1);
+        const handResult = handLandmarker.detectForVideo(video, timestamp + cameraSlot - 1);
         handResult.landmarks.forEach((hand, index) => {
           const side = matchHandToPose(hand, landmarks);
           if (!side) return;
@@ -1470,12 +1622,11 @@ export default function Home() {
           if (side === "left") { hands.left = hand; hands.leftScore = score; }
           else { hands.right = hand; hands.rightScore = score; }
         });
-        secondaryHandsRef.current = hands;
+        handsRef.current = hands;
       }
-      if (!landmarks) secondaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
+      if (!landmarks) handsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
       const fullBody = landmarks ? isFullBodyVisible(landmarks) : false;
       const head = landmarks ? getHeadDirection(landmarks) : null;
-      const canvas = secondaryOverlayCanvasRef.current;
       if (canvas) {
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth;
@@ -1483,25 +1634,32 @@ export default function Home() {
         }
         const context = canvas.getContext("2d");
         context?.clearRect(0, 0, canvas.width, canvas.height);
-        if (landmarks) drawMotionSkeleton(canvas, landmarks, secondaryHandsRef.current.left, secondaryHandsRef.current.right, head, fullBody);
+        if (landmarks) drawMotionSkeleton(canvas, landmarks, handsRef.current.left, handsRef.current.right, head, fullBody);
       }
-      if (timestamp - lastSecondarySampleTimeRef.current >= 1000 / MOTION_SAMPLE_RATE) {
-        lastSecondarySampleTimeRef.current = timestamp;
-        recordPoseFrame(timestamp, landmarks, fullBody, head, secondaryHandsRef.current, 2);
+      if (timestamp - lastSampleRef.current >= 1000 / MOTION_SAMPLE_RATE) {
+        lastSampleRef.current = timestamp;
+        recordPoseFrame(timestamp, landmarks, fullBody, head, handsRef.current, cameraSlot);
       }
-      setSecondaryPoseStatus(landmarks ? (fullBody ? "full" : "partial") : "searching");
-    } catch {
-      setSecondaryPoseStatus("error");
+      setStatus(landmarks ? (fullBody ? "full" : "partial") : "searching");
+    } catch (error) {
+      console.error(`Camera ${cameraSlot} pose tracking failed`, error);
+      setStatus("error");
     }
   }
 
-  async function startPoseTracking(primaryId = primaryCameraId, secondaryId = secondaryCameraId) {
+  async function startPoseTracking(
+    primaryId = primaryCameraId,
+    secondaryId = secondaryCameraId,
+    tertiaryId = tertiaryCameraId,
+    connectionMessage = "",
+  ) {
     try {
       await ensureMotionLandmarkers();
       const startedAt = currentEpochTime();
       const connectedCameras = [
         { cameraId: primaryId, slot: 1 as const, label: availableCameras.find((camera) => camera.deviceId === primaryId)?.label || "카메라 1" },
         ...(secondaryStreamRef.current ? [{ cameraId: secondaryId, slot: 2 as const, label: availableCameras.find((camera) => camera.deviceId === secondaryId)?.label || "카메라 2" }] : []),
+        ...(tertiaryStreamRef.current ? [{ cameraId: tertiaryId, slot: 3 as const, label: availableCameras.find((camera) => camera.deviceId === tertiaryId)?.label || "카메라 3" }] : []),
       ];
       globalCaptureSessionRef.current = createGlobalCaptureSession(connectedCameras);
       const sharedSession = {
@@ -1521,6 +1679,13 @@ export default function Home() {
           { ...sharedSession, cameraId: secondaryId, cameraSlot: 2 },
         )
         : null;
+      tertiaryPoseSessionRef.current = tertiaryStreamRef.current
+        ? await createMotionSession(
+          `motion-${crypto.randomUUID()}`,
+          startedAt,
+          { ...sharedSession, cameraId: tertiaryId, cameraSlot: 3 },
+        )
+        : null;
       sessionPerformanceStartRef.current = globalCaptureSessionRef.current.timelineOriginMs;
       lastDetectionTimeRef.current = 0;
       lastHandDetectionTimeRef.current = 0;
@@ -1530,11 +1695,17 @@ export default function Home() {
       lastSecondaryDetectionTimeRef.current = 0;
       lastSecondaryHandDetectionTimeRef.current = 0;
       lastSecondarySampleTimeRef.current = 0;
+      lastTertiaryVideoTimeRef.current = -1;
+      lastTertiaryDetectionTimeRef.current = 0;
+      lastTertiaryHandDetectionTimeRef.current = 0;
+      lastTertiarySampleTimeRef.current = 0;
       secondaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
+      tertiaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
       lastPoseRef.current = null;
       lastPoseSeenAtRef.current = 0;
       poseTargetLockRef.current = null;
       secondaryPoseTargetLockRef.current = null;
+      tertiaryPoseTargetLockRef.current = null;
       lastHandsRef.current = {
         left: null,
         right: null,
@@ -1550,6 +1721,10 @@ export default function Home() {
       secondaryChunkDetectedFramesRef.current = 0;
       secondaryChunkFullBodyFramesRef.current = 0;
       secondaryChunkHandFramesRef.current = 0;
+      tertiaryPoseBufferRef.current = [];
+      tertiaryChunkDetectedFramesRef.current = 0;
+      tertiaryChunkFullBodyFramesRef.current = 0;
+      tertiaryChunkHandFramesRef.current = 0;
       const emptyStats: PoseStats = {
         frames: 0,
         detectedFrames: 0,
@@ -1568,10 +1743,13 @@ export default function Home() {
       setSessionCount((count) => count + 1);
       updatePoseStatus("searching");
       setSecondaryPoseStatus(secondaryStreamRef.current ? "searching" : "idle");
+      setTertiaryPoseStatus(tertiaryStreamRef.current ? "searching" : "idle");
       trackingActiveRef.current = true;
-      if (handLandmarkerRef.current) {
-        setCameraMessage(secondaryStreamRef.current
-          ? "두 카메라의 몸·손 좌표를 한 명의 공통 시간축에 기록하고 있어요."
+      if (connectionMessage) {
+        setCameraMessage(connectionMessage);
+      } else if (handLandmarkerRef.current) {
+        setCameraMessage(secondaryStreamRef.current || tertiaryStreamRef.current
+          ? `웹캠 ${connectedCameras.length}대의 몸·손 좌표를 한 명의 공통 시간축에 기록하고 있어요.`
           : "얼굴은 제외하고 몸·머리 방향·손가락 좌표를 기록하고 있어요.");
       } else {
         setCameraMessage("몸·머리 방향 좌표를 기록 중이에요. 손가락 추적은 이 기기에서 준비하지 못했어요.");
@@ -1634,7 +1812,11 @@ export default function Home() {
         .sort((a, b) => b.frames.filter((frame) => frame[1] === 1).length - a.frames.filter((frame) => frame[1] === 1).length)[0];
       const features = extractObservationFeatures(
         bestCamera?.frames ?? motionSlice.frames,
-        bestCamera?.cameraSlot === 2 ? observationProfile.secondaryZoneGrid : observationProfile.zoneGrid,
+        bestCamera?.cameraSlot === 3
+          ? observationProfile.tertiaryZoneGrid
+          : bestCamera?.cameraSlot === 2
+            ? observationProfile.secondaryZoneGrid
+            : observationProfile.zoneGrid,
         zoneAliases,
       );
       let episode: ReviewableObservationEpisode = createObservationEpisode({
@@ -1717,16 +1899,17 @@ export default function Home() {
     }
   }
 
-  async function stopPoseTracking() {
+  async function stopPoseTracking(analyzeSession = true) {
     trackingActiveRef.current = false;
     if (poseAnimationRef.current !== null) {
       cancelAnimationFrame(poseAnimationRef.current);
       poseAnimationRef.current = null;
     }
-    await Promise.all([flushPoseFrames(1), flushPoseFrames(2)]);
-    await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current]);
+    await Promise.all([flushPoseFrames(1), flushPoseFrames(2), flushPoseFrames(3)]);
+    await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current, tertiaryPoseWriteQueueRef.current]);
     const session = poseSessionRef.current;
     const secondarySession = secondaryPoseSessionRef.current;
+    const tertiarySession = tertiaryPoseSessionRef.current;
     const endedAt = currentEpochTime();
     let secondaryFrameCount = 0;
     if (secondarySession) {
@@ -1734,12 +1917,17 @@ export default function Home() {
       secondaryFrameCount = completedSecondary.frameCount;
       secondaryPoseSessionRef.current = null;
     }
+    if (tertiarySession) {
+      const completedTertiary = await finishMotionSession(tertiarySession, endedAt);
+      secondaryFrameCount += completedTertiary.frameCount;
+      tertiaryPoseSessionRef.current = null;
+    }
     if (session) {
       const completed = await finishMotionSession(session, endedAt);
       setLatestSession(completed);
       setRecentSessions((previous) => [completed, ...previous.filter((s) => s.id !== completed.id)].slice(0, 5));
       poseSessionRef.current = null;
-      if (consent.observationConsent && completed.frameCount + secondaryFrameCount >= 20) {
+      if (analyzeSession && consent.observationConsent && completed.frameCount + secondaryFrameCount >= 20) {
         void recordMotionDetections(completed.id, completed.globalSessionId).then(refreshCareData);
         void recordObservationSession(completed.id, endedAt, completed.globalSessionId);
       }
@@ -1762,43 +1950,50 @@ export default function Home() {
         overlayCanvasRef.current.height,
       );
     secondaryOverlayCanvasRef.current?.getContext("2d")?.clearRect(0, 0, secondaryOverlayCanvasRef.current.width, secondaryOverlayCanvasRef.current.height);
+    tertiaryOverlayCanvasRef.current?.getContext("2d")?.clearRect(0, 0, tertiaryOverlayCanvasRef.current.width, tertiaryOverlayCanvasRef.current.height);
     updatePoseStatus("idle");
     setSecondaryPoseStatus("idle");
+    setTertiaryPoseStatus("idle");
   }
 
-  async function stopCamera() {
+  async function stopCamera({ analyzeSession = true, notify = true } = {}) {
     if (document.fullscreenElement === cameraFeedLayoutRef.current) {
       await document.exitFullscreen().catch(() => undefined);
     }
-    await stopPoseTracking();
+    await stopPoseTracking(analyzeSession);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     secondaryStreamRef.current?.getTracks().forEach((track) => track.stop());
+    tertiaryStreamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     secondaryStreamRef.current = null;
+    tertiaryStreamRef.current = null;
     setSecondaryCameraConnected(false);
+    setTertiaryCameraConnected(false);
     if (videoRef.current) videoRef.current.srcObject = null;
     if (secondaryVideoRef.current) secondaryVideoRef.current.srcObject = null;
+    if (tertiaryVideoRef.current) tertiaryVideoRef.current.srcObject = null;
     if (processingVideoRef.current) processingVideoRef.current.srcObject = null;
     setCameraStatus("idle");
     poseTargetLockRef.current = null;
     setTargetLocked(false);
     setElapsedSeconds(0);
     setCameraMessage("카메라 연결을 멈췄어요.");
-    toast.success("좌표 기록을 안전하게 저장하고 카메라를 종료했어요");
+    if (notify) toast.success("좌표 기록을 안전하게 저장하고 카메라를 종료했어요");
   }
 
-  async function changeCameraSource(kind: "primary" | "secondary", deviceId: string) {
-    const nextPrimary = kind === "primary" ? deviceId : primaryCameraId;
-    let nextSecondary = kind === "secondary" ? deviceId : secondaryCameraId;
-    if (kind === "primary" && deviceId === secondaryCameraId) {
-      nextSecondary = primaryCameraId;
-    }
-    if (!nextPrimary || nextPrimary === nextSecondary) return;
+  async function changeCameraSource(slot: CameraSlot, deviceId: string) {
+    const next = [primaryCameraId, secondaryCameraId, tertiaryCameraId];
+    const previousIndex = next.indexOf(deviceId);
+    if (previousIndex >= 0) next[previousIndex] = next[slot - 1];
+    next[slot - 1] = deviceId;
+    const [nextPrimary, nextSecondary, nextTertiary] = next;
+    if (!nextPrimary || new Set(next.filter(Boolean)).size !== next.filter(Boolean).length) return;
     setPrimaryCameraId(nextPrimary);
     setSecondaryCameraId(nextSecondary);
+    setTertiaryCameraId(nextTertiary);
     if (cameraStatus === "connected") {
-      await stopCamera();
-      await startCamera(nextPrimary, nextSecondary);
+      await stopCamera({ analyzeSession: false, notify: false });
+      await startCamera(nextPrimary, nextSecondary, nextTertiary);
     }
   }
 
@@ -1903,6 +2098,7 @@ export default function Home() {
       baselineVersion: observationProfile.baselineVersion + 1,
       zoneGrid: Array(9).fill(null),
       secondaryZoneGrid: Array(9).fill(null),
+      tertiaryZoneGrid: Array(9).fill(null),
       customZones: observationProfile.customZones.map((zone) => ({
         ...zone,
         contextZoneId: inferZoneContext(template, zone.label)?.id ?? null,
@@ -1912,7 +2108,7 @@ export default function Home() {
     setOccupationInput(occupationName);
     setSelectedZoneId(template.zones[0]?.id ?? "");
     await refreshObservationData(next);
-    toast.success(`${occupationName}을(를) ${template.label} 업무 맥락으로 이해했어요`);
+    toast.success(`‘${occupationName}’ 업종을 ${template.label} 업무 맥락으로 이해했어요`);
   }
 
   function saveOccupation(event: FormEvent<HTMLFormElement>) {
@@ -1923,6 +2119,60 @@ export default function Home() {
       return;
     }
     void changeOccupation(name);
+  }
+
+  function beginOnboarding(step: OnboardingStep = 1) {
+    setOnboardingStep(step);
+    setView("onboarding");
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function openSettings(section: SettingsSection = null) {
+    setSettingsSection(section);
+    setView("settings");
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  async function continueOnboardingFromOccupation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = occupationInput.trim();
+    if (!name) {
+      toast.error("업종 이름을 입력해 주세요");
+      return;
+    }
+    if (name !== observationProfile.occupationName.trim()) {
+      await changeOccupation(name);
+    }
+    setOnboardingStep(2);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function continueOnboardingFromZones() {
+    const configuredCells = [
+      ...observationProfile.zoneGrid,
+      ...observationProfile.secondaryZoneGrid,
+      ...observationProfile.tertiaryZoneGrid,
+    ].filter(Boolean).length;
+    if (configuredCells === 0) {
+      toast.error("매장 구역을 하나 이상 지정해 주세요");
+      return;
+    }
+    setOnboardingStep(3);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function continueOnboardingFromRoutine() {
+    const routine = workContextConfig.routines[0];
+    if (!routine?.name.trim()) {
+      toast.error("업무 루틴 이름을 입력해 주세요");
+      return;
+    }
+    if (routine.days.length === 0) {
+      toast.error("업무 루틴을 적용할 요일을 하나 이상 선택해 주세요");
+      return;
+    }
+    setOnboardingStep(4);
+    window.scrollTo({ top: 0, behavior: "auto" });
   }
 
   async function changeObservationMode(mode: ObservationMode) {
@@ -1949,7 +2199,7 @@ export default function Home() {
   }
 
   async function assignZoneCell(index: number) {
-    const key = zoneCameraSlot === 1 ? "zoneGrid" : "secondaryZoneGrid";
+    const key = zoneCameraSlot === 1 ? "zoneGrid" : zoneCameraSlot === 2 ? "secondaryZoneGrid" : "tertiaryZoneGrid";
     const zoneGrid = [...observationProfile[key]];
     zoneGrid[index] = zoneGrid[index] === selectedZoneId ? null : selectedZoneId;
     const next = await saveObservationProfile({ ...observationProfile, [key]: zoneGrid });
@@ -2027,7 +2277,7 @@ export default function Home() {
       return;
     }
     if (cameraStatus === "connected") await stopCamera();
-    await startCamera(undefined, undefined, true);
+    await startCamera(undefined, undefined, undefined, true);
   }
 
   async function closeQuickMotionCamera() {
@@ -2381,6 +2631,45 @@ export default function Home() {
   );
   const todaySummary = userCareLogs[0] ? summarizeLog(userCareLogs[0]) : null;
   const activeNavItems = interfaceMode === "developer" ? developerNavItems : userNavItems;
+  const pageKey = `${interfaceMode}-${view}-${onboardingStep}-${settingsSection ?? "root"}`;
+  const pageMotionClass = animatedPageKey === pageKey ? " page-transition" : "";
+
+  useEffect(() => {
+    if (!pageMotionReadyRef.current) {
+      pageMotionReadyRef.current = true;
+      return;
+    }
+    setAnimatedPageKey(pageKey);
+    const timeout = window.setTimeout(() => setAnimatedPageKey(null), 260);
+    return () => window.clearTimeout(timeout);
+  }, [pageKey]);
+
+  useLayoutEffect(() => {
+    const nav = mainNavRef.current;
+    const pill = mainNavPillRef.current;
+    if (!nav || !pill || view === "onboarding") return;
+
+    const placePill = (animate: boolean) => {
+      const activeTab = nav.querySelector<HTMLButtonElement>('.t-tab[aria-current="page"]');
+      if (!activeTab) return;
+      if (!animate) pill.style.transition = "none";
+      pill.style.width = `${activeTab.offsetWidth}px`;
+      pill.style.transform = `translateX(${activeTab.offsetLeft}px)`;
+      if (!animate) {
+        void pill.offsetWidth;
+        pill.style.transition = "";
+      }
+    };
+
+    const modeChanged = previousNavModeRef.current !== interfaceMode;
+    placePill(navPillReadyRef.current && !modeChanged);
+    navPillReadyRef.current = true;
+    previousNavModeRef.current = interfaceMode;
+
+    const handleResize = () => placePill(false);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [interfaceMode, view]);
   const realHasNotice = changeSignal.level !== "none";
   const realFlowMessage = !careBaseline
     ? "평소 흐름을 알아가는 중이에요."
@@ -2395,10 +2684,22 @@ export default function Home() {
   const occupationTemplate = getOccupationTemplate(observationProfile.occupation);
   const occupationDisplayName = observationProfile.occupationName.trim() || occupationTemplate.label;
   const occupationDraftInference = inferOccupationContext(occupationInput);
+  const onboardingRoutine = workContextConfig.routines[0] ?? DEFAULT_WORK_ROUTINE;
+  const settingsSectionTitle = settingsSection === "occupation"
+    ? "업종 변경"
+    : settingsSection === "observation"
+      ? "관찰 방식"
+      : settingsSection === "context"
+        ? "업무 맥락 등록"
+        : settingsSection === "checklist"
+          ? "마감 체크리스트 수정"
+          : "설정";
   const zoneOptions = [...occupationTemplate.zones, ...observationProfile.customZones];
   const activeZoneGrid = zoneCameraSlot === 1
     ? observationProfile.zoneGrid
-    : observationProfile.secondaryZoneGrid;
+    : zoneCameraSlot === 2
+      ? observationProfile.secondaryZoneGrid
+      : observationProfile.tertiaryZoneGrid;
   const selectedCustomZone = observationProfile.customZones.find((zone) => zone.id === selectedZoneId);
   const selectedZoneContext = selectedCustomZone?.contextZoneId
     ? occupationTemplate.zones.find((zone) => zone.id === selectedCustomZone.contextZoneId)
@@ -2533,12 +2834,13 @@ export default function Home() {
     setUserInstall(install);
     setObservationProfile(nextProfile);
     await refreshObservationData(nextProfile);
+    setOnboardingStep(1);
     setView("home");
     toast.success("초기 설정을 마쳤어요. 새로운 사용자 기준으로 학습을 시작합니다.");
   }
 
   return (
-    <main className={`app-shell interface-${interfaceMode}`}>
+    <main className={`app-shell interface-${interfaceMode}${view === "onboarding" ? " onboarding-active" : ""}`}>
       <video
         ref={processingVideoRef}
         className="processing-video"
@@ -2555,12 +2857,18 @@ export default function Home() {
           </span>
         </div>
 
-        <nav className="main-nav" aria-label="주요 메뉴">
+        <nav ref={mainNavRef} className="main-nav t-tabs" aria-label="주요 메뉴">
+          <span ref={mainNavPillRef} className="t-tabs-pill" aria-hidden="true" />
           {activeNavItems.map((item) => (
             <button
               key={item.id}
-              className={view === item.id ? "active" : ""}
+              className={`t-tab ${view === item.id ? "active" : ""}`}
               onClick={() => {
+                if (interfaceMode === "user" && !userInstall && item.id === "settings") {
+                  beginOnboarding();
+                  return;
+                }
+                if (item.id === "settings") setSettingsSection(null);
                 setView(item.id);
                 window.scrollTo({ top: 0, behavior: "auto" });
               }}
@@ -2617,7 +2925,7 @@ export default function Home() {
                 aria-label={cameraStatus === "connected" ? "카메라 연결 끄기" : "카메라 연결하기"}
               >
                 <span aria-hidden="true" />
-                {cameraStatus === "connected" ? "연결됨" : cameraStatus === "requesting" ? "연결 중" : "카메라 연결"}
+                {cameraStatus === "connected" ? "연결됨" : cameraStatus === "requesting" ? <ShimmerText>연결 중</ShimmerText> : "카메라 연결"}
               </button>
               <button className="notification-button" type="button" onClick={() => setView("care")} aria-label="변화 알림 보기">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>
@@ -2646,7 +2954,8 @@ export default function Home() {
               {view === "today" && "카메라 기능 테스트"}
               {view === "timeline" && "오늘의 기록"}
               {view === "care" && (interfaceMode === "user" ? "이번 주 변화" : "가상 케어 리포트")}
-              {view === "settings" && (interfaceMode === "user" ? "설정" : "테스트 설정")}
+              {view === "settings" && (interfaceMode === "user" ? settingsSectionTitle : "테스트 설정")}
+              {view === "onboarding" && `초기 설정 ${onboardingStep}/4`}
             </h1>
           </div>
           <div className="topbar-actions">
@@ -2654,9 +2963,11 @@ export default function Home() {
               <span aria-hidden="true" />
               {interfaceMode === "user"
                 ? cameraStatus === "connected"
-                  ? secondaryCameraConnected ? "카메라 2대 연결됨" : "카메라 연결됨"
+                  ? tertiaryCameraConnected ? "웹캠 3대 연결됨" : secondaryCameraConnected ? "웹캠 2대 연결됨" : "웹캠 연결됨"
                   : "카메라 연결 대기"
-                : statusText}
+                : cameraStatus === "requesting"
+                  ? <ShimmerText>{statusText}</ShimmerText>
+                  : statusText}
             </div>
             <button
               type="button"
@@ -2673,19 +2984,20 @@ export default function Home() {
         </header>
 
         {view === "home" && (
-          <div className="mobile-home-view">
+          <div className={`mobile-home-view${pageMotionClass}`}>
             {!userInstall ? (
               <section className="first-user-welcome">
                 <span className="welcome-mark" aria-hidden="true">M</span>
                 <span className="section-kicker">처음 시작하기</span>
                 <h2>사장님의 평소 업무 흐름부터 알아갈게요</h2>
-                <p>아직 연결된 기록이 없어요. 먼저 업종과 매장 구역을 확인한 뒤, 1~2주 동안 학습 모드로 평소 루틴을 익힙니다.</p>
+                <p>아직 연결된 기록이 없어요. 업종, 매장 구역과 업무 루틴을 확인한 뒤, 1~2주 동안 학습 모드로 평소 흐름을 익힙니다.</p>
                 <div className="first-user-steps" aria-label="초기 설정 순서">
                   <span><i>1</i><strong>업종 입력</strong></span>
                   <span><i>2</i><strong>매장 구역 설정</strong></span>
-                  <span><i>3</i><strong>학습 시작</strong></span>
+                  <span><i>3</i><strong>업무 루틴 입력</strong></span>
+                  <span><i>4</i><strong>학습 시작</strong></span>
                 </div>
-                <button type="button" onClick={() => setView("settings")}>초기 설정 시작하기</button>
+                <button type="button" onClick={() => beginOnboarding()}>초기 설정 시작하기</button>
                 <small>개발자 모드에서 만든 가상 데이터와 테스트 기록은 사용자 화면에 나타나지 않아요.</small>
               </section>
             ) : (
@@ -2711,7 +3023,7 @@ export default function Home() {
                   </div>
                 </section>
 
-                <button className="home-observation-mode" type="button" onClick={() => setView("settings")}>
+                <button className="home-observation-mode" type="button" onClick={() => openSettings("observation")}>
                   <span className={`home-mode-icon mode-${observationProfile.mode}`} aria-hidden="true">
                     {observationProfile.mode === "learning" ? "↻" : "⌁"}
                   </span>
@@ -2759,7 +3071,7 @@ export default function Home() {
                       </label>
                     ))}
                   </div>
-                  <button className="checklist-settings-link" type="button" onClick={() => setView("settings")}>항목 수정하기</button>
+                  <button className="checklist-settings-link" type="button" onClick={() => openSettings("checklist")}>항목 수정하기</button>
                 </section>
 
                 <section className="home-flow-card">
@@ -2816,15 +3128,148 @@ export default function Home() {
           </div>
         )}
 
+        {view === "onboarding" && interfaceMode === "user" && !userInstall && (
+          <div className="onboarding-page">
+            <div className="onboarding-progress" aria-label={`초기 설정 4단계 중 ${onboardingStep}단계`}>
+              <div>
+                {[1, 2, 3, 4].map((step) => (
+                  <span key={step} className={onboardingStep >= step ? "active" : ""} aria-hidden="true" />
+                ))}
+              </div>
+              <small>{onboardingStep === 1 ? "업종 입력" : onboardingStep === 2 ? "매장 구역 설정" : onboardingStep === 3 ? "업무 루틴 입력" : "학습 시작"}</small>
+            </div>
+
+            {onboardingStep === 1 && (
+              <section className={`onboarding-step${pageMotionClass}`} aria-labelledby="onboarding-occupation-title">
+                <span className="onboarding-step-number">1</span>
+                <span className="section-kicker">첫 번째 단계</span>
+                <h2 id="onboarding-occupation-title">어떤 매장을 운영하고 계신가요?</h2>
+                <p>업종에 맞는 기본 업무 흐름과 추천 구역을 준비할게요.</p>
+                <form className="onboarding-form" onSubmit={(event) => void continueOnboardingFromOccupation(event)}>
+                  <label htmlFor="onboarding-occupation">
+                    <span>업종 이름</span>
+                    <input
+                      id="onboarding-occupation"
+                      value={occupationInput}
+                      onChange={(event) => setOccupationInput(event.target.value)}
+                      placeholder="예: 디저트 카페, 네일숍, 꽃 공방"
+                      autoComplete="organization"
+                    />
+                  </label>
+                  {occupationInput.trim() && (
+                    <small className="onboarding-context-hint">
+                      {occupationDraftInference.matched
+                        ? `${occupationDraftInference.template.label} 업무 맥락으로 시작해요.`
+                        : "기본 매장 맥락으로 시작하고, 다음 단계에서 실제 구역에 맞게 보완해요."}
+                    </small>
+                  )}
+                  <button type="submit">다음: 매장 구역 설정</button>
+                </form>
+              </section>
+            )}
+
+            {onboardingStep === 2 && (
+              <section className={`onboarding-step${pageMotionClass}`} aria-labelledby="onboarding-zone-title">
+                <span className="onboarding-step-number">2</span>
+                <span className="section-kicker">두 번째 단계</span>
+                <h2 id="onboarding-zone-title">카메라 화면에 매장 구역을 표시해 주세요</h2>
+                <p>계산대, 작업대처럼 자주 일하는 위치를 하나 이상 지정하면 동작의 맥락을 더 정확히 이해할 수 있어요.</p>
+                <div className="onboarding-zone-summary">
+                  <span>현재 업종</span>
+                  <strong>{occupationDisplayName}</strong>
+                  <small>설정 창에서 카메라별 3×3 화면을 눌러 구역을 지정합니다.</small>
+                </div>
+                <div className="onboarding-actions">
+                  <button className="onboarding-secondary" type="button" onClick={() => setOnboardingStep(1)}>이전</button>
+                  <button type="button" onClick={() => setZoneSetupOpen(true)}>매장 구역 설정하기</button>
+                  <button className="onboarding-next" type="button" onClick={continueOnboardingFromZones}>다음: 업무 루틴 입력</button>
+                </div>
+              </section>
+            )}
+
+            {onboardingStep === 3 && (
+              <section className={`onboarding-step${pageMotionClass}`} aria-labelledby="onboarding-routine-title">
+                <span className="onboarding-step-number">3</span>
+                <span className="section-kicker">세 번째 단계</span>
+                <h2 id="onboarding-routine-title">평소 업무 루틴을 알려주세요</h2>
+                <p>주로 일하는 요일과 오픈·마감 시각을 기준으로, 같은 시간대의 업무 흐름을 비교해요.</p>
+                <div className="onboarding-routine-card">
+                  <label className="onboarding-routine-name" htmlFor="onboarding-routine-name">
+                    <span>루틴 이름</span>
+                    <input
+                      id="onboarding-routine-name"
+                      value={onboardingRoutine.name}
+                      onChange={(event) => renameRoutine(onboardingRoutine.id, event.target.value)}
+                      placeholder="예: 평일 루틴"
+                    />
+                  </label>
+                  <fieldset className="onboarding-routine-days">
+                    <legend>이 루틴을 적용할 요일</legend>
+                    <div className="weekday-chip-row">
+                      {WEEKDAY_DISPLAY_ORDER.map((day) => (
+                        <button
+                          key={day}
+                          type="button"
+                          className={`weekday-toggle-chip ${onboardingRoutine.days.includes(day) ? "active" : ""}`}
+                          onClick={() => assignDayToRoutine(onboardingRoutine.id, day)}
+                          aria-pressed={onboardingRoutine.days.includes(day)}
+                        >
+                          {WEEKDAY_LABELS[day]}
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <div className="onboarding-routine-times">
+                    <label>
+                      <span>출근·오픈 시각</span>
+                      <input type="time" value={onboardingRoutine.openTime} onChange={(event) => setRoutineTime(onboardingRoutine.id, "openTime", event.target.value)} />
+                    </label>
+                    <label>
+                      <span>마감 시각</span>
+                      <input type="time" value={onboardingRoutine.closeTime} onChange={(event) => setRoutineTime(onboardingRoutine.id, "closeTime", event.target.value)} />
+                    </label>
+                  </div>
+                  <small>세부 반복 업무와 추가 루틴은 설정 탭에서 언제든 수정할 수 있어요.</small>
+                </div>
+                <div className="onboarding-actions">
+                  <button className="onboarding-secondary" type="button" onClick={() => setOnboardingStep(2)}>이전</button>
+                  <button className="onboarding-next" type="button" onClick={continueOnboardingFromRoutine}>다음: 학습 시작 확인</button>
+                </div>
+              </section>
+            )}
+
+            {onboardingStep === 4 && (
+              <section className={`onboarding-step${pageMotionClass}`} aria-labelledby="onboarding-learning-title">
+                <span className="onboarding-step-number">4</span>
+                <span className="section-kicker">마지막 단계</span>
+                <h2 id="onboarding-learning-title">이제 평소 업무 흐름을 학습할게요</h2>
+                <p>처음 1~2주 동안은 특이하거나 확실하지 않은 동작을 제외하고, 사장님의 평소 루틴만 차분히 익힙니다.</p>
+                <dl className="onboarding-review">
+                  <div><dt>업종</dt><dd>{occupationDisplayName}</dd></div>
+                  <div><dt>업무 루틴</dt><dd>{onboardingRoutine.name}</dd></div>
+                  <div><dt>운영 시각</dt><dd>{formatClockLabel(onboardingRoutine.openTime)}–{formatClockLabel(onboardingRoutine.closeTime)}</dd></div>
+                  <div><dt>시작 모드</dt><dd>학습 모드</dd></div>
+                  <div><dt>데이터 기준</dt><dd>새 사용자 기록만 사용</dd></div>
+                </dl>
+                <div className="onboarding-actions final">
+                  <button className="onboarding-secondary" type="button" onClick={() => setOnboardingStep(3)}>이전</button>
+                  <button type="button" onClick={() => void completeFirstUserSetup()}>설정 완료하고 학습 시작하기</button>
+                </div>
+                <small className="onboarding-privacy-note">개발자 모드의 가상 데이터와 테스트 기록은 사용자 기준선에 포함되지 않아요.</small>
+              </section>
+            )}
+          </div>
+        )}
+
         {view === "today" && (
-          <div className="today-view">
+          <div className={`today-view${pageMotionClass}`}>
             <section className="safety-banner">
               <div className="safety-check" aria-hidden="true">
                 ✓
               </div>
               <div>
                 <strong>테스트 중인 기능이에요</strong>
-                <p>내장 카메라와 웹캠을 고정한 뒤, 두 화면 사이로 이동하며 예시 동작을 따라 해보세요.</p>
+                <p>웹캠 3대를 고정한 뒤, 세 화면 사이로 이동하며 예시 동작을 따라 해보세요.</p>
               </div>
               <button type="button" onClick={() => setView("settings")}>
                 설정으로 <span aria-hidden="true">›</span>
@@ -2967,7 +3412,7 @@ export default function Home() {
                       >
                         동작 촬영 시작
                       </button>
-                      <span>내장 카메라 촬영 창이 별도로 열립니다.</span>
+                      <span>저장된 1번 웹캠 촬영 창이 별도로 열립니다.</span>
                     </div>
                   )}
 
@@ -3084,8 +3529,8 @@ export default function Home() {
               <section className={`panel camera-panel ${quickMotionMode !== "idle" ? "quick-motion-hidden" : ""}`}>
                 <div className="panel-heading">
                   <div>
-                    <span className="section-kicker">두 카메라 테스트</span>
-                    <h2>내장 카메라와 웹캠 확인</h2>
+                    <span className="section-kicker">외장 웹캠 3대 테스트</span>
+                    <h2>웹캠 3대 연결 확인</h2>
                   </div>
                   {cameraStatus === "connected" && (
                     <div className="camera-badges">
@@ -3105,7 +3550,7 @@ export default function Home() {
                       <span>카메라 1</span>
                       <select
                         value={primaryCameraId}
-                        onChange={(event) => void changeCameraSource("primary", event.target.value)}
+                        onChange={(event) => void changeCameraSource(1, event.target.value)}
                         disabled={cameraStatus === "requesting"}
                       >
                         {availableCameras.map((camera, index) => (
@@ -3120,7 +3565,7 @@ export default function Home() {
                         <span>카메라 2</span>
                         <select
                           value={secondaryCameraId}
-                          onChange={(event) => void changeCameraSource("secondary", event.target.value)}
+                          onChange={(event) => void changeCameraSource(2, event.target.value)}
                           disabled={cameraStatus === "requesting"}
                         >
                           {availableCameras
@@ -3133,6 +3578,22 @@ export default function Home() {
                         </select>
                       </label>
                     )}
+                    {availableCameras.length > 2 && (
+                      <label>
+                        <span>카메라 3</span>
+                        <select
+                          value={tertiaryCameraId}
+                          onChange={(event) => void changeCameraSource(3, event.target.value)}
+                          disabled={cameraStatus === "requesting"}
+                        >
+                          {availableCameras
+                            .filter((camera) => camera.deviceId !== primaryCameraId && camera.deviceId !== secondaryCameraId)
+                            .map((camera, index) => (
+                              <option key={camera.deviceId} value={camera.deviceId}>{cameraDisplayName(camera, index)}</option>
+                            ))}
+                        </select>
+                      </label>
+                    )}
                   </div>
                 )}
 
@@ -3140,7 +3601,7 @@ export default function Home() {
                   <div className="camera-connect-action" aria-live="polite">
                     <p>{cameraMessage}</p>
                     <button className="primary-button" type="button" onClick={requestCameraStart} disabled={cameraStatus === "requesting"}>
-                      {cameraStatus === "requesting" ? "연결 중…" : "카메라 연결"}
+                      {cameraStatus === "requesting" ? <ShimmerText>연결 중…</ShimmerText> : "카메라 연결"}
                     </button>
                   </div>
                 )}
@@ -3263,7 +3724,7 @@ export default function Home() {
         )}
 
         {view === "timeline" && (
-          <div className="subpage timeline-page">
+          <div className={`subpage timeline-page${pageMotionClass}`}>
             <div className="subpage-intro">
               <div>
                 <span className="section-kicker">하루의 기억을 한눈에</span>
@@ -3278,16 +3739,47 @@ export default function Home() {
         )}
 
         {view === "settings" && (
-          <div className="settings-page">
+          <div className={`settings-page${pageMotionClass}`}>
             {interfaceMode === "user" ? (
               <>
-                {!userInstall && (
+                {settingsSection !== null && (
+                  <div className="settings-subpage-head">
+                    <button type="button" onClick={() => { setSettingsSection(null); window.scrollTo({ top: 0, behavior: "auto" }); }} aria-label="설정 목록으로 돌아가기">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+                    </button>
+                    <div><span className="section-kicker">설정</span><strong>{settingsSectionTitle}</strong></div>
+                  </div>
+                )}
+
+                {settingsSection === null && !userInstall && (
                   <section className="first-user-settings-head">
                     <span>초기 설정</span>
                     <strong>아래 내용을 확인하면 새로운 학습을 시작할 수 있어요.</strong>
                   </section>
                 )}
-                <section className="settings-intro-card">
+
+                {settingsSection === null && (
+                  <section className="settings-section-menu" aria-label="사용자 설정 메뉴">
+                    <button type="button" onClick={() => setSettingsSection("occupation")}>
+                      <span className="settings-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 10h16v10H4zM3 10l2-6h14l2 6M8 20v-6h4v6" /></svg></span>
+                      <span><strong>업종 변경</strong><small>{occupationDisplayName} · 매장 구역도 함께 관리해요</small></span><i aria-hidden="true">›</i>
+                    </button>
+                    <button type="button" onClick={() => setSettingsSection("observation")}>
+                      <span className="settings-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" /><circle cx="12" cy="12" r="2.5" /></svg></span>
+                      <span><strong>관찰 방식</strong><small>{observationProfile.mode === "learning" ? "학습 모드" : "분석 모드"}</small></span><i aria-hidden="true">›</i>
+                    </button>
+                    <button type="button" onClick={() => setSettingsSection("context")}>
+                      <span className="settings-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z" /></svg></span>
+                      <span><strong>업무 맥락 등록</strong><small>{workContextConfig.routines.length}개 루틴 · 정기 휴일 {workContextConfig.closedDays.length}일</small></span><i aria-hidden="true">›</i>
+                    </button>
+                    <button type="button" onClick={() => setSettingsSection("checklist")}>
+                      <span className="settings-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m5 7 2 2 4-4M5 13l2 2 4-4M13 8h6M13 14h6M5 20h14" /></svg></span>
+                      <span><strong>마감 체크리스트 수정</strong><small>{closingChecklist.length}개 항목</small></span><i aria-hidden="true">›</i>
+                    </button>
+                  </section>
+                )}
+
+                {settingsSection === "occupation" && <section className="settings-intro-card">
                   <span className="section-kicker">나의 업무 환경</span>
                   <h2>{occupationDisplayName}</h2>
                   <p>입력한 업종 이름을 로컬에서 가장 가까운 업무 맥락으로 해석해요.</p>
@@ -3313,9 +3805,9 @@ export default function Home() {
                         : "정확히 일치하는 업종이 없어 기본 매장 맥락으로 시작합니다. 매장 구역과 업무 루틴을 입력하면 실제 환경에 맞게 보완됩니다."}
                     </small>
                   )}
-                </section>
+                </section>}
 
-                <section className={`settings-observation-mode mode-${userInstall ? observationProfile.mode : "learning"}`}>
+                {settingsSection === "observation" && <section className={`settings-observation-mode mode-${userInstall ? observationProfile.mode : "learning"}`}>
                   <div>
                     <span className="section-kicker">관찰 방식</span>
                     <h2>{!userInstall || observationProfile.mode === "learning" ? "평소 업무 흐름부터 학습해요" : "평소 흐름과 오늘의 동작을 비교하고 있어요"}</h2>
@@ -3354,16 +3846,16 @@ export default function Home() {
                       ? "모드를 바꿔도 기존에 학습한 기준선과 케어 기록은 삭제되지 않아요."
                       : "처음 설정을 마치면 개발 테스트 기록과 분리된 새 학습 기준선이 만들어져요."}
                   </p>
-                </section>
+                </section>}
 
-                {!userInstall && (
+                {settingsSection === null && !userInstall && (
                   <button className="complete-user-setup" type="button" onClick={() => void completeFirstUserSetup()}>
                     설정 완료하고 학습 시작하기
                     <span>이전 개발 테스트 기록과 분리된 새 사용자 기준선이 만들어져요.</span>
                   </button>
                 )}
 
-                <section className="settings-checklist-card work-context-card">
+                {settingsSection === "context" && <section className="settings-checklist-card work-context-card">
                   <div>
                     <span className="section-kicker">업무 맥락 등록</span>
                     <h2>사장님의 실제 업무 루틴을 알려주세요</h2>
@@ -3486,9 +3978,9 @@ export default function Home() {
                   ))}
 
                   <button type="button" className="work-routine-add" onClick={addRoutine}>+ 새 루틴 추가</button>
-                </section>
+                </section>}
 
-                <section className="settings-checklist-card">
+                {settingsSection === "checklist" && <section className="settings-checklist-card">
                   <div>
                     <span className="section-kicker">마감 체크리스트</span>
                     <h2>필요한 항목을 직접 확인해요</h2>
@@ -3511,7 +4003,7 @@ export default function Home() {
                     />
                     <button type="submit">항목 추가</button>
                   </form>
-                </section>
+                </section>}
 
               </>
             ) : (
@@ -3520,12 +4012,12 @@ export default function Home() {
                 <h2>카메라 인식을 검증해요</h2>
                 <p>이 화면의 기능과 데이터는 실제 사용자가 보는 사용자 모드에는 표시되지 않아요.</p>
                 <div className="developer-setting-summary">
-                  <span><small>입력 장치</small><strong>내장 카메라 + 웹캠</strong></span>
+                  <span><small>입력 장치</small><strong>외장 웹캠 3대</strong></span>
                 </div>
               </section>
             )}
 
-            <section className="settings-list" aria-label="설정 목록">
+            {(interfaceMode === "developer" || settingsSection === null) && <section className="settings-list" aria-label="설정 목록">
               <button type="button" onClick={() => setMyDataOpen(true)}>
                 <span aria-hidden="true">◌</span>
                 <span><strong>내 데이터 관리</strong><small>저장된 테스트 기록을 확인하거나 삭제해요</small></span>
@@ -3546,31 +4038,31 @@ export default function Home() {
               {interfaceMode === "developer" && (
                 <button type="button" onClick={() => setView("today")}>
                   <span aria-hidden="true">⌁</span>
-                  <span><strong>두 카메라 기능 테스트</strong><small>카메라별 재생과 시공간 인계 분석을 확인해요</small></span>
+                  <span><strong>웹캠 3대 기능 테스트</strong><small>카메라별 재생과 시공간 인계 분석을 확인해요</small></span>
                   <i aria-hidden="true">›</i>
                 </button>
               )}
-            </section>
+            </section>}
 
             {interfaceMode === "developer" && (
               <section className="settings-note">
                 <strong>개발자 모드 안내</strong>
-                <p>현재는 내장 카메라와 웹캠을 이용한 짧은 동작 테스트와 카메라 간 인계 검증을 지원해요. IoT·POS 연동은 이후 단계에서 추가합니다.</p>
+                <p>현재는 외장 웹캠 3대를 이용한 동작 테스트와 카메라 간 인계 검증을 지원해요. IoT·POS 연동은 이후 단계에서 추가합니다.</p>
               </section>
             )}
 
-            <section className="factory-reset-card">
+            {(interfaceMode === "developer" || settingsSection === null) && <section className="factory-reset-card">
               <div>
                 <strong>처음 화면으로 돌아가기</strong>
                 <p>사용자 기록, 학습 기준선, 동작 좌표와 설정을 모두 지우고 처음 설치한 상태로 돌아가요.</p>
               </div>
               <button type="button" onClick={() => void resetToFirstScreen()}>전체 초기화</button>
-            </section>
+            </section>}
           </div>
         )}
 
         {view === "care" && (
-          <div className="subpage care-page">
+          <div className={`subpage care-page${pageMotionClass}`}>
             {interfaceMode === "developer" && <section className="demo-switcher">
               <div>
                 <span className="section-kicker">테스트용 케어 기록</span>
@@ -3592,7 +4084,7 @@ export default function Home() {
                 <CareMark />
                 <h2>아직 사용자 기록이 없어요</h2>
                 <p>초기 설정을 마치고 학습을 시작하면, 새로 쌓이는 기록만 이곳에 표시됩니다. 개발자 모드의 가상·테스트 기록은 포함되지 않아요.</p>
-                <button type="button" onClick={() => setView("settings")}>초기 설정 시작하기</button>
+                <button type="button" onClick={() => beginOnboarding()}>초기 설정 시작하기</button>
               </section>
             ) : interfaceMode === "developer" && demoMode ? (
               <>
@@ -3919,12 +4411,12 @@ export default function Home() {
         open={multiCameraModalOpen}
         onClose={() => setMultiCameraModalOpen(false)}
         labelledBy="multi-camera-modal-title"
-        className={`multi-camera-modal ${secondaryCameraConnected ? "has-secondary-camera" : "single-camera"}`}
+        className={`multi-camera-modal ${tertiaryCameraConnected ? "has-tertiary-camera" : secondaryCameraConnected ? "has-secondary-camera" : "single-camera"}`}
       >
         <button className="modal-close" type="button" onClick={() => setMultiCameraModalOpen(false)} aria-label="카메라 팝업 닫기">×</button>
         <header className="multi-camera-modal-header">
           <div className="multi-camera-modal-heading">
-            <span className="section-kicker">두 카메라 테스트 · 영상 저장 안 함</span>
+            <span className="section-kicker">외장 웹캠 3대 · 영상 저장 안 함</span>
             <h2 id="multi-camera-modal-title">카메라 화면 확인</h2>
             <p>{cameraMessage}</p>
           </div>
@@ -3935,7 +4427,7 @@ export default function Home() {
                 <span>카메라 1</span>
                 <select
                   value={primaryCameraId}
-                  onChange={(event) => void changeCameraSource("primary", event.target.value)}
+                  onChange={(event) => void changeCameraSource(1, event.target.value)}
                   disabled={cameraStatus === "requesting"}
                 >
                   {availableCameras.map((camera, index) => (
@@ -3948,11 +4440,27 @@ export default function Home() {
                   <span>카메라 2</span>
                   <select
                     value={secondaryCameraId}
-                    onChange={(event) => void changeCameraSource("secondary", event.target.value)}
+                    onChange={(event) => void changeCameraSource(2, event.target.value)}
                     disabled={cameraStatus === "requesting"}
                   >
                     {availableCameras
                       .filter((camera) => camera.deviceId !== primaryCameraId)
+                      .map((camera, index) => (
+                        <option key={camera.deviceId} value={camera.deviceId}>{cameraDisplayName(camera, index)}</option>
+                      ))}
+                  </select>
+                </label>
+              )}
+              {availableCameras.length > 2 && (
+                <label>
+                  <span>카메라 3</span>
+                  <select
+                    value={tertiaryCameraId}
+                    onChange={(event) => void changeCameraSource(3, event.target.value)}
+                    disabled={cameraStatus === "requesting"}
+                  >
+                    {availableCameras
+                      .filter((camera) => camera.deviceId !== primaryCameraId && camera.deviceId !== secondaryCameraId)
                       .map((camera, index) => (
                         <option key={camera.deviceId} value={camera.deviceId}>{cameraDisplayName(camera, index)}</option>
                       ))}
@@ -3991,7 +4499,9 @@ export default function Home() {
                 {cameraFullscreen ? "전체화면 닫기" : "전체화면"}
               </button>
               <div className="camera-caption">
-                <span className={`pose-state ${poseStatus}`}><i aria-hidden="true" /> {poseStatusLabel}</span>
+                <span className={`pose-state ${poseStatus}`}>
+                  <i aria-hidden="true" /> {poseStatus === "loading" ? <ShimmerText>{poseStatusLabel}</ShimmerText> : poseStatusLabel}
+                </span>
               </div>
             </div>
 
@@ -4008,11 +4518,30 @@ export default function Home() {
                 </div>
               </section>
             )}
+            {tertiaryCameraConnected && (
+              <section className="secondary-camera-frame" aria-label="카메라 3 화면">
+                <div className="secondary-camera-heading">
+                  <span>카메라 3</span>
+                  <small>공통 대상 · 좌표 기록</small>
+                </div>
+                <div className="camera-secondary-view">
+                  <video ref={tertiaryVideoRef} muted playsInline aria-label="카메라 3 영상" />
+                  <canvas ref={tertiaryOverlayCanvasRef} className="pose-overlay" aria-label="카메라 3 전신 스켈레톤" />
+                  <span className={`secondary-pose-state ${tertiaryPoseStatus}`}>좌표 · {tertiaryPoseStatus === "full" ? "전신 인식" : tertiaryPoseStatus === "partial" ? "일부 인식" : tertiaryPoseStatus === "error" ? "추적 오류" : "찾는 중"}</span>
+                </div>
+              </section>
+            )}
           </div>
         ) : (
           <div className={`multi-camera-modal-waiting status-${cameraStatus}`} aria-live="polite">
             <span aria-hidden="true" />
-            <strong>{cameraStatus === "requesting" ? "카메라를 연결하고 있어요" : cameraStatus === "error" ? "카메라를 연결하지 못했어요" : "카메라 연결을 기다리고 있어요"}</strong>
+            <strong>
+              {cameraStatus === "requesting"
+                ? <ShimmerText>카메라를 연결하고 있어요</ShimmerText>
+                : cameraStatus === "error"
+                  ? "카메라를 연결하지 못했어요"
+                  : "카메라 연결을 기다리고 있어요"}
+            </strong>
             <p>{cameraMessage}</p>
             {cameraStatus !== "requesting" && (
               <button className="primary-button" type="button" onClick={requestCameraStart}>다시 연결</button>
@@ -4036,7 +4565,7 @@ export default function Home() {
       >
         <button className="modal-close" type="button" onClick={() => void closeQuickMotionCamera()} aria-label="촬영 창 닫기">×</button>
         <div className="quick-motion-camera-heading">
-          <span className="section-kicker">내장 카메라 · 영상 저장 안 함</span>
+          <span className="section-kicker">1번 웹캠 · 영상 저장 안 함</span>
           <h2 id="quick-motion-camera-title">
             {quickMotionMode === "training"
               ? `${draftMotionSamples.length + 1}번째 동작을 보여주세요`
@@ -4046,10 +4575,16 @@ export default function Home() {
         </div>
 
         <div className={`quick-motion-camera-preview status-${cameraStatus}`}>
-          <video ref={quickMotionVideoRef} muted playsInline aria-label="내장 카메라 동작 촬영 영상" />
+          <video ref={quickMotionVideoRef} muted playsInline aria-label="1번 웹캠 동작 촬영 영상" />
           {cameraStatus !== "connected" && (
             <div className="quick-motion-camera-waiting">
-              <strong>{cameraStatus === "error" ? "내장 카메라를 연결하지 못했어요" : "내장 카메라를 준비하고 있어요"}</strong>
+              <strong>
+                {cameraStatus === "error"
+                  ? "1번 웹캠을 연결하지 못했어요"
+                  : cameraStatus === "requesting"
+                    ? <ShimmerText>1번 웹캠을 준비하고 있어요</ShimmerText>
+                    : "1번 웹캠을 준비하고 있어요"}
+              </strong>
               <span>{cameraMessage}</span>
             </div>
           )}
@@ -4305,19 +4840,17 @@ export default function Home() {
         <h2 id="zone-setup-title">카메라 화면에 매장 구역을 표시해 주세요</h2>
         <p>카메라를 고르고, 실제 화면에서 구역에 가까운 칸을 눌러주세요. 카메라 위치가 바뀌면 다시 설정해야 해요.</p>
         <div className="zone-camera-tabs" role="tablist" aria-label="편집할 카메라">
-          {[1, 2].map((slot) => (
+          {([1, 2, 3] as CameraSlot[]).map((slot) => (
             <button
               key={slot}
               type="button"
               role="tab"
               aria-selected={zoneCameraSlot === slot}
               className={zoneCameraSlot === slot ? "active" : ""}
-              onClick={() => setZoneCameraSlot(slot as 1 | 2)}
+              onClick={() => setZoneCameraSlot(slot)}
             >
               <strong>카메라 {slot}</strong>
-              <span>{slot === 1
-                ? availableCameras.find((camera) => camera.deviceId === primaryCameraId)?.label || "기본 카메라"
-                : availableCameras.find((camera) => camera.deviceId === secondaryCameraId)?.label || "두 번째 카메라"}</span>
+              <span>{availableCameras.find((camera) => camera.deviceId === [primaryCameraId, secondaryCameraId, tertiaryCameraId][slot - 1])?.label || `카메라 ${slot}`}</span>
             </button>
           ))}
         </div>
@@ -4360,7 +4893,7 @@ export default function Home() {
               : "새 구역으로 기록하고 행동·시간대와 함께 학습해요."}
           </p>
         )}
-        <div className="zone-camera-grid" aria-label={`카메라 ${zoneCameraSlot} 화면 3×3 구역 설정`}>
+        <div key={zoneCameraSlot} className="zone-camera-grid" aria-label={`카메라 ${zoneCameraSlot} 화면 3×3 구역 설정`}>
           {activeZoneGrid.map((zoneId, index) => {
             const zone = zoneOptions.find((item) => item.id === zoneId);
             return (
@@ -4464,7 +4997,7 @@ export default function Home() {
               ) : (
                 <div className="manual-review-no-labels">
                   <strong>먼저 업무 맥락에 업무 이름을 등록해 주세요</strong>
-                  <button type="button" onClick={() => { setSelectedReviewEpisodeId(null); setView("settings"); }}>업무 맥락 등록으로 이동</button>
+                  <button type="button" onClick={() => { setSelectedReviewEpisodeId(null); openSettings("context"); }}>업무 맥락 등록으로 이동</button>
                 </div>
               )}
             </section>

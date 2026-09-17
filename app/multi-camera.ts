@@ -1,4 +1,38 @@
-export type CameraSlot = 1 | 2;
+export type CameraSlot = 1 | 2 | 3;
+
+export type CameraDeviceIdentity = Pick<MediaDeviceInfo, "deviceId" | "groupId" | "label">;
+
+const BUILT_IN_CAMERA = /built-in|facetime|integrated|internal|macbook|continuity|iphone|desk ?view|내장|데스크뵰|아이폰|‘[^’]+’ 카메라/i;
+
+export const isExternalCamera = (camera: CameraDeviceIdentity) =>
+  !BUILT_IN_CAMERA.test(camera.label) && !/데스크뷰/i.test(camera.label);
+
+/** Keeps laptop cameras out and restores the three external-camera slots. */
+export function selectExternalCameraSlots(
+  cameras: CameraDeviceIdentity[],
+  saved: CameraDeviceIdentity[] = [],
+  requestedIds: string[] = [],
+) {
+  const remaining = cameras
+    .filter(isExternalCamera)
+    .sort((a, b) => a.label.localeCompare(b.label) || a.deviceId.localeCompare(b.deviceId));
+  const selected: CameraDeviceIdentity[] = [];
+
+  for (let slot = 0; slot < 3 && remaining.length > 0; slot += 1) {
+    const savedCamera = saved[slot];
+    const requestedIndex = remaining.findIndex((camera) => camera.deviceId === requestedIds[slot]);
+    const savedIdIndex = remaining.findIndex((camera) => camera.deviceId === savedCamera?.deviceId);
+    const savedGroupIndex = remaining.findIndex((camera) =>
+      Boolean(savedCamera?.groupId && camera.groupId === savedCamera.groupId && camera.label === savedCamera.label),
+    );
+    const savedLabelIndex = savedCamera?.label && remaining.filter((camera) => camera.label === savedCamera.label).length === 1
+      ? remaining.findIndex((camera) => camera.label === savedCamera.label)
+      : -1;
+    const index = [requestedIndex, savedIdIndex, savedGroupIndex, savedLabelIndex].find((candidate) => candidate >= 0) ?? 0;
+    selected.push(remaining.splice(index >= 0 ? index : 0, 1)[0]);
+  }
+  return selected;
+}
 
 export type CameraCalibration = {
   cameraId: string;
@@ -96,7 +130,7 @@ function canonicalizeFacing(frame: number[]) {
 }
 
 /**
- * Produces one owner timeline from two synchronized camera streams. Frames in
+ * Produces one owner timeline from synchronized camera streams. Frames in
  * the same sample window are duplicate observations of the study participant,
  * so the clearest skeleton wins instead of counting the action twice.
  */
@@ -124,7 +158,7 @@ export function mergeCameraFrameStreams(
       const rawCenter = bodyCenter(item.frame);
       let offset = offsets.get(item.cameraSlot) ?? { x: 0, y: 0 };
       if (rawCenter && previousCenter && previousSlot !== item.cameraSlot) {
-        // ponytail: translation-only handoff is enough for the two-camera MVP;
+        // ponytail: translation-only handoff is enough for the fixed-camera setup;
         // replace with floor-point homography when measured store coordinates exist.
         offset = { x: previousCenter.x - rawCenter.x, y: previousCenter.y - rawCenter.y };
         offsets.set(item.cameraSlot, offset);
