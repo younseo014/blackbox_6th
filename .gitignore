@@ -41,9 +41,25 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
-/data/external/
+/data/
 /data/delete-candidates-*/
 /graphify-out/
+/.venv/
+
+# Local machine-learning workspace and training artifacts
+/config/*training*.json
+/scripts/__pycache__/
+/scripts/download-*.mjs
+/scripts/prepare-*.py
+/scripts/train-*.py
+/scripts/train-*.ts
+/docs/*training-report.md
+/docs/*performance-report.md
+/docs/epfl-*.md
+/models/*.json
+
+# Runtime model bundled with the application
+!/models/epfl-posture-v1.json
 
 # ui-craft
 /.ui-craft/

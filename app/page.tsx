@@ -1939,6 +1939,21 @@ export default function Home() {
           reason: motionSlice.reason,
         },
       });
+      // Keep the ~600 KB local model out of the initial UI bundle; load it only
+      // when a completed observation is ready for local classification.
+      const { classifyEpflPosture } = await import("./epfl-posture-classifier");
+      const postureResult = classifyEpflPosture(bestCamera?.frames ?? motionSlice.frames);
+      if (postureResult.label && postureResult.displayLabel) {
+        episode = {
+          ...episode,
+          postureClassification: {
+            label: postureResult.label,
+            displayLabel: postureResult.displayLabel,
+            confidence: postureResult.confidence,
+            model: postureResult.model,
+          },
+        };
+      }
       const labelOptions = listWorkContextLabels(workContextConfig);
       let motionCandidates: Array<{ label: string; confidence: number }> = [];
       if (learnedMotions.length > 0) {

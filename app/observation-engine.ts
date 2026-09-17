@@ -65,6 +65,12 @@ export type ObservationEpisode = {
   contextWeight: 0 | 1 | 2 | 3;
   baselineVersion: number;
   source?: "real_learning" | "real_analysis";
+  postureClassification?: {
+    label: "STAND" | "WALK" | "BEND_DOWN";
+    displayLabel: string;
+    confidence: number;
+    model: "epfl-posture-v1";
+  };
   motionSlice?: {
     startMs: number;
     endMs: number;
