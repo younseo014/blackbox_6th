@@ -4,9 +4,12 @@ import {
   BODY_LANDMARK_COUNT,
   HAND_LANDMARK_COUNT,
   MOTION_FRAME_STRIDE,
+  decodeCameraHealth,
   deriveBodyProportionProfile,
+  encodeCameraHealth,
   parseSessionFrame,
 } from "../app/pose-store.ts";
+import { createDataFolderZip, safeDataPathSegment } from "../app/data-folder-export.ts";
 import { generateEventMotion } from "../app/demo-motion.ts";
 
 // Builds a synthetic raw frame matching the stored layout (see
@@ -94,4 +97,33 @@ test("parseSessionFrame: both hands present when both detected", () => {
   assert.ok(parsed.leftHand);
   assert.ok(parsed.rightHand);
   assert.equal(parsed.rightHand![0], 300);
+});
+
+test("camera health flags round-trip in one byte", () => {
+  for (let bits = 0; bits < 16; bits += 1) {
+    const state = {
+      connected: Boolean(bits & 1),
+      receivingFrames: Boolean(bits & 2),
+      personDetected: Boolean(bits & 4),
+      trackingError: Boolean(bits & 8),
+    };
+    assert.equal(encodeCameraHealth(state), bits);
+    assert.deepEqual(decodeCameraHealth(bits), state);
+  }
+});
+
+test("data folder names remove characters that cannot be used in file paths", () => {
+  assert.equal(safeDataPathSegment("HD Webcam: 3D5F / front", "camera"), "HD_Webcam-_3D5F_-_front");
+});
+
+test("data folder ZIP contains local and central directory records", async () => {
+  const zip = createDataFolderZip([
+    { path: "memory-guard-data/catalog.json", contents: "{}" },
+    { path: "memory-guard-data/2026-09-17/camera-1/motion.json", contents: "[]" },
+  ]);
+  const bytes = new Uint8Array(await zip.arrayBuffer());
+  const view = new DataView(bytes.buffer);
+  assert.equal(view.getUint32(0, true), 0x04034b50);
+  assert.equal(view.getUint32(bytes.length - 22, true), 0x06054b50);
+  assert.equal(view.getUint16(bytes.length - 12, true), 2);
 });

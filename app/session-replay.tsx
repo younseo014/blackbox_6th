@@ -289,7 +289,7 @@ export function SessionReplayPanel({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="modal-backdrop replay-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="replay-modal replay-modal-premium" role="dialog" aria-modal="true" aria-labelledby="replay-title" onMouseDown={(event) => event.stopPropagation()}>
         <button className="modal-close" type="button" onClick={onClose} aria-label="닫기">×</button>
         <header className="replay-header">

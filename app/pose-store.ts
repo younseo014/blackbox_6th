@@ -1,4 +1,9 @@
 import { mergeCameraFrameStreams, type CameraSlot } from "./multi-camera";
+import {
+  createDataFolderZip,
+  safeDataPathSegment,
+  type DataFolderEntry,
+} from "./data-folder-export";
 
 export const BODY_LANDMARK_COUNT = 22;
 export const HAND_LANDMARK_COUNT = 21;
@@ -77,8 +82,66 @@ export type MotionSessionRecord = {
   globalSessionId?: string;
   cameraId?: string;
   cameraSlot?: CameraSlot;
+  cameraLabel?: string;
+  logicalCameraId?: string;
   timelineOriginMs?: number;
 };
+
+export type CaptureManifestRecord = {
+  id: string;
+  startedAt: number;
+  endedAt: number | null;
+  timelineOriginMs: number;
+  expectedCameraSlots: CameraSlot[];
+  cameras: Array<{
+    slot: CameraSlot;
+    logicalCameraId: string;
+    deviceId: string;
+    label: string;
+    sessionId: string | null;
+    connectedAtStart: boolean;
+  }>;
+  zoneSnapshot: {
+    primary: Array<string | null>;
+    secondary: Array<string | null>;
+    tertiary: Array<string | null>;
+    customZones: Array<{ id: string; label: string; contextZoneId: string | null }>;
+    profileUpdatedAt: number;
+  };
+  healthSampleRateHz: 1;
+};
+
+export type CameraHealthState = {
+  connected: boolean;
+  receivingFrames: boolean;
+  personDetected: boolean;
+  trackingError: boolean;
+};
+
+export type CameraHealthChunkRecord = {
+  id: string;
+  globalSessionId: string;
+  cameraSlot: CameraSlot;
+  startSecond: number;
+  sampleCount: number;
+  data: ArrayBuffer;
+};
+
+export function encodeCameraHealth(state: CameraHealthState) {
+  return Number(state.connected) |
+    (Number(state.receivingFrames) << 1) |
+    (Number(state.personDetected) << 2) |
+    (Number(state.trackingError) << 3);
+}
+
+export function decodeCameraHealth(value: number): CameraHealthState {
+  return {
+    connected: Boolean(value & 1),
+    receivingFrames: Boolean(value & 2),
+    personDetected: Boolean(value & 4),
+    trackingError: Boolean(value & 8),
+  };
+}
 
 export type MotionChunkRecord = {
   id: string;
@@ -90,9 +153,11 @@ export type MotionChunkRecord = {
 };
 
 const DB_NAME = "memory-guard-motion-v2";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SESSION_STORE = "motion_sessions";
 const CHUNK_STORE = "motion_chunks";
+const CAPTURE_MANIFEST_STORE = "capture_manifests";
+const CAMERA_HEALTH_STORE = "camera_health_chunks";
 
 function requestResult<T>(request: IDBRequest<T>) {
   return new Promise<T>((resolve, reject) => {
@@ -123,6 +188,13 @@ export function openMotionDatabase() {
         });
         chunkStore.createIndex("sessionId", "sessionId", { unique: false });
       }
+      if (!database.objectStoreNames.contains(CAPTURE_MANIFEST_STORE)) {
+        database.createObjectStore(CAPTURE_MANIFEST_STORE, { keyPath: "id" });
+      }
+      if (!database.objectStoreNames.contains(CAMERA_HEALTH_STORE)) {
+        const healthStore = database.createObjectStore(CAMERA_HEALTH_STORE, { keyPath: "id" });
+        healthStore.createIndex("globalSessionId", "globalSessionId", { unique: false });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -132,7 +204,7 @@ export function openMotionDatabase() {
 export async function createMotionSession(
   id: string,
   startedAt: number,
-  multiCamera?: Pick<MotionSessionRecord, "globalSessionId" | "cameraId" | "cameraSlot" | "timelineOriginMs">,
+  multiCamera?: Pick<MotionSessionRecord, "globalSessionId" | "cameraId" | "cameraSlot" | "cameraLabel" | "logicalCameraId" | "timelineOriginMs">,
 ) {
   const database = await openMotionDatabase();
   const transaction = database.transaction(SESSION_STORE, "readwrite");
@@ -158,6 +230,104 @@ export async function createMotionSession(
   await transactionDone(transaction);
   database.close();
   return record;
+}
+
+export async function saveCaptureManifest(manifest: CaptureManifestRecord) {
+  const database = await openMotionDatabase();
+  const transaction = database.transaction(CAPTURE_MANIFEST_STORE, "readwrite");
+  transaction.objectStore(CAPTURE_MANIFEST_STORE).put(manifest);
+  await transactionDone(transaction);
+  database.close();
+  return manifest;
+}
+
+export async function finishCaptureManifest(id: string, endedAt: number) {
+  const database = await openMotionDatabase();
+  const transaction = database.transaction(CAPTURE_MANIFEST_STORE, "readwrite");
+  const store = transaction.objectStore(CAPTURE_MANIFEST_STORE);
+  const manifest = await requestResult<CaptureManifestRecord | undefined>(store.get(id));
+  if (manifest) store.put({ ...manifest, endedAt });
+  await transactionDone(transaction);
+  database.close();
+}
+
+export async function getCaptureManifest(id: string) {
+  const database = await openMotionDatabase();
+  const transaction = database.transaction(CAPTURE_MANIFEST_STORE, "readonly");
+  const manifest = await requestResult<CaptureManifestRecord | undefined>(
+    transaction.objectStore(CAPTURE_MANIFEST_STORE).get(id),
+  );
+  await transactionDone(transaction);
+  database.close();
+  return manifest ?? null;
+}
+
+export async function appendCameraHealthChunk(
+  globalSessionId: string,
+  cameraSlot: CameraSlot,
+  startSecond: number,
+  samples: Uint8Array,
+) {
+  if (samples.length === 0) return;
+  const database = await openMotionDatabase();
+  const transaction = database.transaction(CAMERA_HEALTH_STORE, "readwrite");
+  const data = samples.buffer.slice(samples.byteOffset, samples.byteOffset + samples.byteLength);
+  const record: CameraHealthChunkRecord = {
+    id: `${globalSessionId}:${cameraSlot}:${startSecond}`,
+    globalSessionId,
+    cameraSlot,
+    startSecond,
+    sampleCount: samples.length,
+    data,
+  };
+  transaction.objectStore(CAMERA_HEALTH_STORE).put(record);
+  await transactionDone(transaction);
+  database.close();
+}
+
+async function getCameraHealthChunks(globalSessionId: string) {
+  const database = await openMotionDatabase();
+  const transaction = database.transaction(CAMERA_HEALTH_STORE, "readonly");
+  const chunks = await requestResult<CameraHealthChunkRecord[]>(
+    transaction.objectStore(CAMERA_HEALTH_STORE).index("globalSessionId").getAll(globalSessionId),
+  );
+  await transactionDone(transaction);
+  database.close();
+  return chunks.sort((a, b) => a.cameraSlot - b.cameraSlot || a.startSecond - b.startSecond);
+}
+
+export async function getCameraHealthTimeline(globalSessionId: string) {
+  return (await getCameraHealthChunks(globalSessionId))
+    .flatMap((chunk) => Array.from(new Uint8Array(chunk.data), (value, offset) => ({
+      cameraSlot: chunk.cameraSlot,
+      second: chunk.startSecond + offset,
+      ...decodeCameraHealth(value),
+    })));
+}
+
+export async function getCameraHealthIntervals(globalSessionId: string) {
+  const intervals: Array<CameraHealthState & {
+    cameraSlot: CameraSlot;
+    startSecond: number;
+    endSecond: number;
+  }> = [];
+  for (const chunk of await getCameraHealthChunks(globalSessionId)) {
+    Array.from(new Uint8Array(chunk.data)).forEach((value, offset) => {
+      const second = chunk.startSecond + offset;
+      const state = decodeCameraHealth(value);
+      const previous = intervals[intervals.length - 1];
+      const sameState = previous &&
+        previous.cameraSlot === chunk.cameraSlot &&
+        previous.endSecond + 1 === second &&
+        previous.connected === state.connected &&
+        previous.receivingFrames === state.receivingFrames &&
+        previous.personDetected === state.personDetected &&
+        previous.trackingError === state.trackingError;
+      if (sameState) previous.endSecond = second;
+      else intervals.push({ cameraSlot: chunk.cameraSlot, startSecond: second, endSecond: second, ...state });
+    });
+  }
+  return intervals;
 }
 
 export async function appendMotionChunk(
@@ -254,6 +424,9 @@ export async function getGlobalSessionCameraFrames(globalSessionId: string) {
   return Promise.all(sessions.map(async (session) => ({
     sessionId: session.id,
     cameraSlot: session.cameraSlot ?? 1,
+    cameraId: session.cameraId ?? "",
+    cameraLabel: session.cameraLabel ?? `카메라 ${session.cameraSlot ?? 1}`,
+    logicalCameraId: session.logicalCameraId ?? `CAMERA_${session.cameraSlot ?? 1}`,
     frames: await getSessionFrames(session.id),
   })));
 }
@@ -460,8 +633,14 @@ export async function deleteAllMotionSessions(): Promise<void> {
   await requestResult(indexedDB.deleteDatabase(DB_NAME));
 }
 
-export async function downloadMotionSession(session: MotionSessionRecord) {
+async function buildMotionSessionDataset(session: MotionSessionRecord) {
   const chunks = await getMotionChunks(session.id);
+  const captureManifest = session.globalSessionId
+    ? await getCaptureManifest(session.globalSessionId)
+    : null;
+  const cameraHealth = session.globalSessionId
+    ? await getCameraHealthIntervals(session.globalSessionId)
+    : [];
   const frames: number[][] = [];
   for (const chunk of chunks) {
     const values = new Float32Array(chunk.data);
@@ -503,17 +682,134 @@ export async function downloadMotionSession(session: MotionSessionRecord) {
       },
       body_landmark_names: BODY_LANDMARK_NAMES,
       hand_landmark_names: HAND_LANDMARK_NAMES,
+      camera_health: {
+        sample_rate_hz: 1,
+        format: "run_length_intervals",
+        time_fields: ["startSecond", "endSecond"],
+        fields: ["connected", "receivingFrames", "personDetected", "trackingError"],
+      },
     },
     session,
+    capture_manifest: captureManifest,
+    camera_health: cameraHealth,
     frames,
   };
-  const blob = new Blob([JSON.stringify(dataset)], {
-    type: "application/json",
-  });
+  return dataset;
+}
+
+export async function downloadMotionSession(session: MotionSessionRecord) {
+  const dataset = await buildMotionSessionDataset(session);
+  const blob = new Blob([JSON.stringify(dataset)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = `memory-guard-motion-${new Date(session.startedAt).toISOString()}.json`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function captureDirectoryName(session: MotionSessionRecord) {
+  const stamp = new Date(session.startedAt).toISOString().replace(/[:.]/g, "-");
+  const id = safeDataPathSegment(session.globalSessionId ?? session.id, "session").slice(-18);
+  return `${stamp}_${id}`;
+}
+
+/** Downloads every locally retained coordinate session in one identifiable folder archive. */
+export async function downloadMotionDataFolder() {
+  const sessions = await listMotionSessions();
+  if (sessions.length === 0) return false;
+
+  const groups = new Map<string, MotionSessionRecord[]>();
+  for (const session of sessions) {
+    const key = session.globalSessionId ?? session.id;
+    groups.set(key, [...(groups.get(key) ?? []), session]);
+  }
+
+  const entries: DataFolderEntry[] = [];
+  const catalog: Array<{
+    captureId: string;
+    startedAt: string;
+    directory: string;
+    cameras: Array<{ slot: number; logicalCameraId: string; label: string; file: string }>;
+  }> = [];
+
+  for (const [captureId, captureSessions] of groups) {
+    const ordered = [...captureSessions].sort((a, b) => (a.cameraSlot ?? 1) - (b.cameraSlot ?? 1));
+    const primary = ordered[0];
+    const dateDirectory = new Date(primary.startedAt).toISOString().slice(0, 10);
+    const sessionDirectory = `${dateDirectory}/${captureDirectoryName(primary)}`;
+    const manifest = primary.globalSessionId ? await getCaptureManifest(primary.globalSessionId) : null;
+    const health = primary.globalSessionId ? await getCameraHealthIntervals(primary.globalSessionId) : [];
+    entries.push({
+      path: `memory-guard-data/${sessionDirectory}/capture-manifest.json`,
+      contents: JSON.stringify(manifest ?? {
+        id: captureId,
+        startedAt: primary.startedAt,
+        endedAt: primary.endedAt,
+        legacySession: true,
+      }, null, 2),
+    });
+    entries.push({
+      path: `memory-guard-data/${sessionDirectory}/camera-health.json`,
+      contents: JSON.stringify(health, null, 2),
+    });
+
+    const cameras = [];
+    for (const session of ordered) {
+      const slot = session.cameraSlot ?? 1;
+      const label = session.cameraLabel ?? `카메라 ${slot}`;
+      const cameraDirectory = `camera-${slot}_${safeDataPathSegment(label, `camera-${slot}`)}`;
+      const file = `${sessionDirectory}/${cameraDirectory}/motion.json`;
+      const dataset = await buildMotionSessionDataset(session);
+      entries.push({
+        path: `memory-guard-data/${file}`,
+        contents: JSON.stringify(dataset),
+      });
+      cameras.push({
+        slot,
+        logicalCameraId: session.logicalCameraId ?? `CAMERA_${slot}`,
+        label,
+        file,
+      });
+    }
+    catalog.push({
+      captureId,
+      startedAt: new Date(primary.startedAt).toISOString(),
+      directory: sessionDirectory,
+      cameras,
+    });
+  }
+
+  entries.unshift({
+    path: "memory-guard-data/catalog.json",
+    contents: JSON.stringify({
+      format: "memory-guard-data-folder-v1",
+      exportedAt: new Date().toISOString(),
+      captureCount: catalog.length,
+      cameraSessionCount: sessions.length,
+      captures: catalog.sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
+    }, null, 2),
+  });
+  entries.unshift({
+    path: "memory-guard-data/README.txt",
+    contents: [
+      "Memory Guard 좌표 데이터 폴더",
+      "",
+      "catalog.json: 전체 촬영 세션과 카메라 파일 색인",
+      "날짜/세션/capture-manifest.json: 카메라·구역 매핑 스냅샷",
+      "날짜/세션/camera-health.json: 카메라별 연결·프레임·사람 인식 상태",
+      "날짜/세션/camera-N_라벨/motion.json: 해당 카메라의 스켈레톤 좌표",
+      "",
+      "영상·음성·얼굴 특징점은 포함되지 않습니다.",
+    ].join("\n"),
+  });
+
+  const blob = createDataFolderZip(entries);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `memory-guard-data_${new Date().toISOString().slice(0, 10)}.zip`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }

@@ -143,7 +143,7 @@ test("페르소나: 카메라 권한 거부 - 에러 메시지가 뜨고 다른 
       .getByRole("button", { name: "확인 완료", exact: true })
       .click();
 
-    await page.getByRole("button", { name: "케어 기록", exact: false }).first().click();
+    await page.getByRole("button", { name: "가상 리포트", exact: true }).click();
     await assert.doesNotReject(
       page.getByText("가상 페르소나의 일주일 관찰 결과").waitFor(),
       "케어 기록 (demo) should stay usable without a camera",
@@ -358,7 +358,9 @@ test("개발용 세션 리플레이: 기록된 세션을 재생하면 스켈레�
 test("개발용 합성 시나리오 리플레이: 페르소나의 '동작 보기'를 누르면 합성 스켈레톤과 실제 기록이 아니라는 안내가 뜬다", async () => {
   await withPage({}, async (page) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: "케어 기록", exact: false }).first().click();
+    await page.evaluate(() => localStorage.setItem("memory-guard-interface-mode-v1", "developer"));
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "가상 리포트", exact: true }).click();
     await page.waitForTimeout(300);
 
     // The default persona/day already has at least one example event, so no

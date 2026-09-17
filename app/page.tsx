@@ -13,17 +13,21 @@ import {
   HAND_LANDMARK_COUNT,
   MOTION_FRAME_STRIDE,
   MOTION_SAMPLE_RATE,
+  appendCameraHealthChunk,
   appendMotionChunk,
   createMotionSession,
   deleteAllMotionSessions,
-  downloadMotionSession,
+  downloadMotionDataFolder,
   extractHandPointTrajectory,
+  finishCaptureManifest,
   finishMotionSession,
   getGlobalSessionCameraFrames,
   getGlobalSessionFrames,
   getSessionFrames,
   getLatestBodyProportionProfile,
   listMotionSessions,
+  saveCaptureManifest,
+  encodeCameraHealth,
   type MotionSessionRecord,
 } from "./pose-store";
 import {
@@ -265,6 +269,7 @@ const INTERFACE_MODE_STORAGE_KEY = "memory-guard-interface-mode-v1";
 const USER_INSTALL_STORAGE_KEY = "memory-guard-user-install-v1";
 const CAMERA_SLOT_STORAGE_KEY = "memory-guard-external-camera-slots-v1";
 const POSE_DISPLAY_HOLD_MS = 450;
+const CAMERA_HEALTH_CHUNK_SECONDS = 300;
 
 function loadInterfaceMode(): InterfaceMode {
   if (typeof window === "undefined") return "user";
@@ -749,8 +754,6 @@ export default function Home() {
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const secondaryPoseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const tertiaryPoseLandmarkerRef = useRef<PoseLandmarker | null>(null);
-  const secondaryHandLandmarkerRef = useRef<HandLandmarker | null>(null);
-  const tertiaryHandLandmarkerRef = useRef<HandLandmarker | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const poseAnimationRef = useRef<number | null>(null);
   const trackingActiveRef = useRef(false);
@@ -777,6 +780,15 @@ export default function Home() {
   const secondaryPoseSessionRef = useRef<MotionSessionRecord | null>(null);
   const tertiaryPoseSessionRef = useRef<MotionSessionRecord | null>(null);
   const globalCaptureSessionRef = useRef<GlobalCaptureSession | null>(null);
+  const cameraHealthBuffersRef = useRef<Record<CameraSlot, { startSecond: number; samples: number[] }>>({
+    1: { startSecond: -1, samples: [] },
+    2: { startSecond: -1, samples: [] },
+    3: { startSecond: -1, samples: [] },
+  });
+  const lastCameraHealthSecondRef = useRef(-1);
+  const lastPersonSeenByCameraRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
+  const cameraTrackingErrorRef = useRef<Record<CameraSlot, boolean>>({ 1: false, 2: false, 3: false });
+  const cameraHealthWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const poseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const secondaryPoseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const tertiaryPoseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -994,8 +1006,6 @@ export default function Home() {
       poseLandmarkerRef.current?.close();
       secondaryPoseLandmarkerRef.current?.close();
       tertiaryPoseLandmarkerRef.current?.close();
-      secondaryHandLandmarkerRef.current?.close();
-      tertiaryHandLandmarkerRef.current?.close();
       handLandmarkerRef.current?.close();
     };
   }, []);
@@ -1145,25 +1155,12 @@ export default function Home() {
         }
       }
 
-      const [primaryHasFrames, secondaryHasFrames, tertiaryHasFrames] = await Promise.all([
-        receivesVideoFrames(stream),
-        secondaryStream ? receivesVideoFrames(secondaryStream) : Promise.resolve(false),
-        tertiaryStream ? receivesVideoFrames(tertiaryStream) : Promise.resolve(false),
-      ]);
+      // The first two streams are the proven working path. Safari can starve
+      // extra detached video elements, so only probe the newly added third stream.
+      const tertiaryHasFrames = tertiaryStream
+        ? await receivesVideoFrames(tertiaryStream)
+        : false;
       const camerasWithoutFrames: string[] = [];
-      if (!primaryHasFrames) {
-        stream.getTracks().forEach((track) => track.stop());
-        secondaryStream?.getTracks().forEach((track) => track.stop());
-        tertiaryStream?.getTracks().forEach((track) => track.stop());
-        setCameraStatus("error");
-        setCameraMessage(`${cameraDisplayName(preferredPrimary, 0)}에서 영상 프레임을 받지 못했어요. 카메라를 다른 USB 포트에 직접 연결한 뒤 다시 연결해 주세요.`);
-        return;
-      }
-      if (secondaryStream && !secondaryHasFrames) {
-        camerasWithoutFrames.push(cameraDisplayName(preferredSecondary!, 1));
-        secondaryStream.getTracks().forEach((track) => track.stop());
-        secondaryStream = null;
-      }
       if (tertiaryStream && !tertiaryHasFrames) {
         camerasWithoutFrames.push(cameraDisplayName(preferredTertiary!, 2));
         tertiaryStream.getTracks().forEach((track) => track.stop());
@@ -1217,9 +1214,14 @@ export default function Home() {
           : "";
       await startPoseTracking(
         preferredPrimary.deviceId,
-        secondaryStream ? preferredSecondary?.deviceId : undefined,
-        tertiaryStream ? preferredTertiary?.deviceId : undefined,
+        preferredSecondary?.deviceId,
+        preferredTertiary?.deviceId,
         connectionMessage,
+        {
+          1: preferredPrimary.label || "카메라 1",
+          2: preferredSecondary?.label || "카메라 2",
+          3: preferredTertiary?.label || "카메라 3",
+        },
       );
     } catch (error) {
       console.error("Camera connection failed", error);
@@ -1234,6 +1236,17 @@ export default function Home() {
     if (poseStatusRef.current === nextStatus) return;
     poseStatusRef.current = nextStatus;
     setPoseStatus(nextStatus);
+  }
+
+  function resetMotionLandmarkers() {
+    poseLandmarkerRef.current?.close();
+    secondaryPoseLandmarkerRef.current?.close();
+    tertiaryPoseLandmarkerRef.current?.close();
+    handLandmarkerRef.current?.close();
+    poseLandmarkerRef.current = null;
+    secondaryPoseLandmarkerRef.current = null;
+    tertiaryPoseLandmarkerRef.current = null;
+    handLandmarkerRef.current = null;
   }
 
   async function ensureMotionLandmarkers() {
@@ -1324,12 +1337,6 @@ export default function Home() {
       }
     };
     if (!handLandmarkerRef.current) handLandmarkerRef.current = await createHandLandmarker();
-    if (secondaryStreamRef.current && !secondaryHandLandmarkerRef.current) {
-      secondaryHandLandmarkerRef.current = await createHandLandmarker();
-    }
-    if (tertiaryStreamRef.current && !tertiaryHandLandmarkerRef.current) {
-      tertiaryHandLandmarkerRef.current = await createHandLandmarker();
-    }
   }
 
   function flushPoseFrames(cameraSlot: CameraSlot = 1) {
@@ -1438,6 +1445,56 @@ export default function Home() {
     }
   }
 
+  function flushCameraHealth(cameraSlot: CameraSlot) {
+    const globalSessionId = globalCaptureSessionRef.current?.id;
+    const buffer = cameraHealthBuffersRef.current[cameraSlot];
+    if (!globalSessionId || buffer.startSecond < 0 || buffer.samples.length === 0) {
+      return cameraHealthWriteQueueRef.current;
+    }
+    const startSecond = buffer.startSecond;
+    const samples = Uint8Array.from(buffer.samples);
+    cameraHealthBuffersRef.current[cameraSlot] = { startSecond: -1, samples: [] };
+    cameraHealthWriteQueueRef.current = cameraHealthWriteQueueRef.current.then(() =>
+      appendCameraHealthChunk(globalSessionId, cameraSlot, startSecond, samples),
+    );
+    return cameraHealthWriteQueueRef.current;
+  }
+
+  function sampleCameraHealth(timestamp: number) {
+    const origin = sessionPerformanceStartRef.current;
+    if (!origin) return;
+    const second = Math.max(0, Math.floor((timestamp - origin) / 1000));
+    if (second <= lastCameraHealthSecondRef.current) return;
+    const lastDetections: Record<CameraSlot, number> = {
+      1: lastDetectionTimeRef.current,
+      2: lastSecondaryDetectionTimeRef.current,
+      3: lastTertiaryDetectionTimeRef.current,
+    };
+    const streams: Record<CameraSlot, MediaStream | null> = {
+      1: streamRef.current,
+      2: secondaryStreamRef.current,
+      3: tertiaryStreamRef.current,
+    };
+
+    for (let sampledSecond = lastCameraHealthSecondRef.current + 1; sampledSecond <= second; sampledSecond += 1) {
+      ([1, 2, 3] as CameraSlot[]).forEach((cameraSlot) => {
+        const stream = streams[cameraSlot];
+        const connected = Boolean(stream?.getVideoTracks().some((track) => track.readyState === "live"));
+        const value = encodeCameraHealth({
+          connected,
+          receivingFrames: connected && timestamp - lastDetections[cameraSlot] < 1_500,
+          personDetected: timestamp - lastPersonSeenByCameraRef.current[cameraSlot] < 1_500,
+          trackingError: cameraTrackingErrorRef.current[cameraSlot],
+        });
+        const buffer = cameraHealthBuffersRef.current[cameraSlot];
+        if (buffer.startSecond < 0) buffer.startSecond = sampledSecond;
+        buffer.samples.push(value);
+        if (buffer.samples.length >= CAMERA_HEALTH_CHUNK_SECONDS) void flushCameraHealth(cameraSlot);
+      });
+    }
+    lastCameraHealthSecondRef.current = second;
+  }
+
   function poseTrackingLoop() {
     if (!trackingActiveRef.current) return;
     const video = processingVideoRef.current;
@@ -1456,6 +1513,7 @@ export default function Home() {
       lastDetectionTimeRef.current = timestamp;
       try {
         const result = landmarker.detectForVideo(video, timestamp);
+        cameraTrackingErrorRef.current[1] = false;
         const targetSelection = selectLockedPose(
           result.landmarks,
           poseTargetLockRef.current,
@@ -1466,6 +1524,7 @@ export default function Home() {
         if (liveLandmarks) {
           lastPoseRef.current = liveLandmarks;
           lastPoseSeenAtRef.current = timestamp;
+          lastPersonSeenByCameraRef.current[1] = timestamp;
         }
         const holdingLastPose = Boolean(
           !liveLandmarks &&
@@ -1579,11 +1638,13 @@ export default function Home() {
         }
       } catch (error) {
         console.error("Primary camera pose tracking failed", error);
+        cameraTrackingErrorRef.current[1] = true;
         updatePoseStatus("error");
       }
     }
     trackAuxiliaryPose(timestamp, 2);
     trackAuxiliaryPose(timestamp, 3);
+    sampleCameraHealth(timestamp);
     poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
   }
 
@@ -1591,7 +1652,9 @@ export default function Home() {
     const video = cameraSlot === 2 ? secondaryVideoRef.current : tertiaryVideoRef.current;
     const canvas = cameraSlot === 2 ? secondaryOverlayCanvasRef.current : tertiaryOverlayCanvasRef.current;
     const landmarker = cameraSlot === 2 ? secondaryPoseLandmarkerRef.current : tertiaryPoseLandmarkerRef.current;
-    const handLandmarker = cameraSlot === 2 ? secondaryHandLandmarkerRef.current : tertiaryHandLandmarkerRef.current;
+    // Hand detection is stateless enough for our sampled frames; sharing one
+    // model avoids loading three large WASM graphs at camera startup.
+    const handLandmarker = handLandmarkerRef.current;
     const targetLockRef = cameraSlot === 2 ? secondaryPoseTargetLockRef : tertiaryPoseTargetLockRef;
     const handsRef = cameraSlot === 2 ? secondaryHandsRef : tertiaryHandsRef;
     const lastVideoTimeRef = cameraSlot === 2 ? lastSecondaryVideoTimeRef : lastTertiaryVideoTimeRef;
@@ -1604,6 +1667,7 @@ export default function Home() {
     lastDetectionRef.current = timestamp;
     try {
       const result = landmarker.detectForVideo(video, timestamp);
+      cameraTrackingErrorRef.current[cameraSlot] = false;
       const targetSelection = selectLockedPose(
         result.landmarks,
         targetLockRef.current,
@@ -1611,6 +1675,7 @@ export default function Home() {
       );
       targetLockRef.current = targetSelection.lock;
       const landmarks = targetSelection.landmarks;
+      if (landmarks) lastPersonSeenByCameraRef.current[cameraSlot] = timestamp;
       if (landmarks && handLandmarker && timestamp - lastHandDetectionRef.current >= 100) {
         lastHandDetectionRef.current = timestamp;
         const hands: HandState = { left: null, right: null, leftScore: 0, rightScore: 0 };
@@ -1643,6 +1708,7 @@ export default function Home() {
       setStatus(landmarks ? (fullBody ? "full" : "partial") : "searching");
     } catch (error) {
       console.error(`Camera ${cameraSlot} pose tracking failed`, error);
+      cameraTrackingErrorRef.current[cameraSlot] = true;
       setStatus("error");
     }
   }
@@ -1652,14 +1718,15 @@ export default function Home() {
     secondaryId = secondaryCameraId,
     tertiaryId = tertiaryCameraId,
     connectionMessage = "",
+    cameraLabels: Partial<Record<CameraSlot, string>> = {},
   ) {
     try {
       await ensureMotionLandmarkers();
       const startedAt = currentEpochTime();
       const connectedCameras = [
-        { cameraId: primaryId, slot: 1 as const, label: availableCameras.find((camera) => camera.deviceId === primaryId)?.label || "카메라 1" },
-        ...(secondaryStreamRef.current ? [{ cameraId: secondaryId, slot: 2 as const, label: availableCameras.find((camera) => camera.deviceId === secondaryId)?.label || "카메라 2" }] : []),
-        ...(tertiaryStreamRef.current ? [{ cameraId: tertiaryId, slot: 3 as const, label: availableCameras.find((camera) => camera.deviceId === tertiaryId)?.label || "카메라 3" }] : []),
+        { cameraId: primaryId, slot: 1 as const, label: cameraLabels[1] || "카메라 1" },
+        ...(secondaryStreamRef.current ? [{ cameraId: secondaryId, slot: 2 as const, label: cameraLabels[2] || "카메라 2" }] : []),
+        ...(tertiaryStreamRef.current ? [{ cameraId: tertiaryId, slot: 3 as const, label: cameraLabels[3] || "카메라 3" }] : []),
       ];
       globalCaptureSessionRef.current = createGlobalCaptureSession(connectedCameras);
       const sharedSession = {
@@ -1669,23 +1736,50 @@ export default function Home() {
       const session = await createMotionSession(
         `motion-${crypto.randomUUID()}`,
         startedAt,
-        { ...sharedSession, cameraId: primaryId, cameraSlot: 1 },
+        { ...sharedSession, cameraId: primaryId, cameraSlot: 1, cameraLabel: cameraLabels[1], logicalCameraId: "CAMERA_1" },
       );
       poseSessionRef.current = session;
       secondaryPoseSessionRef.current = secondaryStreamRef.current
         ? await createMotionSession(
           `motion-${crypto.randomUUID()}`,
           startedAt,
-          { ...sharedSession, cameraId: secondaryId, cameraSlot: 2 },
+          { ...sharedSession, cameraId: secondaryId, cameraSlot: 2, cameraLabel: cameraLabels[2], logicalCameraId: "CAMERA_2" },
         )
         : null;
       tertiaryPoseSessionRef.current = tertiaryStreamRef.current
         ? await createMotionSession(
           `motion-${crypto.randomUUID()}`,
           startedAt,
-          { ...sharedSession, cameraId: tertiaryId, cameraSlot: 3 },
+          { ...sharedSession, cameraId: tertiaryId, cameraSlot: 3, cameraLabel: cameraLabels[3], logicalCameraId: "CAMERA_3" },
         )
         : null;
+      await saveCaptureManifest({
+        id: globalCaptureSessionRef.current.id,
+        startedAt,
+        endedAt: null,
+        timelineOriginMs: globalCaptureSessionRef.current.timelineOriginMs,
+        expectedCameraSlots: [1, 2, 3],
+        cameras: ([1, 2, 3] as CameraSlot[]).map((slot) => {
+          const ids = [primaryId, secondaryId, tertiaryId];
+          const sessions = [session, secondaryPoseSessionRef.current, tertiaryPoseSessionRef.current];
+          return {
+            slot,
+            logicalCameraId: `CAMERA_${slot}`,
+            deviceId: ids[slot - 1] || "",
+            label: cameraLabels[slot] || `카메라 ${slot}`,
+            sessionId: sessions[slot - 1]?.id ?? null,
+            connectedAtStart: Boolean(sessions[slot - 1]),
+          };
+        }),
+        zoneSnapshot: {
+          primary: [...observationProfile.zoneGrid],
+          secondary: [...observationProfile.secondaryZoneGrid],
+          tertiary: [...observationProfile.tertiaryZoneGrid],
+          customZones: observationProfile.customZones.map((zone) => ({ ...zone })),
+          profileUpdatedAt: observationProfile.updatedAt,
+        },
+        healthSampleRateHz: 1,
+      });
       sessionPerformanceStartRef.current = globalCaptureSessionRef.current.timelineOriginMs;
       lastDetectionTimeRef.current = 0;
       lastHandDetectionTimeRef.current = 0;
@@ -1699,6 +1793,14 @@ export default function Home() {
       lastTertiaryDetectionTimeRef.current = 0;
       lastTertiaryHandDetectionTimeRef.current = 0;
       lastTertiarySampleTimeRef.current = 0;
+      lastCameraHealthSecondRef.current = -1;
+      cameraHealthBuffersRef.current = {
+        1: { startSecond: -1, samples: [] },
+        2: { startSecond: -1, samples: [] },
+        3: { startSecond: -1, samples: [] },
+      };
+      lastPersonSeenByCameraRef.current = { 1: 0, 2: 0, 3: 0 };
+      cameraTrackingErrorRef.current = { 1: false, 2: false, 3: false };
       secondaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
       tertiaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
       lastPoseRef.current = null;
@@ -1755,7 +1857,9 @@ export default function Home() {
         setCameraMessage("몸·머리 방향 좌표를 기록 중이에요. 손가락 추적은 이 기기에서 준비하지 못했어요.");
       }
       poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
-    } catch {
+    } catch (error) {
+      console.error("Motion tracking initialization failed", error);
+      resetMotionLandmarkers();
       updatePoseStatus("error");
       setCameraMessage("몸·손 추적 모델을 불러오지 못했어요. 다시 연결해 주세요.");
       toast.success("동작 추적 모델을 준비하지 못했어요");
@@ -1900,6 +2004,7 @@ export default function Home() {
   }
 
   async function stopPoseTracking(analyzeSession = true) {
+    sampleCameraHealth(currentMonotonicTime());
     trackingActiveRef.current = false;
     if (poseAnimationRef.current !== null) {
       cancelAnimationFrame(poseAnimationRef.current);
@@ -1907,10 +2012,15 @@ export default function Home() {
     }
     await Promise.all([flushPoseFrames(1), flushPoseFrames(2), flushPoseFrames(3)]);
     await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current, tertiaryPoseWriteQueueRef.current]);
+    await Promise.all([flushCameraHealth(1), flushCameraHealth(2), flushCameraHealth(3)]);
+    await cameraHealthWriteQueueRef.current;
     const session = poseSessionRef.current;
     const secondarySession = secondaryPoseSessionRef.current;
     const tertiarySession = tertiaryPoseSessionRef.current;
     const endedAt = currentEpochTime();
+    if (globalCaptureSessionRef.current) {
+      await finishCaptureManifest(globalCaptureSessionRef.current.id, endedAt);
+    }
     let secondaryFrameCount = 0;
     if (secondarySession) {
       const completedSecondary = await finishMotionSession(secondarySession, endedAt);
@@ -2054,13 +2164,12 @@ export default function Home() {
     try {
       await flushPoseFrames();
       await poseWriteQueueRef.current;
-      const session = poseSessionRef.current ?? latestSession;
-      if (!session || session.frameCount === 0) {
+      const exported = await downloadMotionDataFolder();
+      if (!exported) {
         toast.success("내보낼 좌표 기록이 아직 없어요");
         return;
       }
-      await downloadMotionSession(session);
-      toast.success("학습용 좌표 데이터를 내려받았어요");
+      toast.success("전체 기록을 하나의 데이터 폴더로 내려받았어요");
     } catch {
       toast.success("좌표 데이터를 내보내지 못했어요");
     }
@@ -2849,6 +2958,7 @@ export default function Home() {
         playsInline
         aria-hidden="true"
       />
+      <a className="skip-link" href="#main-content">본문으로 건너뛰기</a>
       <aside className="sidebar">
         <div className="brand" aria-label="메모리 가드">
           <span>
@@ -2901,7 +3011,7 @@ export default function Home() {
         </div>
       </aside>
 
-      <section className="workspace">
+      <section id="main-content" className="workspace" tabIndex={-1}>
         <header className="mobile-brand-header">
           <button
             className="mobile-brand"
@@ -3645,7 +3755,7 @@ export default function Home() {
                         onClick={() => void exportPoseData()}
                         disabled={!latestSession && poseStats.frames === 0}
                       >
-                        학습용 JSON 내려받기
+                        전체 데이터 폴더 내려받기
                       </button>
                     </div>
                   </details>
@@ -4812,6 +4922,14 @@ export default function Home() {
         )}
 
         <div className="my-data-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void exportPoseData()}
+            disabled={sessionCount === 0 && poseStats.frames === 0}
+          >
+            전체 데이터 폴더 내려받기
+          </button>
           {consent.observationConsent ? (
             <button type="button" onClick={withdrawObservationConsent}>
               장기 관찰 참여 철회하기
