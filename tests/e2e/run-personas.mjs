@@ -600,7 +600,10 @@ test("개발자 수동 라벨링: 애매한 행동의 스켈레톤을 보고 업
     assert.equal(await allReviewsDialog.locator(".all-action-reviews-list article").count(), 1);
     await allReviewsDialog.getByRole("button", { name: "스켈레톤 확인" }).click();
     await page.getByRole("dialog", { name: /업무 라벨 검토/ }).waitFor();
-    await page.getByRole("radio", { name: "설거지" }).check();
+    const washLabelRadio = page.getByRole("radio", { name: "설거지" });
+    const radioBox = await washLabelRadio.boundingBox();
+    assert.ok(radioBox && radioBox.width <= 20 && radioBox.height <= 20, "업무 라벨 라디오가 카드 전체 크기로 늘어나면 안 됩니다");
+    await washLabelRadio.check();
     await page.getByRole("button", { name: "라벨 확정" }).click();
     await page.getByLabel("검토 대기 0건").waitFor();
 

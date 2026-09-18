@@ -1532,7 +1532,30 @@ input, select {
   cursor: pointer;
 }
 .manual-review-choice label.selected { border-color: rgba(8, 117, 177, .5); background: white; color: var(--sky-ink); box-shadow: 0 0 0 2px rgba(8, 117, 177, .08); }
-.manual-review-choice input { flex: 0 0 auto; accent-color: var(--sky-strong); }
+.manual-review-choice input[type="radio"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  flex: 0 0 18px;
+  border: 1.5px solid #9baebe;
+  border-radius: 50%;
+  display: grid;
+  place-content: center;
+  background: white;
+}
+.manual-review-choice input[type="radio"]::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sky-strong);
+  content: "";
+  transform: scale(0);
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+.manual-review-choice input[type="radio"]:checked { border-color: var(--sky-strong); }
+.manual-review-choice input[type="radio"]:checked::before { transform: scale(1); }
 .manual-review-choice label span { min-width: 0; overflow: hidden; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .manual-review-actions { margin-top: 10px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 7px; }
 .manual-review-actions button,

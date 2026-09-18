@@ -2369,6 +2369,13 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }
 
+  function openWorkContextSettingsFromReview() {
+    setSelectedReviewEpisodeId(null);
+    setAllActionReviewsOpen(false);
+    setInterfaceMode("user");
+    openSettings("context");
+  }
+
   async function continueOnboardingFromOccupation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = occupationInput.trim();
@@ -5400,7 +5407,7 @@ export default function Home() {
               ) : (
                 <div className="manual-review-no-labels">
                   <strong>먼저 업무 맥락에 업무 이름을 등록해 주세요</strong>
-                  <button type="button" onClick={() => { setSelectedReviewEpisodeId(null); openSettings("context"); }}>업무 맥락 등록으로 이동</button>
+                  <button type="button" onClick={openWorkContextSettingsFromReview}>업무 맥락 등록으로 이동</button>
                 </div>
               )}
             </section>
