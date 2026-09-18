@@ -3,19 +3,41 @@ export type CameraSlot = 1 | 2 | 3;
 export type CameraDeviceIdentity = Pick<MediaDeviceInfo, "deviceId" | "groupId" | "label">;
 
 const BUILT_IN_CAMERA = /built-in|facetime|integrated|internal|macbook|continuity|iphone|desk ?view|내장|데스크뵰|아이폰|‘[^’]+’ 카메라/i;
+const CONTINUITY_CAMERA = /continuity|iphone|desk ?view|아이폰|데스크뵰|데스크뷰|‘[^’]+’ 카메라/i;
 
 export const isExternalCamera = (camera: CameraDeviceIdentity) =>
   !BUILT_IN_CAMERA.test(camera.label) && !/데스크뷰/i.test(camera.label);
 
-/** Keeps laptop cameras out and restores the three external-camera slots. */
+/**
+ * Keeps dedicated webcams first without hiding a usable camera just because
+ * its driver reports a generic "Integrated Camera" style label. Continuity
+ * cameras stay last so they never displace a physically connected webcam.
+ */
+export function listCameraCandidates<T extends CameraDeviceIdentity>(cameras: T[]): T[] {
+  const unique = cameras.filter((camera, index) =>
+    camera.deviceId
+      ? cameras.findIndex((candidate) => candidate.deviceId === camera.deviceId) === index
+      : true,
+  );
+  const byStableName = (a: T, b: T) =>
+    a.label.localeCompare(b.label) || a.deviceId.localeCompare(b.deviceId);
+  const external = unique.filter(isExternalCamera).sort(byStableName);
+  const localFallback = unique
+    .filter((camera) => !isExternalCamera(camera) && !CONTINUITY_CAMERA.test(camera.label))
+    .sort(byStableName);
+  const continuity = unique
+    .filter((camera) => !isExternalCamera(camera) && CONTINUITY_CAMERA.test(camera.label))
+    .sort(byStableName);
+  return [...external, ...localFallback, ...continuity];
+}
+
+/** Prefers external cameras and restores up to three stable camera slots. */
 export function selectExternalCameraSlots(
   cameras: CameraDeviceIdentity[],
   saved: CameraDeviceIdentity[] = [],
   requestedIds: string[] = [],
 ) {
-  const remaining = cameras
-    .filter(isExternalCamera)
-    .sort((a, b) => a.label.localeCompare(b.label) || a.deviceId.localeCompare(b.deviceId));
+  const remaining = listCameraCandidates(cameras);
   const selected: CameraDeviceIdentity[] = [];
 
   for (let slot = 0; slot < 3 && remaining.length > 0; slot += 1) {

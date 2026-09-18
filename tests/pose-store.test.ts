@@ -4,6 +4,7 @@ import {
   BODY_LANDMARK_COUNT,
   HAND_LANDMARK_COUNT,
   MOTION_FRAME_STRIDE,
+  buildFrameTimeIndex,
   decodeCameraHealth,
   deriveBodyProportionProfile,
   encodeCameraHealth,
@@ -97,6 +98,18 @@ test("parseSessionFrame: both hands present when both detected", () => {
   assert.ok(parsed.leftHand);
   assert.ok(parsed.rightHand);
   assert.equal(parsed.rightHand![0], 300);
+});
+
+test("buildFrameTimeIndex: attaches an absolute timestamp and UTC offset to every skeleton frame", () => {
+  const startedAt = new Date("2026-09-18T00:00:00.000Z").getTime();
+  const index = buildFrameTimeIndex([
+    buildRawFrame({ relativeTimeMs: 0 }),
+    buildRawFrame({ relativeTimeMs: 1250 }),
+  ], startedAt);
+  assert.equal(index.length, 2);
+  assert.equal(index[0][0], startedAt);
+  assert.equal(index[1][0], startedAt + 1250);
+  assert.equal(index[0][1], -new Date(startedAt).getTimezoneOffset());
 });
 
 test("camera health flags round-trip in one byte", () => {

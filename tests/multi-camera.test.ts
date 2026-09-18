@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateEventMotion } from "../app/demo-motion.ts";
 import { compareSkeletonMotions } from "../app/motion-classifier.ts";
-import { analyzeCameraContinuity, isExternalCamera, mergeCameraFrameStreams, selectExternalCameraSlots } from "../app/multi-camera.ts";
+import { analyzeCameraContinuity, isExternalCamera, listCameraCandidates, mergeCameraFrameStreams, selectExternalCameraSlots } from "../app/multi-camera.ts";
 import { BODY_LANDMARK_COUNT, HAND_LANDMARK_COUNT, MOTION_FRAME_STRIDE } from "../app/pose-store.ts";
 
 function frame(timeMs: number, { body = true, full = true, hands = 0, centerX = 0.5, facing = "front" } = {}) {
@@ -120,4 +120,34 @@ test("built-in and Continuity cameras stay out of external-camera slots", () => 
   assert.equal(isExternalCamera(camera("‘서연’ 데스크뵰 카메라")), false);
   assert.equal(isExternalCamera(camera("‘서연’ 데스크뷰 카메라")), false);
   assert.equal(isExternalCamera(camera("SNAP U2")), true);
+});
+
+test("a locally installed camera with an integrated-style driver label fills the third slot", () => {
+  const camera = (deviceId: string, label: string) => ({ deviceId, groupId: deviceId, label });
+  const cameras = [
+    camera("laptop", "Integrated Camera"),
+    camera("usb-a", "SNAP U2"),
+    camera("usb-b", "USB Camera"),
+  ];
+
+  assert.deepEqual(
+    selectExternalCameraSlots(cameras).map((item) => item.deviceId),
+    ["usb-a", "usb-b", "laptop"],
+  );
+});
+
+test("camera candidates keep all detected devices while prioritizing physical webcams", () => {
+  const camera = (deviceId: string, label: string) => ({ deviceId, groupId: deviceId, label });
+  const cameras = [
+    camera("continuity", "‘서연’ 카메라"),
+    camera("built-in", "FaceTime HD Camera"),
+    camera("usb-b", "USB Camera B"),
+    camera("usb-a", "USB Camera A"),
+    camera("usb-a", "USB Camera A"),
+  ];
+
+  assert.deepEqual(
+    listCameraCandidates(cameras).map((item) => item.deviceId),
+    ["usb-a", "usb-b", "built-in", "continuity"],
+  );
 });

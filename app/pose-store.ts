@@ -14,6 +14,24 @@ export const MOTION_SAMPLE_RATE = 10;
 export const MOTION_FRAME_STRIDE =
   10 + BODY_LANDMARK_COUNT * 4 + HAND_LANDMARK_COUNT * 2 * 3;
 
+export type TimeZoneMetadata = {
+  timeZone: string;
+  utcOffsetMinutes: number;
+};
+
+export function getTimeZoneMetadata(at: number): TimeZoneMetadata {
+  let timeZone = "UTC";
+  try {
+    timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    // UTC is a safe fallback on runtimes without full Intl time-zone data.
+  }
+  return {
+    timeZone,
+    utcOffsetMinutes: -new Date(at).getTimezoneOffset(),
+  };
+}
+
 export const BODY_LANDMARK_NAMES = [
   "left_shoulder",
   "right_shoulder",
@@ -85,6 +103,9 @@ export type MotionSessionRecord = {
   cameraLabel?: string;
   logicalCameraId?: string;
   timelineOriginMs?: number;
+  /** IANA zone and local UTC offset captured with this session. Optional for legacy records. */
+  timeZone?: string;
+  utcOffsetMinutes?: number;
 };
 
 export type CaptureManifestRecord = {
@@ -92,6 +113,8 @@ export type CaptureManifestRecord = {
   startedAt: number;
   endedAt: number | null;
   timelineOriginMs: number;
+  timeZone?: string;
+  utcOffsetMinutes?: number;
   expectedCameraSlots: CameraSlot[];
   cameras: Array<{
     slot: CameraSlot;
@@ -206,6 +229,7 @@ export async function createMotionSession(
   startedAt: number,
   multiCamera?: Pick<MotionSessionRecord, "globalSessionId" | "cameraId" | "cameraSlot" | "cameraLabel" | "logicalCameraId" | "timelineOriginMs">,
 ) {
+  const timeZone = getTimeZoneMetadata(startedAt);
   const database = await openMotionDatabase();
   const transaction = database.transaction(SESSION_STORE, "readwrite");
   const record: MotionSessionRecord = {
@@ -224,6 +248,7 @@ export async function createMotionSession(
     mirroredPreview: true,
     source: "local_camera",
     faceLandmarksStored: false,
+    ...timeZone,
     ...multiCamera,
   };
   transaction.objectStore(SESSION_STORE).put(record);
@@ -233,12 +258,18 @@ export async function createMotionSession(
 }
 
 export async function saveCaptureManifest(manifest: CaptureManifestRecord) {
+  const fallbackTimeZone = getTimeZoneMetadata(manifest.startedAt);
+  const record: CaptureManifestRecord = {
+    ...manifest,
+    timeZone: manifest.timeZone ?? fallbackTimeZone.timeZone,
+    utcOffsetMinutes: manifest.utcOffsetMinutes ?? fallbackTimeZone.utcOffsetMinutes,
+  };
   const database = await openMotionDatabase();
   const transaction = database.transaction(CAPTURE_MANIFEST_STORE, "readwrite");
-  transaction.objectStore(CAPTURE_MANIFEST_STORE).put(manifest);
+  transaction.objectStore(CAPTURE_MANIFEST_STORE).put(record);
   await transactionDone(transaction);
   database.close();
-  return manifest;
+  return record;
 }
 
 export async function finishCaptureManifest(id: string, endedAt: number) {
@@ -633,6 +664,18 @@ export async function deleteAllMotionSessions(): Promise<void> {
   await requestResult(indexedDB.deleteDatabase(DB_NAME));
 }
 
+/**
+ * Builds one absolute timestamp row per stored skeleton frame. The UTC offset
+ * is calculated for each frame so a capture spanning a daylight-saving change
+ * remains unambiguous.
+ */
+export function buildFrameTimeIndex(frames: number[][], sessionStartedAt: number) {
+  return frames.map((frame) => {
+    const epochMs = sessionStartedAt + (Number.isFinite(frame[0]) ? frame[0] : 0);
+    return [epochMs, -new Date(epochMs).getTimezoneOffset()];
+  });
+}
+
 async function buildMotionSessionDataset(session: MotionSessionRecord) {
   const chunks = await getMotionChunks(session.id);
   const captureManifest = session.globalSessionId
@@ -650,6 +693,11 @@ async function buildMotionSessionDataset(session: MotionSessionRecord) {
       );
     }
   }
+  const fallbackTimeZone = getTimeZoneMetadata(session.startedAt);
+  const timeZone = session.timeZone ?? captureManifest?.timeZone ?? fallbackTimeZone.timeZone;
+  const utcOffsetMinutes = session.utcOffsetMinutes
+    ?? captureManifest?.utcOffsetMinutes
+    ?? fallbackTimeZone.utcOffsetMinutes;
 
   const dataset = {
     format: "memory-guard-motion-v2",
@@ -659,6 +707,13 @@ async function buildMotionSessionDataset(session: MotionSessionRecord) {
       sample_rate_hz: MOTION_SAMPLE_RATE,
       coordinate_space: "normalized_image",
       mirrored_preview: true,
+      time_reference: {
+        session_started_at_epoch_ms: session.startedAt,
+        time_zone_iana: timeZone,
+        utc_offset_minutes_at_start: utcOffsetMinutes,
+        frame_time_index_layout: ["captured_at_epoch_ms", "utc_offset_minutes"],
+        note: "frame_time_index has one row for every skeleton row in frames.",
+      },
       frame_layout: [
         "relative_time_ms",
         "body_detected_0_or_1",
@@ -692,6 +747,7 @@ async function buildMotionSessionDataset(session: MotionSessionRecord) {
     session,
     capture_manifest: captureManifest,
     camera_health: cameraHealth,
+    frame_time_index: buildFrameTimeIndex(frames, session.startedAt),
     frames,
   };
   return dataset;
@@ -798,7 +854,7 @@ export async function downloadMotionDataFolder() {
       "catalog.json: 전체 촬영 세션과 카메라 파일 색인",
       "날짜/세션/capture-manifest.json: 카메라·구역 매핑 스냅샷",
       "날짜/세션/camera-health.json: 카메라별 연결·프레임·사람 인식 상태",
-      "날짜/세션/camera-N_라벨/motion.json: 해당 카메라의 스켈레톤 좌표",
+      "날짜/세션/camera-N_라벨/motion.json: 해당 카메라의 스켈레톤 좌표와 프레임별 절대 시각·시간대 오프셋",
       "",
       "영상·음성·얼굴 특징점은 포함되지 않습니다.",
     ].join("\n"),

@@ -441,19 +441,8 @@ test("개발용 합성 시나리오 리플레이: 페르소나의 '동작 보기
 });
 
 test("개발자 수동 라벨링: 애매한 행동의 스켈레톤을 보고 업무 라벨을 확정한다", async () => {
-  await withPage({}, async (page) => {
-    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-    await page.evaluate(async () => {
-      const resultOf = (request) => new Promise((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      const done = (transaction) => new Promise((resolve, reject) => {
-        transaction.oncomplete = resolve;
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () => reject(transaction.error);
-      });
-
+  await withPage({}, async (page, context) => {
+    await context.addInitScript(() => {
       localStorage.setItem("memory-guard-interface-mode-v1", "developer");
       localStorage.setItem("memory-guard-work-context-config-v2", JSON.stringify({
         routines: [{
@@ -469,6 +458,18 @@ test("개발자 수동 라벨링: 애매한 행동의 스켈레톤을 보고 업
         }],
         closedDays: [],
       }));
+    });
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    await page.evaluate(async () => {
+      const resultOf = (request) => new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const done = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
 
       const stride = 224;
       const frameCount = 12;
@@ -593,7 +594,11 @@ test("개발자 수동 라벨링: 애매한 행동의 스켈레톤을 보고 업
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByLabel("검토 대기 1건").waitFor();
-    await page.getByRole("button", { name: "스켈레톤 확인" }).click();
+    await page.getByRole("button", { name: "전체 1건 보기" }).click();
+    const allReviewsDialog = page.getByRole("dialog", { name: "전체 미분류 동작" });
+    await allReviewsDialog.waitFor();
+    assert.equal(await allReviewsDialog.locator(".all-action-reviews-list article").count(), 1);
+    await allReviewsDialog.getByRole("button", { name: "스켈레톤 확인" }).click();
     await page.getByRole("dialog", { name: /업무 라벨 검토/ }).waitFor();
     await page.getByRole("radio", { name: "설거지" }).check();
     await page.getByRole("button", { name: "라벨 확정" }).click();
