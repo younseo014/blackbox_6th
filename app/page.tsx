@@ -93,10 +93,14 @@ import {
   saveObservationProfile,
 } from "./observation-store";
 import {
+  addObservationMotionSample,
   classifyLearnedMotion,
   clearLearnedMotionActions,
+  clearObservationMotionActions,
   loadLearnedMotionActions,
+  loadObservationMotionActions,
   saveLearnedMotionActions,
+  saveObservationMotionActions,
   type LearnedMotionAction,
   type LearnedMotionResult,
   type LearnedMotionSample,
@@ -698,6 +702,7 @@ export default function Home() {
   const [workContextConfig, setWorkContextConfig] = useState<WorkContextConfig>(loadWorkContextConfig);
   const [brainHealthOpen, setBrainHealthOpen] = useState(false);
   const [learnedMotions, setLearnedMotions] = useState<LearnedMotionAction[]>([]);
+  const [observationLearnedMotions, setObservationLearnedMotions] = useState<LearnedMotionAction[]>([]);
   const [quickMotionMode, setQuickMotionMode] = useState<QuickMotionMode>("idle");
   const [trainingTargetCount, setTrainingTargetCount] = useState<5 | 10>(5);
   const [draftMotionSamples, setDraftMotionSamples] = useState<LearnedMotionSample[]>([]);
@@ -950,7 +955,10 @@ export default function Home() {
   }, [cameraStatus, secondaryCameraConnected, tertiaryCameraConnected, zoneCameraSlot, zoneSetupOpen]);
 
   useEffect(() => {
-    queueMicrotask(() => setLearnedMotions(loadLearnedMotionActions()));
+    queueMicrotask(() => {
+      setLearnedMotions(loadLearnedMotionActions());
+      setObservationLearnedMotions(loadObservationMotionActions());
+    });
   }, []);
 
   useEffect(() => {
@@ -2017,8 +2025,8 @@ export default function Home() {
       // once when a completed session is ready for local classification.
       const { classifyEpflPosture } = await import("./epfl-posture-classifier");
       const labelOptions = listWorkContextLabels(workContextConfig);
-      const loadedActions = learnedMotions.length > 0
-        ? await Promise.all(learnedMotions.map(async (action) => ({
+      const loadedActions = observationLearnedMotions.length > 0
+        ? await Promise.all(observationLearnedMotions.map(async (action) => ({
           id: action.id,
           label: action.label,
           samples: (await Promise.all(action.samples.map(framesForMotionSample))).filter(
@@ -2645,6 +2653,7 @@ export default function Home() {
     window.localStorage.removeItem(WORK_CONTEXT_CONFIG_STORAGE_KEY);
     window.localStorage.removeItem(USER_INSTALL_STORAGE_KEY);
     clearLearnedMotionActions();
+    clearObservationMotionActions();
     setConsentState(getConsent());
     setUserInstall(null);
     setSessionCount(0);
@@ -2654,6 +2663,7 @@ export default function Home() {
     setMotionSignal(null);
     setCareLogs([]);
     setLearnedMotions([]);
+    setObservationLearnedMotions([]);
     setQuickMotionMode("idle");
     setClosingChecklist(DEFAULT_CLOSING_CHECKLIST);
     setWorkContextConfig(DEFAULT_WORK_CONTEXT_CONFIG);
@@ -2994,9 +3004,19 @@ export default function Home() {
   const reviewLabelOptions = listWorkContextLabels(workContextConfig);
   const registeredReviewTaskTypes = new Set(reviewLabelOptions.map((option) => option.taskType));
 
+  function actionReviewDisplayCandidate(episode: ReviewableObservationEpisode) {
+    return episode.actionReview?.candidates.find((candidate) => registeredReviewTaskTypes.has(candidate.taskType))
+      ?? (registeredReviewTaskTypes.has(episode.taskType)
+        ? {
+            taskType: episode.taskType,
+            taskLabel: episode.taskLabel,
+            confidence: episode.taskConfidence,
+          }
+        : null);
+  }
+
   function actionReviewDisplayLabel(episode: ReviewableObservationEpisode) {
-    return episode.actionReview?.candidates.find((candidate) => registeredReviewTaskTypes.has(candidate.taskType))?.taskLabel
-      ?? (registeredReviewTaskTypes.has(episode.taskType) ? episode.taskLabel : "미분류");
+    return actionReviewDisplayCandidate(episode)?.taskLabel ?? "미분류";
   }
 
   function openActionReview(episode: ReviewableObservationEpisode) {
@@ -3028,21 +3048,14 @@ export default function Home() {
         startMs: updated.motionSlice.startMs,
         endMs: updated.motionSlice.endMs,
       };
-      const matching = learnedMotions.find(
-        (motion) => motion.label.toLocaleLowerCase() === selectedLabel.taskLabel.toLocaleLowerCase(),
+      const next = addObservationMotionSample(
+        observationLearnedMotions,
+        selectedLabel.taskLabel,
+        sample,
+        nowMs(),
       );
-      const next = matching
-        ? learnedMotions.map((motion) => motion.id === matching.id
-          ? { ...motion, samples: [...motion.samples.filter((item) => item.sessionId !== sample.sessionId), sample] }
-          : motion)
-        : [...learnedMotions, {
-          id: `learned-${crypto.randomUUID()}`,
-          label: selectedLabel.taskLabel,
-          samples: [sample],
-          createdAt: nowMs(),
-        }];
-      saveLearnedMotionActions(next);
-      setLearnedMotions(next);
+      saveObservationMotionActions(next);
+      setObservationLearnedMotions(next);
     }
     await refreshObservationData(observationProfile);
     setSelectedReviewEpisodeId(null);
@@ -3619,7 +3632,7 @@ export default function Home() {
                 <div>
                   <span>수동 라벨 검토</span>
                   <h2 id="manual-review-title">판별이 애매한 행동만 모았어요</h2>
-                  <p>영상·음성 없이 스켈레톤 구간과 분류 근거를 확인한 뒤 업무 이름을 확정합니다.</p>
+                  <p>실제 관찰의 업무 맥락 후보를 검토합니다. 직접 학습 판별 테스트와는 별도로 작동해요.</p>
                 </div>
                 <strong aria-label={`검토 대기 ${pendingActionReviews.length}건`}>
                   {pendingActionReviews.length}<small>건 대기</small>
@@ -3739,9 +3752,9 @@ export default function Home() {
 
                   {quickMotionMode === "testing" && (
                     <div className="quick-motion-test-copy">
-                      <span>임시 분석 모드</span>
+                      <span>모델 테스트 전용</span>
                       <strong>{motionCapture ? "판별할 동작을 수행하고 있어요" : "학습시킨 동작 중 하나를 보여주세요"}</strong>
-                      <small>정면이나 후면 어느 쪽에서 수행해도 좌우 반전 좌표를 함께 비교합니다.</small>
+                      <small>이 결과는 실제 관찰 라벨이나 개인 기준선에 반영되지 않아요.</small>
                     </div>
                   )}
 
@@ -3763,7 +3776,7 @@ export default function Home() {
                     <div className={`learned-motion-result status-${learnedMotionResult.status}`} aria-live="polite">
                       <span>{learnedMotionResult.status === "matched" ? "판별 결과" : learnedMotionResult.status === "uncertain" ? "가장 가까운 후보" : "판별 보류"}</span>
                       <strong>{learnedMotionResult.label ?? "상반신 좌표가 부족합니다"}</strong>
-                      <b>신뢰도 <NumberFlow value={Math.round(learnedMotionResult.confidence * 100)} suffix="%" /></b>
+                      <b>신뢰도 <NumberFlow value={Math.round((Number.isFinite(learnedMotionResult.confidence) ? learnedMotionResult.confidence : 0) * 100)} suffix="%" /></b>
                       {learnedMotionResult.candidates.length > 1 && (
                         <small>다음 후보 · {learnedMotionResult.candidates[1].label}</small>
                       )}
@@ -4950,7 +4963,7 @@ export default function Home() {
           <div className={`learned-motion-result status-${learnedMotionResult.status}`} aria-live="polite">
             <span>{learnedMotionResult.status === "matched" ? "판별 결과" : learnedMotionResult.status === "uncertain" ? "가장 가까운 후보" : "판별 보류"}</span>
             <strong>{learnedMotionResult.label ?? "상반신 좌표가 부족합니다"}</strong>
-            <b>신뢰도 <NumberFlow value={Math.round(learnedMotionResult.confidence * 100)} suffix="%" /></b>
+            <b>신뢰도 <NumberFlow value={Math.round((Number.isFinite(learnedMotionResult.confidence) ? learnedMotionResult.confidence : 0) * 100)} suffix="%" /></b>
             {learnedMotionResult.candidates.length > 1 && <small>다음 후보 · {learnedMotionResult.candidates[1].label}</small>}
           </div>
         )}
@@ -5366,9 +5379,12 @@ export default function Home() {
           reviewPanel={(
             <section className="manual-review-panel" aria-labelledby="manual-review-panel-title">
               <div className="manual-review-evidence">
-                <span>자동 판별 근거</span>
+                <span>업무 맥락 기반 자동 후보</span>
                 <strong id="manual-review-panel-title">
                   {actionReviewDisplayLabel(selectedReviewEpisode)}
+                  {actionReviewDisplayCandidate(selectedReviewEpisode) && (
+                    <> · {Math.round(actionReviewDisplayCandidate(selectedReviewEpisode)!.confidence * 100)}%</>
+                  )}
                 </strong>
                 <p>
                   {selectedReviewEpisode.actionReview?.reasons
@@ -5380,6 +5396,7 @@ export default function Home() {
                     ? `감지 구역 · ${occupationTemplate.zones.find((zone) => zone.id === selectedReviewEpisode.features.dominantZone)?.label ?? selectedReviewEpisode.features.dominantZone}`
                     : "감지 구역을 확인하지 못했어요"}
                 </small>
+                <small>확정 기준 · 신뢰도 60% 이상, 2순위와 12%p 이상 차이, 좌표·구역·시간 정보 정상</small>
               </div>
 
               {reviewLabelOptions.length > 0 ? (

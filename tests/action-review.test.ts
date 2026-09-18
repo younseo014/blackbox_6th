@@ -70,6 +70,18 @@ test("assessActionAmbiguity accepts a clear, high-confidence winner", () => {
   assert.deepEqual(result.reasons, []);
 });
 
+test("ambiguity boundaries accept exactly 60% confidence and a 12 point lead", () => {
+  const result = assessActionAmbiguity({
+    confidence: 0.6,
+    candidates: [
+      { taskType: "PREP", taskLabel: "제조", confidence: 0.6 },
+      { taskType: "CLEAN", taskLabel: "세척", confidence: 0.48 },
+    ],
+  });
+  assert.equal(result.ambiguous, false);
+  assert.deepEqual(result.reasons, []);
+});
+
 test("normalizeActionCandidates clamps, de-duplicates and sorts candidates", () => {
   assert.deepEqual(normalizeActionCandidates([
     { taskType: "A", taskLabel: "에이", confidence: -1 },

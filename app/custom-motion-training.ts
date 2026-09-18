@@ -29,6 +29,7 @@ export type LearnedMotionResult = {
 };
 
 const STORAGE_KEY = "memory-guard-custom-motions-v1";
+const OBSERVATION_STORAGE_KEY = "memory-guard-observation-motion-labels-v1";
 const MATCH_CONFIDENCE = 0.52;
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -49,14 +50,18 @@ function isLearnedMotionAction(value: unknown): value is LearnedMotionAction {
     );
 }
 
-export function loadLearnedMotionActions() {
+function loadActions(storageKey: string) {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "[]") as unknown;
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]") as unknown;
     return Array.isArray(parsed) ? parsed.filter(isLearnedMotionAction) : [];
   } catch {
     return [];
   }
+}
+
+export function loadLearnedMotionActions() {
+  return loadActions(STORAGE_KEY);
 }
 
 export function saveLearnedMotionActions(actions: LearnedMotionAction[]) {
@@ -65,6 +70,43 @@ export function saveLearnedMotionActions(actions: LearnedMotionAction[]) {
 
 export function clearLearnedMotionActions() {
   if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY);
+}
+
+export function loadObservationMotionActions() {
+  return loadActions(OBSERVATION_STORAGE_KEY);
+}
+
+export function saveObservationMotionActions(actions: LearnedMotionAction[]) {
+  window.localStorage.setItem(OBSERVATION_STORAGE_KEY, JSON.stringify(actions));
+}
+
+export function clearObservationMotionActions() {
+  if (typeof window !== "undefined") window.localStorage.removeItem(OBSERVATION_STORAGE_KEY);
+}
+
+export function addObservationMotionSample(
+  actions: LearnedMotionAction[],
+  label: string,
+  sample: LearnedMotionSample,
+  createdAt = Date.now(),
+) {
+  const normalizedLabel = label.trim().toLocaleLowerCase();
+  const matching = actions.find((action) => action.label.trim().toLocaleLowerCase() === normalizedLabel);
+  if (!matching) {
+    return [...actions, {
+      id: `observed-${crypto.randomUUID()}`,
+      label: label.trim(),
+      samples: [sample],
+      createdAt,
+    }];
+  }
+  const isSameSlice = (item: LearnedMotionSample) =>
+    item.sessionId === sample.sessionId &&
+    item.startMs === sample.startMs &&
+    item.endMs === sample.endMs;
+  return actions.map((action) => action.id === matching.id
+    ? { ...action, samples: [...action.samples.filter((item) => !isSameSlice(item)), sample] }
+    : action);
 }
 
 function closestExamplesDistance(values: number[]) {
@@ -80,7 +122,7 @@ export function classifyLearnedMotion(
     .map((action) => {
       const distances = action.samples
         .map((sample) => compareSkeletonMotions(observedFrames, sample))
-        .filter((distance): distance is number => distance !== null);
+        .filter((distance): distance is number => distance !== null && Number.isFinite(distance));
       return distances.length > 0
         ? { actionId: action.id, label: action.label, distance: closestExamplesDistance(distances) }
         : null;

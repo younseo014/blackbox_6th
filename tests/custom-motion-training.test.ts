@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyLearnedMotion } from "../app/custom-motion-training.ts";
+import { addObservationMotionSample, classifyLearnedMotion } from "../app/custom-motion-training.ts";
 import { generateEventMotion } from "../app/demo-motion.ts";
 
 function upperBodyOnly(frames: number[][]) {
@@ -80,4 +80,39 @@ test("classifyLearnedMotion tolerates pauses and uneven execution speed", () => 
 
   assert.equal(result.status, "matched");
   assert.equal(result.label, "선반 정리");
+});
+
+test("classifyLearnedMotion never exposes NaN confidence when some coordinates are invalid", () => {
+  const corrupted = generateEventMotion("high_reach", 3).map((frame, frameIndex) => {
+    const next = [...frame];
+    if (frameIndex % 2 === 0) {
+      next[10] = Number.NaN;
+      next[10 + 22 * 4 + 8 * 3] = Number.NaN;
+    }
+    return next;
+  });
+  const result = classifyLearnedMotion(corrupted, [
+    { id: "reach", label: "선반 정리", samples: [generateEventMotion("high_reach", 1)] },
+  ]);
+
+  assert.equal(Number.isFinite(result.confidence), true);
+  assert.equal(result.candidates.every((candidate) => Number.isFinite(candidate.distance)), true);
+});
+
+test("observation labels accumulate separate motion slices from the same long session", () => {
+  const first = { sessionId: "business-day", startMs: 1_000, endMs: 3_000 };
+  const second = { sessionId: "business-day", startMs: 8_000, endMs: 10_000 };
+  const initial = [{ id: "observed-wash", label: "설거지", samples: [first], createdAt: 1 }];
+  const updated = addObservationMotionSample(initial, "설거지", second, 2);
+
+  assert.equal(updated[0].samples.length, 2);
+  assert.deepEqual(updated[0].samples, [first, second]);
+});
+
+test("observation labels replace only the exact same slice", () => {
+  const sample = { sessionId: "business-day", startMs: 1_000, endMs: 3_000 };
+  const initial = [{ id: "observed-wash", label: "설거지", samples: [sample], createdAt: 1 }];
+  const updated = addObservationMotionSample(initial, " 설거지 ", sample, 2);
+
+  assert.equal(updated[0].samples.length, 1);
 });

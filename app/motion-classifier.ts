@@ -136,8 +136,10 @@ function frameDistance(a: SignatureFrame, b: SignatureFrame) {
   let totalWeight = 0;
   for (let index = 0; index < a.values.length; index += 1) {
     const weight = Math.min(a.mask[index] ?? 0, b.mask[index] ?? 0);
-    if (weight <= 0) continue;
-    weightedError += (a.values[index] - b.values[index]) ** 2 * weight;
+    const observed = a.values[index];
+    const reference = b.values[index];
+    if (weight <= 0 || !Number.isFinite(observed) || !Number.isFinite(reference)) continue;
+    weightedError += (observed - reference) ** 2 * weight;
     totalWeight += weight;
   }
   return totalWeight > 0 ? Math.sqrt(weightedError / totalWeight) : 10;
