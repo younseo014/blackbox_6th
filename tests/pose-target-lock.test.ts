@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  EMPTY_POSE_CONFIRMATION,
+  confirmPoseSelection,
   handBelongsToPose,
+  handTrackingDetailScore,
   matchHandToPose,
   selectLockedPose,
 } from "../app/pose-target-lock.ts";
@@ -68,14 +71,19 @@ test("target lock reports missing instead of switching to a distant pose-like ob
   assert.equal(missing.lock, acquired.lock);
 });
 
-test("the single visible person is reacquired after a sustained tracking loss", () => {
+test("a lost owner is released before a distant candidate can be acquired", () => {
   const owner = standingPose(0.42, 0.9);
   const acquired = selectLockedPose([owner], null, 1000);
   const repositionedOwner = standingPose(0.88, 0.42);
-  const recovered = selectLockedPose([repositionedOwner], acquired.lock, 1700);
-  assert.equal(recovered.state, "acquired");
-  assert.equal(recovered.landmarks, repositionedOwner);
-  assert.ok(recovered.lock);
+  const stillMissing = selectLockedPose([repositionedOwner], acquired.lock, 1700);
+  assert.equal(stillMissing.state, "missing");
+  const released = selectLockedPose([repositionedOwner], acquired.lock, 3600);
+  assert.equal(released.state, "searching");
+  assert.equal(released.landmarks, null);
+  assert.equal(released.lock, null);
+  const fresh = selectLockedPose([repositionedOwner], released.lock, 3666);
+  assert.equal(fresh.state, "acquired");
+  assert.equal(fresh.landmarks, repositionedOwner);
 });
 
 test("target lock stays missing instead of merging with a similarly-placed but differently-built stranger", () => {
@@ -116,7 +124,7 @@ test("shoulders and arms are enough to lock a true upper-body-only pose", () => 
   assert.ok(selection.lock);
 });
 
-test("one visible arm is enough to recognize and track a partial person", () => {
+test("one visible arm maintains an owner but cannot create a new owner", () => {
   const owner = standingPose();
   const acquired = selectLockedPose([owner], null, 1000);
   const armOnly = standingPose();
@@ -125,8 +133,37 @@ test("one visible arm is enough to recognize and track a partial person", () => 
   }
   for (const index of [11, 13, 15]) armOnly[index] = { ...owner[index], visibility: 0.8 };
 
-  assert.equal(selectLockedPose([armOnly], null, 1066).landmarks, armOnly);
+  assert.equal(selectLockedPose([armOnly], null, 1066).landmarks, null);
   assert.equal(selectLockedPose([armOnly], acquired.lock, 1066).landmarks, armOnly);
+});
+
+test("a candidate must remain anatomically consistent for three frames", () => {
+  const owner = standingPose();
+  const first = selectLockedPose([owner], null, 1000);
+  const firstConfirmation = confirmPoseSelection(first, EMPTY_POSE_CONFIRMATION);
+  assert.equal(firstConfirmation.landmarks, null);
+
+  const second = selectLockedPose([owner], first.lock, 1066);
+  const secondConfirmation = confirmPoseSelection(second, firstConfirmation.state);
+  assert.equal(secondConfirmation.landmarks, null);
+
+  const third = selectLockedPose([owner], second.lock, 1132);
+  const thirdConfirmation = confirmPoseSelection(third, secondConfirmation.state);
+  assert.equal(thirdConfirmation.landmarks, owner);
+  assert.equal(thirdConfirmation.state.confirmed, true);
+});
+
+test("a pose cannot become a new owner without person or foreground evidence", () => {
+  const owner = standingPose();
+  const first = selectLockedPose([owner], null, 1000);
+  const blocked = confirmPoseSelection(first, EMPTY_POSE_CONFIRMATION, false);
+  assert.equal(blocked.landmarks, null);
+  assert.equal(blocked.state.consecutiveMatches, 0);
+
+  const second = selectLockedPose([owner], first.lock, 1066);
+  const allowed = confirmPoseSelection(second, blocked.state, true);
+  assert.equal(allowed.state.consecutiveMatches, 1);
+  assert.equal(allowed.landmarks, null);
 });
 
 test("target lock follows the same person from close upper-body to farther full-body framing", () => {
@@ -184,4 +221,11 @@ test("hand association ignores incompatible z scales from separate vision models
   const rightHand = handAt(0.64, 0.5).map((landmark) => ({ ...landmark, z: -1.8 }));
   assert.equal(matchHandToPose(leftHand, owner), "left");
   assert.equal(matchHandToPose(rightHand, owner), "right");
+});
+
+test("hand detail uses the camera where the forearm occupies enough pixels", () => {
+  const owner = standingPose();
+  assert.ok(handTrackingDetailScore(owner, 1920, 1080) > 28);
+  assert.ok(handTrackingDetailScore(owner, 160, 90) < 28);
+  assert.equal(handTrackingDetailScore(null, 1920, 1080), 0);
 });

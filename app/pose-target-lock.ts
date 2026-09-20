@@ -14,7 +14,8 @@ const MAX_SCALE_LOG_CHANGE = 0.65;
 // be picked up as a continuity match).
 const MAX_SHAPE_DISTANCE = 0.5;
 const MAX_CONTINUITY_SCORE = 0.4;
-const REACQUIRE_AFTER_MS = 650;
+const RELEASE_AFTER_MS = 2_500;
+export const POSE_CONFIRMATION_FRAMES = 3;
 
 type TargetDescriptor = {
   centerX: number;
@@ -27,6 +28,7 @@ type TargetDescriptor = {
   legRatio: number;
   quality: number;
   partial: boolean;
+  acquisitionReady: boolean;
 };
 
 export type PoseTargetLock = {
@@ -77,17 +79,29 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
 
   const visiblePoints = BODY_LANDMARKS
     .map((index) => landmarks[index])
-    .filter((point) => point && landmarkVisibility(point) >= 0.2);
-  const visibleSegment = BODY_SEGMENTS.some(([first, second]) =>
-    landmarks[first] && landmarks[second] && pairIsVisible(landmarks[first], landmarks[second], 0.2),
-  );
-  if (!visibleSegment) return null;
+    .filter((point) => point && landmarkVisibility(point) >= 0.2 &&
+      point.x >= -0.1 && point.x <= 1.1 && point.y >= -0.1 && point.y <= 1.1);
+  const visibleSegmentCount = BODY_SEGMENTS.filter(([first, second]) =>
+    landmarks[first] && landmarks[second] && pairIsVisible(landmarks[first], landmarks[second], 0.2) &&
+    landmarks[first].x >= -0.1 && landmarks[first].x <= 1.1 &&
+    landmarks[first].y >= -0.1 && landmarks[first].y <= 1.1 &&
+    landmarks[second].x >= -0.1 && landmarks[second].x <= 1.1 &&
+    landmarks[second].y >= -0.1 && landmarks[second].y <= 1.1,
+  ).length;
+  if (visibleSegmentCount === 0) return null;
 
   const leftShoulder = landmarks[11];
   const rightShoulder = landmarks[12];
   const leftHip = landmarks[23];
   const rightHip = landmarks[24];
   const shouldersVisible = pairIsVisible(leftShoulder, rightShoulder, 0.15);
+  const hipsVisible = pairIsVisible(leftHip, rightHip);
+  // A lone line on furniture is easy for a low-confidence pose model to
+  // hallucinate as an arm or leg. New owners need a torso anchor or at least
+  // two connected body segments. Once locked, one visible limb can still keep
+  // a real, partially occluded person alive.
+  const acquisitionReady = visiblePoints.length >= 4 &&
+    (shouldersVisible || hipsVisible || visibleSegmentCount >= 2);
   const xs = visiblePoints.map((point) => point.x);
   const ys = visiblePoints.map((point) => point.y);
   const minX = Math.min(...xs);
@@ -108,11 +122,11 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
       legRatio: Number.NaN,
       quality: visiblePoints.reduce((sum, point) => sum + (point.visibility ?? 0), 0) / visiblePoints.length,
       partial: true,
+      acquisitionReady,
     };
   }
   const shoulderCenter = visibilityWeightedCenter(leftShoulder, rightShoulder);
   const shoulderWidth = imageDistance(leftShoulder, rightShoulder);
-  const hipsVisible = pairIsVisible(leftHip, rightHip);
   const hipCenter = hipsVisible
     ? visibilityWeightedCenter(leftHip, rightHip)
     : { x: shoulderCenter.x, y: shoulderCenter.y + shoulderWidth / 0.6, z: shoulderCenter.z };
@@ -150,6 +164,7 @@ function descriptorFor(landmarks: NormalizedLandmarkLike[]): TargetDescriptor | 
       visiblePoints.reduce((sum, point) => sum + (point.visibility ?? 0), 0) /
       visiblePoints.length,
     partial: !hipsVisible,
+    acquisitionReady,
   };
 }
 
@@ -211,6 +226,7 @@ export function selectLockedPose<T extends NormalizedLandmarkLike>(
 
   if (!currentLock) {
     const rankedCandidates = described
+      .filter((candidate) => candidate.descriptor.acquisitionReady)
       .sort((a, b) => acquisitionScore(b.descriptor) - acquisitionScore(a.descriptor));
     const selected = rankedCandidates[0];
     if (!selected) {
@@ -234,20 +250,10 @@ export function selectLockedPose<T extends NormalizedLandmarkLike>(
     .sort((a, b) => a.score - b.score);
   const selected = matches[0];
   if (!selected) {
-    const reacquired = timestamp - currentLock.lastSeenAt >= REACQUIRE_AFTER_MS
-      ? described.sort((a, b) => acquisitionScore(b.descriptor) - acquisitionScore(a.descriptor))[0]
-      : null;
-    if (reacquired) {
-      return {
-        landmarks: reacquired.landmarks,
-        lock: {
-          acquiredAt: timestamp,
-          lastSeenAt: timestamp,
-          initial: reacquired.descriptor,
-          latest: reacquired.descriptor,
-        },
-        state: "acquired",
-      };
+    if (timestamp - currentLock.lastSeenAt >= RELEASE_AFTER_MS) {
+      // Release before accepting a replacement. This prevents an abandoned
+      // lock from jumping directly to a chair or hanger elsewhere in frame.
+      return { landmarks: null, lock: null, state: "searching" };
     }
     return { landmarks: null, lock: currentLock, state: "missing" };
   }
@@ -261,6 +267,68 @@ export function selectLockedPose<T extends NormalizedLandmarkLike>(
     },
     state: "tracking",
   };
+}
+
+export type PoseConfirmationState = {
+  lockAcquiredAt: number | null;
+  consecutiveMatches: number;
+  confirmed: boolean;
+};
+
+export const EMPTY_POSE_CONFIRMATION: PoseConfirmationState = {
+  lockAcquiredAt: null,
+  consecutiveMatches: 0,
+  confirmed: false,
+};
+
+/** Prevents a one-frame object hallucination from becoming a visible owner. */
+export function confirmPoseSelection<T extends NormalizedLandmarkLike>(
+  selection: PoseTargetSelection<T>,
+  previous: PoseConfirmationState,
+  allowAcquisition = true,
+) {
+  if (!selection.lock) {
+    return { landmarks: null as T[] | null, state: { ...EMPTY_POSE_CONFIRMATION } };
+  }
+  const sameLock = previous.lockAcquiredAt === selection.lock.acquiredAt;
+  const eligibleLandmarks = previous.confirmed || allowAcquisition
+    ? selection.landmarks
+    : null;
+  const consecutiveMatches = eligibleLandmarks
+    ? (sameLock ? previous.consecutiveMatches : 0) + 1
+    : previous.confirmed
+      ? previous.consecutiveMatches
+      : 0;
+  const confirmed = sameLock &&
+    (previous.confirmed || consecutiveMatches >= POSE_CONFIRMATION_FRAMES);
+  const state: PoseConfirmationState = {
+    lockAcquiredAt: selection.lock.acquiredAt,
+    consecutiveMatches,
+    confirmed,
+  };
+  return { landmarks: confirmed ? eligibleLandmarks : null, state };
+}
+
+/** Scores whether this view has enough wrist/forearm pixels for finger detail. */
+export function handTrackingDetailScore(
+  pose: NormalizedLandmarkLike[] | null,
+  videoWidth: number,
+  videoHeight: number,
+) {
+  if (!pose || videoWidth <= 0 || videoHeight <= 0) return 0;
+  const forearmPixels = ([
+    [13, 15],
+    [14, 16],
+  ] as const).map(([elbowIndex, wristIndex]) => {
+    const elbow = pose[elbowIndex];
+    const wrist = pose[wristIndex];
+    if (!elbow || !wrist || !pairIsVisible(elbow, wrist, 0.45)) return 0;
+    return Math.hypot(
+      (elbow.x - wrist.x) * videoWidth,
+      (elbow.y - wrist.y) * videoHeight,
+    );
+  });
+  return Math.max(...forearmPixels);
 }
 
 /**

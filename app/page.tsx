@@ -7,6 +7,7 @@ import { Dialog } from "@base-ui-components/react/dialog";
 import type {
   HandLandmarker,
   NormalizedLandmark,
+  ObjectDetector,
   PoseLandmarker,
 } from "@mediapipe/tasks-vision";
 import {
@@ -128,10 +129,23 @@ import {
   listWorkContextLabels,
 } from "./work-context-inference";
 import {
+  EMPTY_POSE_CONFIRMATION,
+  confirmPoseSelection,
+  handTrackingDetailScore,
   matchHandToPose,
   selectLockedPose,
+  type PoseConfirmationState,
   type PoseTargetLock,
 } from "./pose-target-lock";
+import {
+  BACKGROUND_HEIGHT,
+  BACKGROUND_WIDTH,
+  EMPTY_BACKGROUND_GATE,
+  grayscaleSignature,
+  personPresenceAllowsAcquisition,
+  updateBackgroundGate,
+  type BackgroundGateState,
+} from "./person-presence-gate";
 
 type View = "home" | "settings" | "today" | "timeline" | "care" | "onboarding";
 type OnboardingStep = 1 | 2 | 3 | 4;
@@ -293,6 +307,8 @@ const USER_INSTALL_STORAGE_KEY = "memory-guard-user-install-v1";
 const CAMERA_SLOT_STORAGE_KEY = "memory-guard-external-camera-slots-v1";
 const POSE_DISPLAY_HOLD_MS = 450;
 const CAMERA_HEALTH_CHUNK_SECONDS = 300;
+const MIN_HAND_FOREARM_PIXELS = 28;
+const PERSON_DETECTION_INTERVAL_MS = 400;
 
 function loadInterfaceMode(): InterfaceMode {
   if (typeof window === "undefined") return "user";
@@ -783,6 +799,20 @@ export default function Home() {
   const secondaryPoseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const tertiaryPoseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const personDetectorRef = useRef<ObjectDetector | null>(null);
+  const personDetectorFailedRef = useRef(false);
+  const lastPersonDetectorRunRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
+  const lastPersonDetectorSeenRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
+  const backgroundGateRef = useRef<Record<CameraSlot, BackgroundGateState>>({
+    1: { ...EMPTY_BACKGROUND_GATE },
+    2: { ...EMPTY_BACKGROUND_GATE },
+    3: { ...EMPTY_BACKGROUND_GATE },
+  });
+  const backgroundCanvasRef = useRef<Record<CameraSlot, HTMLCanvasElement | null>>({
+    1: null,
+    2: null,
+    3: null,
+  });
   const poseAnimationRef = useRef<number | null>(null);
   const trackingActiveRef = useRef(false);
   const lastDetectionTimeRef = useRef(0);
@@ -793,6 +823,10 @@ export default function Home() {
   const poseTargetLockRef = useRef<PoseTargetLock | null>(null);
   const secondaryPoseTargetLockRef = useRef<PoseTargetLock | null>(null);
   const tertiaryPoseTargetLockRef = useRef<PoseTargetLock | null>(null);
+  const poseConfirmationRef = useRef<PoseConfirmationState>({ ...EMPTY_POSE_CONFIRMATION });
+  const secondaryPoseConfirmationRef = useRef<PoseConfirmationState>({ ...EMPTY_POSE_CONFIRMATION });
+  const tertiaryPoseConfirmationRef = useRef<PoseConfirmationState>({ ...EMPTY_POSE_CONFIRMATION });
+  const handDetailScoresRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
   const lastHandsRef = useRef<HandState>({
     left: null,
     right: null,
@@ -1095,6 +1129,7 @@ export default function Home() {
       secondaryPoseLandmarkerRef.current?.close();
       tertiaryPoseLandmarkerRef.current?.close();
       handLandmarkerRef.current?.close();
+      personDetectorRef.current?.close();
     };
   }, []);
 
@@ -1352,16 +1387,20 @@ export default function Home() {
     secondaryPoseLandmarkerRef.current?.close();
     tertiaryPoseLandmarkerRef.current?.close();
     handLandmarkerRef.current?.close();
+    personDetectorRef.current?.close();
     poseLandmarkerRef.current = null;
     secondaryPoseLandmarkerRef.current = null;
     tertiaryPoseLandmarkerRef.current = null;
     handLandmarkerRef.current = null;
+    personDetectorRef.current = null;
+    personDetectorFailedRef.current = false;
   }
 
   async function ensureMotionLandmarkers() {
     if (
       poseLandmarkerRef.current &&
       handLandmarkerRef.current &&
+      (personDetectorRef.current || personDetectorFailedRef.current) &&
       (!secondaryStreamRef.current || secondaryPoseLandmarkerRef.current) &&
       (!tertiaryStreamRef.current || tertiaryPoseLandmarkerRef.current)
     ) return;
@@ -1369,6 +1408,7 @@ export default function Home() {
     const {
       FilesetResolver,
       HandLandmarker: HandLandmarkerClass,
+      ObjectDetector: ObjectDetectorClass,
       PoseLandmarker: PoseLandmarkerClass,
     } = await import("@mediapipe/tasks-vision");
     const vision = await FilesetResolver.forVisionTasks("/mediapipe-wasm");
@@ -1380,10 +1420,13 @@ export default function Home() {
     };
     const poseTrackingOptions = {
       runningMode: "VIDEO" as const,
-      numPoses: 3,
-      minPoseDetectionConfidence: 0.25,
-      minPosePresenceConfidence: 0.25,
-      minTrackingConfidence: 0.25,
+      // There is exactly one study participant across the three views. Asking
+      // every camera for three low-confidence people mostly manufactures
+      // candidates from furniture in an empty scene.
+      numPoses: 1,
+      minPoseDetectionConfidence: 0.5,
+      minPosePresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
       outputSegmentationMasks: false,
     };
 
@@ -1425,9 +1468,9 @@ export default function Home() {
       const options = {
         runningMode: "VIDEO" as const,
         numHands: 2,
-        minHandDetectionConfidence: 0.45,
-        minHandPresenceConfidence: 0.45,
-        minTrackingConfidence: 0.45,
+        minHandDetectionConfidence: 0.5,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
       };
       try {
         return await HandLandmarkerClass.createFromOptions(
@@ -1446,6 +1489,22 @@ export default function Home() {
       }
     };
     if (!handLandmarkerRef.current) handLandmarkerRef.current = await createHandLandmarker();
+    if (!personDetectorRef.current && !personDetectorFailedRef.current) {
+      try {
+        personDetectorRef.current = await ObjectDetectorClass.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: "/models/efficientdet_lite0.tflite" },
+          runningMode: "VIDEO",
+          maxResults: 1,
+          scoreThreshold: 0.5,
+          categoryAllowlist: ["person"],
+        });
+      } catch (error) {
+        // Background change + anatomical confirmation remains available when
+        // a browser cannot initialize the extra detector.
+        console.error("Person detector initialization failed", error);
+        personDetectorFailedRef.current = true;
+      }
+    }
   }
 
   function flushPoseFrames(cameraSlot: CameraSlot = 1) {
@@ -1604,6 +1663,63 @@ export default function Home() {
     lastCameraHealthSecondRef.current = second;
   }
 
+  function bestHandCameraSlot() {
+    return ([1, 2, 3] as CameraSlot[]).reduce((best, slot) =>
+      handDetailScoresRef.current[slot] > handDetailScoresRef.current[best] ? slot : best,
+    1 as CameraSlot);
+  }
+
+  function updatePersonPresenceGate(
+    video: HTMLVideoElement,
+    cameraSlot: CameraSlot,
+    timestamp: number,
+  ) {
+    if (timestamp - lastPersonDetectorRunRef.current[cameraSlot] >= PERSON_DETECTION_INTERVAL_MS) {
+      lastPersonDetectorRunRef.current[cameraSlot] = timestamp;
+      let detectorSawPerson = false;
+      if (personDetectorRef.current) {
+        try {
+          const result = personDetectorRef.current.detectForVideo(
+            video,
+            timestamp + cameraSlot * 0.01,
+          );
+          detectorSawPerson = result.detections.length > 0;
+          if (detectorSawPerson) lastPersonDetectorSeenRef.current[cameraSlot] = timestamp;
+        } catch (error) {
+          console.error(`Camera ${cameraSlot} person detection failed`, error);
+        }
+      }
+
+      const canvas = backgroundCanvasRef.current[cameraSlot] ?? document.createElement("canvas");
+      backgroundCanvasRef.current[cameraSlot] = canvas;
+      canvas.width = BACKGROUND_WIDTH;
+      canvas.height = BACKGROUND_HEIGHT;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (context) {
+        context.drawImage(video, 0, 0, BACKGROUND_WIDTH, BACKGROUND_HEIGHT);
+        const signature = grayscaleSignature(
+          context.getImageData(0, 0, BACKGROUND_WIDTH, BACKGROUND_HEIGHT).data,
+        );
+        const confirmation = cameraSlot === 1
+          ? poseConfirmationRef.current
+          : cameraSlot === 2
+            ? secondaryPoseConfirmationRef.current
+            : tertiaryPoseConfirmationRef.current;
+        backgroundGateRef.current[cameraSlot] = updateBackgroundGate(
+          backgroundGateRef.current[cameraSlot],
+          signature,
+          timestamp,
+          !detectorSawPerson && !confirmation.confirmed,
+        );
+      }
+    }
+    return personPresenceAllowsAcquisition({
+      timestamp,
+      lastPersonDetectionAt: lastPersonDetectorSeenRef.current[cameraSlot],
+      background: backgroundGateRef.current[cameraSlot],
+    });
+  }
+
   function poseTrackingLoop() {
     if (!trackingActiveRef.current) return;
     const video = processingVideoRef.current;
@@ -1621,6 +1737,7 @@ export default function Home() {
       lastVideoTimeRef.current = video.currentTime;
       lastDetectionTimeRef.current = timestamp;
       try {
+        const personPresenceConfirmed = updatePersonPresenceGate(video, 1, timestamp);
         const result = landmarker.detectForVideo(video, timestamp);
         cameraTrackingErrorRef.current[1] = false;
         const targetSelection = selectLockedPose(
@@ -1629,7 +1746,18 @@ export default function Home() {
           timestamp,
         );
         poseTargetLockRef.current = targetSelection.lock;
-        const liveLandmarks = targetSelection.landmarks;
+        const confirmedSelection = confirmPoseSelection(
+          targetSelection,
+          poseConfirmationRef.current,
+          personPresenceConfirmed,
+        );
+        poseConfirmationRef.current = confirmedSelection.state;
+        const liveLandmarks = confirmedSelection.landmarks;
+        handDetailScoresRef.current[1] = handTrackingDetailScore(
+          liveLandmarks,
+          video.videoWidth,
+          video.videoHeight,
+        );
         if (liveLandmarks) {
           lastPoseRef.current = liveLandmarks;
           lastPoseSeenAtRef.current = timestamp;
@@ -1660,7 +1788,9 @@ export default function Home() {
             ? lastHeadDirectionRef.current
             : null;
 
-        if (liveLandmarks && handLandmarker && timestamp - lastHandDetectionTimeRef.current >= 100) {
+        const primaryHasBestHandView = bestHandCameraSlot() === 1 &&
+          handDetailScoresRef.current[1] >= MIN_HAND_FOREARM_PIXELS;
+        if (liveLandmarks && primaryHasBestHandView && handLandmarker && timestamp - lastHandDetectionTimeRef.current >= 100) {
           lastHandDetectionTimeRef.current = timestamp;
           const handResult = handLandmarker.detectForVideo(video, timestamp);
           const hands: HandState = {
@@ -1691,6 +1821,13 @@ export default function Home() {
             };
             return current.left === next.left && current.right === next.right ? current : next;
           });
+        }
+        if (liveLandmarks && !primaryHasBestHandView) {
+          lastHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
+          setDetectedHands((current) => current === 0 ? current : 0);
+          setDetectedHandSides((current) =>
+            !current.left && !current.right ? current : { left: false, right: false },
+          );
         }
         if (!liveLandmarks && !holdingLastPose) {
           lastHandsRef.current = {
@@ -1775,6 +1912,7 @@ export default function Home() {
     lastVideoTimeRef.current = video.currentTime;
     lastDetectionRef.current = timestamp;
     try {
+      const personPresenceConfirmed = updatePersonPresenceGate(video, cameraSlot, timestamp);
       const result = landmarker.detectForVideo(video, timestamp);
       cameraTrackingErrorRef.current[cameraSlot] = false;
       const targetSelection = selectLockedPose(
@@ -1783,9 +1921,25 @@ export default function Home() {
         timestamp,
       );
       targetLockRef.current = targetSelection.lock;
-      const landmarks = targetSelection.landmarks;
+      const confirmationRef = cameraSlot === 2
+        ? secondaryPoseConfirmationRef
+        : tertiaryPoseConfirmationRef;
+      const confirmedSelection = confirmPoseSelection(
+        targetSelection,
+        confirmationRef.current,
+        personPresenceConfirmed,
+      );
+      confirmationRef.current = confirmedSelection.state;
+      const landmarks = confirmedSelection.landmarks;
+      handDetailScoresRef.current[cameraSlot] = handTrackingDetailScore(
+        landmarks,
+        video.videoWidth,
+        video.videoHeight,
+      );
       if (landmarks) lastPersonSeenByCameraRef.current[cameraSlot] = timestamp;
-      if (landmarks && handLandmarker && timestamp - lastHandDetectionRef.current >= 100) {
+      const cameraHasBestHandView = bestHandCameraSlot() === cameraSlot &&
+        handDetailScoresRef.current[cameraSlot] >= MIN_HAND_FOREARM_PIXELS;
+      if (landmarks && cameraHasBestHandView && handLandmarker && timestamp - lastHandDetectionRef.current >= 100) {
         lastHandDetectionRef.current = timestamp;
         const hands: HandState = { left: null, right: null, leftScore: 0, rightScore: 0 };
         const handResult = handLandmarker.detectForVideo(video, timestamp + cameraSlot - 1);
@@ -1797,6 +1951,9 @@ export default function Home() {
           else { hands.right = hand; hands.rightScore = score; }
         });
         handsRef.current = hands;
+      }
+      if (landmarks && !cameraHasBestHandView) {
+        handsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
       }
       if (!landmarks) handsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
       const fullBody = landmarks ? isFullBodyVisible(landmarks) : false;
@@ -1917,6 +2074,18 @@ export default function Home() {
       poseTargetLockRef.current = null;
       secondaryPoseTargetLockRef.current = null;
       tertiaryPoseTargetLockRef.current = null;
+      poseConfirmationRef.current = { ...EMPTY_POSE_CONFIRMATION };
+      secondaryPoseConfirmationRef.current = { ...EMPTY_POSE_CONFIRMATION };
+      tertiaryPoseConfirmationRef.current = { ...EMPTY_POSE_CONFIRMATION };
+      handDetailScoresRef.current = { 1: 0, 2: 0, 3: 0 };
+      lastPersonDetectorRunRef.current = { 1: 0, 2: 0, 3: 0 };
+      lastPersonDetectorSeenRef.current = { 1: 0, 2: 0, 3: 0 };
+      backgroundGateRef.current = {
+        1: { ...EMPTY_BACKGROUND_GATE },
+        2: { ...EMPTY_BACKGROUND_GATE },
+        3: { ...EMPTY_BACKGROUND_GATE },
+      };
+      backgroundCanvasRef.current = { 1: null, 2: null, 3: null };
       lastHandsRef.current = {
         left: null,
         right: null,
