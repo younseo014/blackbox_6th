@@ -1,49 +1,49 @@
 {
   "version": 1,
-  "updatedAt": 1789351070394,
+  "updatedAt": 1789879509313,
   "nodeCount": 6,
   "contentFingerprint": "836223a8_9875b469_306",
   "nodes": {
     "mem-feedback_functional_scope_only-----0": {
       "id": "mem-feedback_functional_scope_only-----0",
       "category": "feedback_functional_scope_only",
-      "confidence": 0.45999999999999996,
+      "confidence": 0.5,
       "accessCount": 0,
       "createdAt": 1789001111677
     },
     "insight-1789006052149-bns2": {
       "id": "insight-1789006052149-bns2",
       "category": "insights",
-      "confidence": 0.47,
-      "accessCount": 0,
+      "confidence": 0.7000000000000002,
+      "accessCount": 4,
       "createdAt": 1789006052149
     },
     "insight-1789006052149-d1yv": {
       "id": "insight-1789006052149-d1yv",
       "category": "insights",
-      "confidence": 0.47,
-      "accessCount": 0,
+      "confidence": 0.7000000000000002,
+      "accessCount": 4,
       "createdAt": 1789006052149
     },
     "insight-1789006052149-x69i": {
       "id": "insight-1789006052149-x69i",
       "category": "insights",
-      "confidence": 0.47,
-      "accessCount": 0,
+      "confidence": 0.7000000000000002,
+      "accessCount": 4,
       "createdAt": 1789006052149
     },
     "insight-1789016484400-iqbl": {
       "id": "insight-1789016484400-iqbl",
       "category": "insights",
-      "confidence": 0.47,
-      "accessCount": 0,
+      "confidence": 0.7000000000000002,
+      "accessCount": 4,
       "createdAt": 1789016484400
     },
     "insight-1789350752483-0vng": {
       "id": "insight-1789350752483-0vng",
       "category": "insights",
-      "confidence": 0.5,
-      "accessCount": 0,
+      "confidence": 0.7000000000000002,
+      "accessCount": 4,
       "createdAt": 1789350752483
     }
   },

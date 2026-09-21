@@ -1,0 +1,21 @@
+{
+  "id": "session-1789879509308",
+  "startedAt": "2026-09-20T04:45:09.308Z",
+  "cwd": "/Users/younseoyeon/Desktop/work/인재림/blackbox",
+  "context": {
+    "lastMatchedPatterns": [
+      "insight-1789350752483-0vng",
+      "insight-1789016484400-iqbl",
+      "insight-1789006052149-x69i",
+      "insight-1789006052149-d1yv",
+      "insight-1789006052149-bns2"
+    ]
+  },
+  "metrics": {
+    "edits": 21,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "updatedAt": "2026-09-20T06:17:20.587Z"
+}

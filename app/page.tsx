@@ -129,6 +129,19 @@ import {
   listWorkContextLabels,
 } from "./work-context-inference";
 import {
+  EMPTY_GLOBAL_TRACK,
+  updateGlobalPersonTrack,
+  type CameraObservation,
+  type GlobalPersonTrack,
+} from "./global-person-track";
+import {
+  EMPTY_SCHEDULER_STATE,
+  detectorIntervalFor,
+  selectCameraForInference,
+  type CameraActivity,
+  type SchedulerState,
+} from "./pose-scheduler";
+import {
   EMPTY_POSE_CONFIRMATION,
   confirmPoseSelection,
   handTrackingDetailScore,
@@ -308,7 +321,12 @@ const CAMERA_SLOT_STORAGE_KEY = "memory-guard-external-camera-slots-v1";
 const POSE_DISPLAY_HOLD_MS = 450;
 const CAMERA_HEALTH_CHUNK_SECONDS = 300;
 const MIN_HAND_FOREARM_PIXELS = 28;
-const PERSON_DETECTION_INTERVAL_MS = 400;
+/**
+ * How long a camera's last observation stays usable for global fusion. Two
+ * scheduler slots wide, so a camera that is simply waiting its turn keeps
+ * contributing while one that has genuinely stopped seeing anything drops out.
+ */
+const GLOBAL_OBSERVATION_TTL_MS = 1_000;
 
 function loadInterfaceMode(): InterfaceMode {
   if (typeof window === "undefined") return "user";
@@ -517,6 +535,18 @@ function currentTime() {
     minute: "2-digit",
     hour12: false,
   }).format(new Date());
+}
+
+/** A camera slot with nothing to report yet. */
+function emptyCameraObservation(cameraSlot: CameraSlot): CameraObservation {
+  return {
+    cameraSlot,
+    timestamp: 0,
+    landmarks: null,
+    personConfidence: 0,
+    foregroundRatio: 0,
+    confirmed: false,
+  };
 }
 
 function currentMonotonicTime() {
@@ -803,6 +833,7 @@ export default function Home() {
   const personDetectorFailedRef = useRef(false);
   const lastPersonDetectorRunRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
   const lastPersonDetectorSeenRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
+  const personDetectorScoreRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
   const backgroundGateRef = useRef<Record<CameraSlot, BackgroundGateState>>({
     1: { ...EMPTY_BACKGROUND_GATE },
     2: { ...EMPTY_BACKGROUND_GATE },
@@ -850,6 +881,17 @@ export default function Home() {
   const lastCameraHealthSecondRef = useRef(-1);
   const lastPersonSeenByCameraRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
   const cameraTrackingErrorRef = useRef<Record<CameraSlot, boolean>>({ 1: false, 2: false, 3: false });
+  // Single global owner across all three cameras. The per-camera trackers stay
+  // independent - each still draws its own skeleton - but the identity and
+  // action timeline that gets stored come from this one track.
+  const globalTrackRef = useRef<GlobalPersonTrack>({ ...EMPTY_GLOBAL_TRACK });
+  const globalObservationsRef = useRef<Record<CameraSlot, CameraObservation>>({
+    1: emptyCameraObservation(1),
+    2: emptyCameraObservation(2),
+    3: emptyCameraObservation(3),
+  });
+  const schedulerStateRef = useRef<SchedulerState>({ ...EMPTY_SCHEDULER_STATE });
+  const lastPoseInferenceAtRef = useRef<Record<CameraSlot, number>>({ 1: -Infinity, 2: -Infinity, 3: -Infinity });
   const cameraHealthWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const poseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const secondaryPoseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -1674,7 +1716,10 @@ export default function Home() {
     cameraSlot: CameraSlot,
     timestamp: number,
   ) {
-    if (timestamp - lastPersonDetectorRunRef.current[cameraSlot] >= PERSON_DETECTION_INTERVAL_MS) {
+    // The detector only has to gate acquisition, so it backs off once the
+    // global track is holding a person and speeds up when the room is empty.
+    const detectorInterval = detectorIntervalFor(globalTrackRef.current.presence === "present");
+    if (timestamp - lastPersonDetectorRunRef.current[cameraSlot] >= detectorInterval) {
       lastPersonDetectorRunRef.current[cameraSlot] = timestamp;
       let detectorSawPerson = false;
       if (personDetectorRef.current) {
@@ -1684,6 +1729,10 @@ export default function Home() {
             timestamp + cameraSlot * 0.01,
           );
           detectorSawPerson = result.detections.length > 0;
+          personDetectorScoreRef.current[cameraSlot] = result.detections.reduce(
+            (best, detection) => Math.max(best, detection.categories[0]?.score ?? 0),
+            0,
+          );
           if (detectorSawPerson) lastPersonDetectorSeenRef.current[cameraSlot] = timestamp;
         } catch (error) {
           console.error(`Camera ${cameraSlot} person detection failed`, error);
@@ -1720,6 +1769,73 @@ export default function Home() {
     });
   }
 
+  function cameraVideoFor(cameraSlot: CameraSlot) {
+    return cameraSlot === 1
+      ? processingVideoRef.current
+      : cameraSlot === 2
+        ? secondaryVideoRef.current
+        : tertiaryVideoRef.current;
+  }
+
+  /**
+   * Chooses at most one camera to run a body inference on this animation
+   * frame. Three heavy graphs in a single frame is what makes the UI stutter,
+   * and paying for an empty room at full rate is what makes a 12-hour session
+   * fall behind real time.
+   */
+  function scheduleCameraInference(timestamp: number): CameraSlot | null {
+    const track = globalTrackRef.current;
+    const activities: CameraActivity[] = ([1, 2, 3] as CameraSlot[]).map((cameraSlot) => {
+      const video = cameraVideoFor(cameraSlot);
+      return {
+        cameraSlot,
+        lastPersonSeenAt: lastPersonSeenByCameraRef.current[cameraSlot],
+        lastForegroundAt: backgroundGateRef.current[cameraSlot].lastForegroundAt,
+        lastInferenceAt: lastPoseInferenceAtRef.current[cameraSlot],
+        isPrimary: track.primaryCamera === cameraSlot,
+        ready: Boolean(video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA),
+      };
+    });
+    const { slot, state } = selectCameraForInference(schedulerStateRef.current, activities, timestamp);
+    schedulerStateRef.current = state;
+    return slot;
+  }
+
+  function recordGlobalObservation(
+    cameraSlot: CameraSlot,
+    timestamp: number,
+    landmarks: NormalizedLandmark[] | null,
+    presenceConfirmed: boolean,
+  ) {
+    globalObservationsRef.current[cameraSlot] = {
+      cameraSlot,
+      timestamp,
+      landmarks,
+      personConfidence: personDetectorScoreRef.current[cameraSlot],
+      foregroundRatio: backgroundGateRef.current[cameraSlot].foregroundRatio,
+      confirmed: presenceConfirmed && Boolean(landmarks),
+    };
+  }
+
+  /**
+   * Folds the three cameras' latest observations into the one global person.
+   * An observation older than a couple of scheduler slots is dropped rather
+   * than replayed, so a stale frame can never keep a departed person alive.
+   */
+  function updateGlobalTrack(timestamp: number) {
+    const observations = ([1, 2, 3] as CameraSlot[]).map((cameraSlot) => {
+      const observation = globalObservationsRef.current[cameraSlot];
+      const stale = timestamp - observation.timestamp > GLOBAL_OBSERVATION_TTL_MS;
+      return stale ? { ...emptyCameraObservation(cameraSlot), timestamp } : { ...observation, timestamp };
+    });
+    globalTrackRef.current = updateGlobalPersonTrack(
+      globalTrackRef.current,
+      observations,
+      timestamp,
+      () => `global-person-${crypto.randomUUID()}`,
+    );
+  }
+
   function poseTrackingLoop() {
     if (!trackingActiveRef.current) return;
     const video = processingVideoRef.current;
@@ -1727,15 +1843,18 @@ export default function Home() {
     const handLandmarker = handLandmarkerRef.current;
     const timestamp = currentMonotonicTime();
 
+    const scheduledSlot = scheduleCameraInference(timestamp);
+
     if (
+      scheduledSlot === 1 &&
       video &&
       landmarker &&
       video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-      video.currentTime !== lastVideoTimeRef.current &&
-      timestamp - lastDetectionTimeRef.current >= 66
+      video.currentTime !== lastVideoTimeRef.current
     ) {
       lastVideoTimeRef.current = video.currentTime;
       lastDetectionTimeRef.current = timestamp;
+      lastPoseInferenceAtRef.current[1] = timestamp;
       try {
         const personPresenceConfirmed = updatePersonPresenceGate(video, 1, timestamp);
         const result = landmarker.detectForVideo(video, timestamp);
@@ -1758,6 +1877,7 @@ export default function Home() {
           video.videoWidth,
           video.videoHeight,
         );
+        recordGlobalObservation(1, timestamp, liveLandmarks, personPresenceConfirmed);
         if (liveLandmarks) {
           lastPoseRef.current = liveLandmarks;
           lastPoseSeenAtRef.current = timestamp;
@@ -1885,11 +2005,13 @@ export default function Home() {
       } catch (error) {
         console.error("Primary camera pose tracking failed", error);
         cameraTrackingErrorRef.current[1] = true;
+        recordGlobalObservation(1, timestamp, null, false);
         updatePoseStatus("error");
       }
     }
-    trackAuxiliaryPose(timestamp, 2);
-    trackAuxiliaryPose(timestamp, 3);
+    if (scheduledSlot === 2) trackAuxiliaryPose(timestamp, 2);
+    if (scheduledSlot === 3) trackAuxiliaryPose(timestamp, 3);
+    updateGlobalTrack(timestamp);
     sampleCameraHealth(timestamp);
     poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
   }
@@ -1908,9 +2030,10 @@ export default function Home() {
     const lastHandDetectionRef = cameraSlot === 2 ? lastSecondaryHandDetectionTimeRef : lastTertiaryHandDetectionTimeRef;
     const lastSampleRef = cameraSlot === 2 ? lastSecondarySampleTimeRef : lastTertiarySampleTimeRef;
     const setStatus = cameraSlot === 2 ? setSecondaryPoseStatus : setTertiaryPoseStatus;
-    if (!video || !landmarker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.currentTime === lastVideoTimeRef.current || timestamp - lastDetectionRef.current < 100) return;
+    if (!video || !landmarker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.currentTime === lastVideoTimeRef.current) return;
     lastVideoTimeRef.current = video.currentTime;
     lastDetectionRef.current = timestamp;
+    lastPoseInferenceAtRef.current[cameraSlot] = timestamp;
     try {
       const personPresenceConfirmed = updatePersonPresenceGate(video, cameraSlot, timestamp);
       const result = landmarker.detectForVideo(video, timestamp);
@@ -1936,6 +2059,7 @@ export default function Home() {
         video.videoWidth,
         video.videoHeight,
       );
+      recordGlobalObservation(cameraSlot, timestamp, landmarks, personPresenceConfirmed);
       if (landmarks) lastPersonSeenByCameraRef.current[cameraSlot] = timestamp;
       const cameraHasBestHandView = bestHandCameraSlot() === cameraSlot &&
         handDetailScoresRef.current[cameraSlot] >= MIN_HAND_FOREARM_PIXELS;
@@ -1975,6 +2099,7 @@ export default function Home() {
     } catch (error) {
       console.error(`Camera ${cameraSlot} pose tracking failed`, error);
       cameraTrackingErrorRef.current[cameraSlot] = true;
+      recordGlobalObservation(cameraSlot, timestamp, null, false);
       setStatus("error");
     }
   }

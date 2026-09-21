@@ -1,0 +1,225 @@
+{
+  "minIou": 0.5,
+  "results": [
+    {
+      "detector": "yolox-m",
+      "personImages": 714,
+      "rows": [
+        {
+          "threshold": 0.5,
+          "recall": 0.9803921568627451,
+          "emptyFalsePositives": 59,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.025574338968357174,
+          "recallBySize": {
+            "small": 0.9705882352941176,
+            "large": 0.9844097995545658,
+            "medium": 0.9835164835164835,
+            "tiny": 0.8666666666666667
+          }
+        },
+        {
+          "threshold": 0.6,
+          "recall": 0.9747899159663865,
+          "emptyFalsePositives": 45,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.01950585175552666,
+          "recallBySize": {
+            "small": 0.9558823529411765,
+            "large": 0.9821826280623608,
+            "medium": 0.9725274725274725,
+            "tiny": 0.8666666666666667
+          }
+        },
+        {
+          "threshold": 0.7,
+          "recall": 0.9635854341736695,
+          "emptyFalsePositives": 25,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.010836584308625921,
+          "recallBySize": {
+            "small": 0.9411764705882353,
+            "large": 0.9755011135857461,
+            "medium": 0.9560439560439561,
+            "tiny": 0.8
+          }
+        },
+        {
+          "threshold": 0.75,
+          "recall": 0.9565826330532213,
+          "emptyFalsePositives": 18,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.007802340702210663,
+          "recallBySize": {
+            "small": 0.9117647058823529,
+            "large": 0.9732739420935412,
+            "medium": 0.9505494505494505,
+            "tiny": 0.7333333333333333
+          }
+        },
+        {
+          "threshold": 0.8,
+          "recall": 0.9467787114845938,
+          "emptyFalsePositives": 14,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.006068487212830516,
+          "recallBySize": {
+            "small": 0.8823529411764706,
+            "large": 0.9688195991091314,
+            "medium": 0.9395604395604396,
+            "tiny": 0.6666666666666666
+          }
+        },
+        {
+          "threshold": 0.85,
+          "recall": 0.9187675070028011,
+          "emptyFalsePositives": 9,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.0039011703511053317,
+          "recallBySize": {
+            "small": 0.7941176470588235,
+            "large": 0.9532293986636972,
+            "medium": 0.9065934065934066,
+            "tiny": 0.6
+          }
+        },
+        {
+          "threshold": 0.9,
+          "recall": 0.8263305322128851,
+          "emptyFalsePositives": 3,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.0013003901170351106,
+          "recallBySize": {
+            "small": 0.5147058823529411,
+            "large": 0.9175946547884187,
+            "medium": 0.7747252747252747,
+            "tiny": 0.13333333333333333
+          }
+        },
+        {
+          "threshold": 0.95,
+          "recall": 0.2913165266106443,
+          "emptyFalsePositives": 1,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.00043346337234503684,
+          "recallBySize": {
+            "small": 0.0,
+            "large": 0.4365256124721604,
+            "medium": 0.06593406593406594,
+            "tiny": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "detector": "yolox-tiny",
+      "personImages": 714,
+      "rows": [
+        {
+          "threshold": 0.5,
+          "recall": 0.9481792717086834,
+          "emptyFalsePositives": 44,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.01907238838318162,
+          "recallBySize": {
+            "small": 0.8529411764705882,
+            "large": 0.9755011135857461,
+            "tiny": 0.5333333333333333,
+            "medium": 0.9505494505494505
+          }
+        },
+        {
+          "threshold": 0.6,
+          "recall": 0.9355742296918768,
+          "emptyFalsePositives": 28,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.012136974425661032,
+          "recallBySize": {
+            "small": 0.8382352941176471,
+            "large": 0.9688195991091314,
+            "tiny": 0.4,
+            "medium": 0.9340659340659341
+          }
+        },
+        {
+          "threshold": 0.7,
+          "recall": 0.9117647058823529,
+          "emptyFalsePositives": 17,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.007368877329865626,
+          "recallBySize": {
+            "small": 0.75,
+            "large": 0.9532293986636972,
+            "tiny": 0.4,
+            "medium": 0.9120879120879121
+          }
+        },
+        {
+          "threshold": 0.75,
+          "recall": 0.8921568627450981,
+          "emptyFalsePositives": 14,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.006068487212830516,
+          "recallBySize": {
+            "small": 0.6911764705882353,
+            "large": 0.9487750556792873,
+            "tiny": 0.3333333333333333,
+            "medium": 0.8736263736263736
+          }
+        },
+        {
+          "threshold": 0.8,
+          "recall": 0.8613445378151261,
+          "emptyFalsePositives": 10,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.004334633723450368,
+          "recallBySize": {
+            "small": 0.6470588235294118,
+            "large": 0.9287305122494433,
+            "tiny": 0.2,
+            "medium": 0.8296703296703297
+          }
+        },
+        {
+          "threshold": 0.85,
+          "recall": 0.7647058823529411,
+          "emptyFalsePositives": 3,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.0013003901170351106,
+          "recallBySize": {
+            "small": 0.4411764705882353,
+            "large": 0.8708240534521158,
+            "tiny": 0.06666666666666667,
+            "medium": 0.6813186813186813
+          }
+        },
+        {
+          "threshold": 0.9,
+          "recall": 0.5266106442577031,
+          "emptyFalsePositives": 0,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.0,
+          "recallBySize": {
+            "small": 0.04411764705882353,
+            "large": 0.7060133630289532,
+            "tiny": 0.0,
+            "medium": 0.3076923076923077
+          }
+        },
+        {
+          "threshold": 0.95,
+          "recall": 0.04341736694677871,
+          "emptyFalsePositives": 0,
+          "emptyImages": 2307,
+          "emptyFalsePositiveRate": 0.0,
+          "recallBySize": {
+            "small": 0.0,
+            "large": 0.06904231625835189,
+            "tiny": 0.0,
+            "medium": 0.0
+          }
+        }
+      ]
+    }
+  ]
+}

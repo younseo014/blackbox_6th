@@ -1,0 +1,6037 @@
+{
+  "model": "mediapipe-heavy",
+  "generatedAt": "2026-09-20T06-20-59-689Z",
+  "results": [
+    {
+      "result": {
+        "scenario": "empty-room",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 300,
+        "durationMs": 29900,
+        "presenceAccuracy": 1,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": null,
+        "worstRecognitionLatencyMs": null,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 0,
+        "joints": [],
+        "visibleJointDetectionRate": 0,
+        "meanVisibleJointError": null,
+        "conditions": [
+          {
+            "condition": "empty",
+            "ticks": 300,
+            "presenceAccuracy": 1,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {},
+        "fusionMsPerTick": 0,
+        "heapGrowthBytes": 481112,
+        "heapGrowthBytesPer12h": 695118341.1371238
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "n/a ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "n/a",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "decoy-furniture",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 200,
+        "durationMs": 19900,
+        "presenceAccuracy": 1,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": null,
+        "worstRecognitionLatencyMs": null,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 0,
+        "joints": [],
+        "visibleJointDetectionRate": 0,
+        "meanVisibleJointError": null,
+        "conditions": [
+          {
+            "condition": "decoy_object",
+            "ticks": 200,
+            "presenceAccuracy": 1,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {},
+        "fusionMsPerTick": 0.01,
+        "heapGrowthBytes": 1824968,
+        "heapGrowthBytesPer12h": 3961739577.889447
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "n/a ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "n/a",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "entry-latency",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 120,
+        "durationMs": 11900,
+        "presenceAccuracy": 0.9833333333333333,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.98,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 1,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 14,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 15,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 16,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 23,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 24,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 25,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 26,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 27,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 28,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          }
+        ],
+        "visibleJointDetectionRate": 1,
+        "meanVisibleJointError": 0,
+        "conditions": [
+          {
+            "condition": "empty",
+            "ticks": 20,
+            "presenceAccuracy": 1,
+            "retention": 1
+          },
+          {
+            "condition": "front",
+            "ticks": 100,
+            "presenceAccuracy": 0.98,
+            "retention": 0.98
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 8.403361344537815
+        },
+        "fusionMsPerTick": 0.016666666666666666,
+        "heapGrowthBytes": 3119384,
+        "heapGrowthBytesPer12h": 11324150319.327732
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "98.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "side-view",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 60,
+        "durationMs": 5900,
+        "presenceAccuracy": 0.9666666666666667,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 1,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 13,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 14,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 15,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 16,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 23,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 24,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 25,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 26,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 27,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 28,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          }
+        ],
+        "visibleJointDetectionRate": 1,
+        "meanVisibleJointError": 0,
+        "conditions": [
+          {
+            "condition": "side",
+            "ticks": 60,
+            "presenceAccuracy": 0.9666666666666667,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 10.169491525423728
+        },
+        "fusionMsPerTick": 0,
+        "heapGrowthBytes": 1550592,
+        "heapGrowthBytesPer12h": 11353487186.44068
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "back-view",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 60,
+        "durationMs": 5900,
+        "presenceAccuracy": 0.9666666666666667,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 1,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 14,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 15,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 16,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 23,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 24,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 25,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 26,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 27,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 28,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          }
+        ],
+        "visibleJointDetectionRate": 1,
+        "meanVisibleJointError": 0,
+        "conditions": [
+          {
+            "condition": "back",
+            "ticks": 60,
+            "presenceAccuracy": 0.9666666666666667,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 10.169491525423728
+        },
+        "fusionMsPerTick": 0.016666666666666666,
+        "heapGrowthBytes": 1681808,
+        "heapGrowthBytesPer12h": 12314255186.440678
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "headless",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 60,
+        "durationMs": 5900,
+        "presenceAccuracy": 0.9666666666666667,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 1,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 14,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 15,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 16,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 23,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 24,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 25,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 26,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 27,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 28,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          }
+        ],
+        "visibleJointDetectionRate": 1,
+        "meanVisibleJointError": 0,
+        "conditions": [
+          {
+            "condition": "head_occluded",
+            "ticks": 60,
+            "presenceAccuracy": 0.9666666666666667,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 10.169491525423728
+        },
+        "fusionMsPerTick": 0.016666666666666666,
+        "heapGrowthBytes": 1681392,
+        "heapGrowthBytesPer12h": 12311209220.338984
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "upper-body-only",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 60,
+        "durationMs": 5900,
+        "presenceAccuracy": 0.9666666666666667,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 1,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 14,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 15,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 16,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 23,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 24,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 25,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 26,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 27,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 28,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          }
+        ],
+        "visibleJointDetectionRate": 1,
+        "meanVisibleJointError": 0,
+        "conditions": [
+          {
+            "condition": "partial_body",
+            "ticks": 60,
+            "presenceAccuracy": 0.9666666666666667,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 10.169491525423728
+        },
+        "fusionMsPerTick": 0.016666666666666666,
+        "heapGrowthBytes": 1427904,
+        "heapGrowthBytesPer12h": 10455161491.525423
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "distant-small",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 60,
+        "durationMs": 5900,
+        "presenceAccuracy": 0.9666666666666667,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 1,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 14,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 15,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 16,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 23,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 24,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 25,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 26,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 27,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 28,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 60,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 60
+          }
+        ],
+        "visibleJointDetectionRate": 1,
+        "meanVisibleJointError": 0,
+        "conditions": [
+          {
+            "condition": "distant",
+            "ticks": 60,
+            "presenceAccuracy": 0.9666666666666667,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 10.169491525423728
+        },
+        "fusionMsPerTick": 0.016666666666666666,
+        "heapGrowthBytes": 1685800,
+        "heapGrowthBytesPer12h": 12343484745.76271
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "camera-handoff",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 150,
+        "durationMs": 14900,
+        "presenceAccuracy": 0.9866666666666667,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 1,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 14,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 15,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 16,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 23,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 24,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 25,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 26,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 27,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 28,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 150,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 150
+          }
+        ],
+        "visibleJointDetectionRate": 1,
+        "meanVisibleJointError": 0,
+        "conditions": [
+          {
+            "condition": "handoff",
+            "ticks": 150,
+            "presenceAccuracy": 0.9866666666666667,
+            "retention": 1
+          }
+        ],
+        "handoffs": 2,
+        "longestHandoffGapMs": 100,
+        "cameraFps": {
+          "camera1": 3.3557046979865772,
+          "camera2": 3.3557046979865772,
+          "camera3": 3.3557046979865772
+        },
+        "fusionMsPerTick": 0.08666666666666667,
+        "heapGrowthBytes": -28734128,
+        "heapGrowthBytesPer12h": -83309686550.33557
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "three-camera-overlap",
+        "source": "synthetic:developer-pre-validation",
+        "ticks": 100,
+        "durationMs": 9900,
+        "presenceAccuracy": 0.98,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 1,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 1,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 14,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 15,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 16,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 23,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 24,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 25,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 26,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 27,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 28,
+            "detectionRate": 1,
+            "meanError": 0,
+            "observedCount": 100,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 100
+          }
+        ],
+        "visibleJointDetectionRate": 1,
+        "meanVisibleJointError": 0,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 100,
+            "presenceAccuracy": 0.98,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 10.1010101010101,
+          "camera2": 10.1010101010101,
+          "camera3": 10.1010101010101
+        },
+        "fusionMsPerTick": 0.03,
+        "heapGrowthBytes": 5440488,
+        "heapGrowthBytesPer12h": 23740311272.727272
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "100.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-edet035",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.8876751627496414,
+        "emptyFrameFalsePositives": 48,
+        "emptyFrameFalsePositivesPer12h": 1144.0551724137931,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.803921568627451,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 586,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.81,
+            "meanError": 0.027353517929465294,
+            "observedCount": 3516,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.8099290780141843,
+            "meanError": 0.024556116243593152,
+            "observedCount": 3516,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.7187993680884676,
+            "meanError": 0.026464186870009176,
+            "observedCount": 2904,
+            "inferredCount": 0,
+            "missingCount": 612
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.6744186046511628,
+            "meanError": 0.02311659068946287,
+            "observedCount": 2742,
+            "inferredCount": 0,
+            "missingCount": 774
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.7088607594936709,
+            "meanError": 0.025107423908248414,
+            "observedCount": 2802,
+            "inferredCount": 0,
+            "missingCount": 714
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.6973058637083994,
+            "meanError": 0.020699765002178263,
+            "observedCount": 2760,
+            "inferredCount": 0,
+            "missingCount": 756
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2850,
+            "inferredCount": 0,
+            "missingCount": 666
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2796,
+            "inferredCount": 0,
+            "missingCount": 720
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2880,
+            "inferredCount": 0,
+            "missingCount": 636
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2784,
+            "inferredCount": 0,
+            "missingCount": 732
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2838,
+            "inferredCount": 0,
+            "missingCount": 678
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2742,
+            "inferredCount": 0,
+            "missingCount": 774
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.7990726429675425,
+            "meanError": 0.044708094414191504,
+            "observedCount": 3408,
+            "inferredCount": 0,
+            "missingCount": 108
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.7978395061728395,
+            "meanError": 0.04397258595926335,
+            "observedCount": 3414,
+            "inferredCount": 0,
+            "missingCount": 102
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.6607495069033531,
+            "meanError": 0.03198386688705867,
+            "observedCount": 2322,
+            "inferredCount": 0,
+            "missingCount": 1194
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.6686746987951807,
+            "meanError": 0.03520045408469032,
+            "observedCount": 2364,
+            "inferredCount": 0,
+            "missingCount": 1152
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.6733780760626398,
+            "meanError": 0.029708632166879023,
+            "observedCount": 2010,
+            "inferredCount": 0,
+            "missingCount": 1506
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.6621315192743764,
+            "meanError": 0.03271626798911962,
+            "observedCount": 2040,
+            "inferredCount": 0,
+            "missingCount": 1476
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2046,
+            "inferredCount": 0,
+            "missingCount": 1470
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 1992,
+            "inferredCount": 0,
+            "missingCount": 1524
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2082,
+            "inferredCount": 0,
+            "missingCount": 1434
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2016,
+            "inferredCount": 0,
+            "missingCount": 1500
+          }
+        ],
+        "visibleJointDetectionRate": 0.7304457527333894,
+        "meanVisibleJointError": 0.03046701946540343,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.5978021978021978,
+            "retention": 0.8967032967032967
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.5494505494505495,
+            "retention": 0.8241758241758241
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.5238095238095238,
+            "retention": 0.7857142857142857
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.23293172690763053,
+            "retention": 0.3493975903614458
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.6666666666666666,
+            "retention": 1
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.3611111111111111,
+            "retention": 0.5416666666666666
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9965322930212397,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 1.9398620689655173
+        },
+        "fusionMsPerTick": 0.0016550810989738498,
+        "heapGrowthBytes": 9131600,
+        "heapGrowthBytesPer12h": 217646962.75862068
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "1144.06 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "80.4%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "73.0%",
+          "passed": false
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-edet050",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.885909742910736,
+        "emptyFrameFalsePositives": 20,
+        "emptyFrameFalsePositivesPer12h": 476.6896551724138,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.7829131652661064,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 564,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.7914285714285715,
+            "meanError": 0.02670806914257056,
+            "observedCount": 3384,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.7886524822695036,
+            "meanError": 0.02406598734473662,
+            "observedCount": 3384,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.7061611374407583,
+            "meanError": 0.02659202306152471,
+            "observedCount": 2826,
+            "inferredCount": 0,
+            "missingCount": 558
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.6573643410852713,
+            "meanError": 0.022613690812733934,
+            "observedCount": 2658,
+            "inferredCount": 0,
+            "missingCount": 726
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.694620253164557,
+            "meanError": 0.02464048514695741,
+            "observedCount": 2718,
+            "inferredCount": 0,
+            "missingCount": 666
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.6830427892234548,
+            "meanError": 0.02022501178973071,
+            "observedCount": 2688,
+            "inferredCount": 0,
+            "missingCount": 696
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2760,
+            "inferredCount": 0,
+            "missingCount": 624
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2718,
+            "inferredCount": 0,
+            "missingCount": 666
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2790,
+            "inferredCount": 0,
+            "missingCount": 594
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2712,
+            "inferredCount": 0,
+            "missingCount": 672
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2760,
+            "inferredCount": 0,
+            "missingCount": 624
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2670,
+            "inferredCount": 0,
+            "missingCount": 714
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.7789799072642968,
+            "meanError": 0.044183202064819425,
+            "observedCount": 3276,
+            "inferredCount": 0,
+            "missingCount": 108
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.7777777777777778,
+            "meanError": 0.04344265308473387,
+            "observedCount": 3282,
+            "inferredCount": 0,
+            "missingCount": 102
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.6449704142011834,
+            "meanError": 0.03207592890275929,
+            "observedCount": 2256,
+            "inferredCount": 0,
+            "missingCount": 1128
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.6506024096385542,
+            "meanError": 0.034676133675423715,
+            "observedCount": 2292,
+            "inferredCount": 0,
+            "missingCount": 1092
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.6554809843400448,
+            "meanError": 0.03007913366730653,
+            "observedCount": 1950,
+            "inferredCount": 0,
+            "missingCount": 1434
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.6417233560090703,
+            "meanError": 0.03238607704149846,
+            "observedCount": 1962,
+            "inferredCount": 0,
+            "missingCount": 1422
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 1980,
+            "inferredCount": 0,
+            "missingCount": 1404
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 1926,
+            "inferredCount": 0,
+            "missingCount": 1458
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2016,
+            "inferredCount": 0,
+            "missingCount": 1368
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 1950,
+            "inferredCount": 0,
+            "missingCount": 1434
+          }
+        ],
+        "visibleJointDetectionRate": 0.7129240257919821,
+        "meanVisibleJointError": 0.03009274962000083,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.5860805860805861,
+            "retention": 0.8791208791208791
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.5347985347985348,
+            "retention": 0.8021978021978022
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.5119047619047619,
+            "retention": 0.7678571428571429
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.21686746987951808,
+            "retention": 0.3253012048192771
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.4,
+            "retention": 0.6
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.3611111111111111,
+            "retention": 0.5416666666666666
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9985551220921832,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 1.8670344827586207
+        },
+        "fusionMsPerTick": 0.0011033873993158997,
+        "heapGrowthBytes": 18400008,
+        "heapGrowthBytesPer12h": 438554673.4344828
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "476.69 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "78.3%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "71.3%",
+          "passed": false
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-256x192",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 6534,
+        "durationMs": 653300,
+        "presenceAccuracy": 0.7398224670951944,
+        "emptyFrameFalsePositives": 4,
+        "emptyFrameFalsePositivesPer12h": 264.5032909842339,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.9061624649859944,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 648,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9071428571428571,
+            "meanError": 0.015216318080522697,
+            "observedCount": 3858,
+            "inferredCount": 0,
+            "missingCount": 30
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9063829787234042,
+            "meanError": 0.014733827169476093,
+            "observedCount": 3882,
+            "inferredCount": 0,
+            "missingCount": 6
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.9131121642969984,
+            "meanError": 0.013326101060712392,
+            "observedCount": 3834,
+            "inferredCount": 0,
+            "missingCount": 54
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9085271317829458,
+            "meanError": 0.012943644792510145,
+            "observedCount": 3840,
+            "inferredCount": 0,
+            "missingCount": 48
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9113924050632911,
+            "meanError": 0.011071494426680059,
+            "observedCount": 3726,
+            "inferredCount": 0,
+            "missingCount": 162
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9080824088748018,
+            "meanError": 0.01246537583576382,
+            "observedCount": 3756,
+            "inferredCount": 0,
+            "missingCount": 132
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3888
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3888
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3888
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3888
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3888
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3888
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.8979907264296755,
+            "meanError": 0.022990507141180134,
+            "observedCount": 3762,
+            "inferredCount": 0,
+            "missingCount": 126
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.8981481481481481,
+            "meanError": 0.022098955633156423,
+            "observedCount": 3732,
+            "inferredCount": 0,
+            "missingCount": 156
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.893491124260355,
+            "meanError": 0.016043297269977493,
+            "observedCount": 3198,
+            "inferredCount": 0,
+            "missingCount": 690
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.8975903614457831,
+            "meanError": 0.01621835425657075,
+            "observedCount": 3210,
+            "inferredCount": 0,
+            "missingCount": 678
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.8881431767337807,
+            "meanError": 0.017809873042531104,
+            "observedCount": 2712,
+            "inferredCount": 0,
+            "missingCount": 1176
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.8866213151927438,
+            "meanError": 0.01660512445114537,
+            "observedCount": 2688,
+            "inferredCount": 0,
+            "missingCount": 1200
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2508,
+            "inferredCount": 0,
+            "missingCount": 1380
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2604,
+            "inferredCount": 0,
+            "missingCount": 1284
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2412,
+            "inferredCount": 0,
+            "missingCount": 1476
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2466,
+            "inferredCount": 0,
+            "missingCount": 1422
+          }
+        ],
+        "visibleJointDetectionRate": 0.9024390243902439,
+        "meanVisibleJointError": 0.01587200979331806,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.6344322344322344,
+            "retention": 0.9516483516483516
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.6153846153846154,
+            "retention": 0.9230769230769231
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.5952380952380952,
+            "retention": 0.8928571428571429
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.44176706827309237,
+            "retention": 0.6626506024096386
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.4,
+            "retention": 0.6
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6111111111111112,
+            "retention": 0.9166666666666666
+          },
+          {
+            "condition": "empty",
+            "ticks": 2250,
+            "presenceAccuracy": 0.9982222222222222,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 5.951324047145263
+        },
+        "fusionMsPerTick": 0.0027548209366391185,
+        "heapGrowthBytes": 3643624,
+        "heapGrowthBytesPer12h": 240937634.77728456
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "264.50 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "90.6%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "90.2%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-384x288-edet030",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.9035639412997903,
+        "emptyFrameFalsePositives": 192,
+        "emptyFrameFalsePositivesPer12h": 4576.2206896551725,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.9551820728291317,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 731,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9571428571428572,
+            "meanError": 0.014719141494514587,
+            "observedCount": 4320,
+            "inferredCount": 0,
+            "missingCount": 66
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9560283687943263,
+            "meanError": 0.014375413475836953,
+            "observedCount": 4284,
+            "inferredCount": 0,
+            "missingCount": 102
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.9620853080568721,
+            "meanError": 0.012070354275368969,
+            "observedCount": 4266,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9612403100775194,
+            "meanError": 0.01152760039399653,
+            "observedCount": 4248,
+            "inferredCount": 0,
+            "missingCount": 138
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9588607594936709,
+            "meanError": 0.010417236554648495,
+            "observedCount": 4146,
+            "inferredCount": 0,
+            "missingCount": 240
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9556259904912837,
+            "meanError": 0.010471991857434422,
+            "observedCount": 4182,
+            "inferredCount": 0,
+            "missingCount": 204
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4386
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4386
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4386
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4386
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4386
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4386
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.9520865533230294,
+            "meanError": 0.02200397556678801,
+            "observedCount": 4122,
+            "inferredCount": 0,
+            "missingCount": 264
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.9537037037037037,
+            "meanError": 0.021621235655051335,
+            "observedCount": 4158,
+            "inferredCount": 0,
+            "missingCount": 228
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.9566074950690335,
+            "meanError": 0.016790342800676233,
+            "observedCount": 3756,
+            "inferredCount": 0,
+            "missingCount": 630
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.9618473895582329,
+            "meanError": 0.015126221807972925,
+            "observedCount": 3732,
+            "inferredCount": 0,
+            "missingCount": 654
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.959731543624161,
+            "meanError": 0.017992704664606625,
+            "observedCount": 3216,
+            "inferredCount": 0,
+            "missingCount": 1170
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9614512471655329,
+            "meanError": 0.01889186499252184,
+            "observedCount": 3252,
+            "inferredCount": 0,
+            "missingCount": 1134
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3060,
+            "inferredCount": 0,
+            "missingCount": 1326
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3024,
+            "inferredCount": 0,
+            "missingCount": 1362
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3120,
+            "inferredCount": 0,
+            "missingCount": 1266
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3198,
+            "inferredCount": 0,
+            "missingCount": 1188
+          }
+        ],
+        "visibleJointDetectionRate": 0.9578076815250911,
+        "meanVisibleJointError": 0.015324226265245268,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.654945054945055,
+            "retention": 0.9824175824175824
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.63003663003663,
+            "retention": 0.945054945054945
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.6071428571428571,
+            "retention": 0.9107142857142857
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.5542168674698795,
+            "retention": 0.8313253012048193
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.6666666666666666,
+            "retention": 1
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6666666666666666,
+            "retention": 1
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9861291720849589,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 2.417103448275862
+        },
+        "fusionMsPerTick": 0.0012137261392474899,
+        "heapGrowthBytes": -43642232,
+        "heapGrowthBytesPer12h": -1040190026.1517241
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "4576.22 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "95.5%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "95.8%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-384x288-edet035",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.9053293611386958,
+        "emptyFrameFalsePositives": 136,
+        "emptyFrameFalsePositivesPer12h": 3241.4896551724137,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.9467787114845938,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 711,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9485714285714286,
+            "meanError": 0.014747732873440568,
+            "observedCount": 4224,
+            "inferredCount": 0,
+            "missingCount": 42
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9475177304964539,
+            "meanError": 0.014401146118440344,
+            "observedCount": 4212,
+            "inferredCount": 0,
+            "missingCount": 54
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.9557661927330173,
+            "meanError": 0.011755403959780994,
+            "observedCount": 4194,
+            "inferredCount": 0,
+            "missingCount": 72
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.951937984496124,
+            "meanError": 0.011474884643832763,
+            "observedCount": 4164,
+            "inferredCount": 0,
+            "missingCount": 102
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9525316455696202,
+            "meanError": 0.010237130490134309,
+            "observedCount": 4068,
+            "inferredCount": 0,
+            "missingCount": 198
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9477020602218701,
+            "meanError": 0.01039849210480969,
+            "observedCount": 4110,
+            "inferredCount": 0,
+            "missingCount": 156
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4266
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4266
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4266
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4266
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4266
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4266
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.9428129829984544,
+            "meanError": 0.021762706224433558,
+            "observedCount": 4056,
+            "inferredCount": 0,
+            "missingCount": 210
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.9444444444444444,
+            "meanError": 0.021377837734466325,
+            "observedCount": 4086,
+            "inferredCount": 0,
+            "missingCount": 180
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.9506903353057199,
+            "meanError": 0.016774785289336715,
+            "observedCount": 3684,
+            "inferredCount": 0,
+            "missingCount": 582
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.9558232931726908,
+            "meanError": 0.015103919349007684,
+            "observedCount": 3666,
+            "inferredCount": 0,
+            "missingCount": 600
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.9552572706935123,
+            "meanError": 0.01799740730505644,
+            "observedCount": 3150,
+            "inferredCount": 0,
+            "missingCount": 1116
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9569160997732427,
+            "meanError": 0.0189069665531457,
+            "observedCount": 3186,
+            "inferredCount": 0,
+            "missingCount": 1080
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3012,
+            "inferredCount": 0,
+            "missingCount": 1254
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2970,
+            "inferredCount": 0,
+            "missingCount": 1296
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3042,
+            "inferredCount": 0,
+            "missingCount": 1224
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3114,
+            "inferredCount": 0,
+            "missingCount": 1152
+          }
+        ],
+        "visibleJointDetectionRate": 0.9503784693019344,
+        "meanVisibleJointError": 0.015228339535467872,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.652014652014652,
+            "retention": 0.978021978021978
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.6227106227106227,
+            "retention": 0.9340659340659341
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.6071428571428571,
+            "retention": 0.9107142857142857
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.5381526104417671,
+            "retention": 0.8072289156626506
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.6666666666666666,
+            "retention": 1
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6388888888888888,
+            "retention": 0.9583333333333334
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9901748302268458,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 2.350896551724138
+        },
+        "fusionMsPerTick": 0.0009930486593843098,
+        "heapGrowthBytes": 14765504,
+        "heapGrowthBytesPer12h": 351928150.51034486
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "3241.49 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "94.7%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "95.0%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-384x288-edet050",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.9040052962595168,
+        "emptyFrameFalsePositives": 48,
+        "emptyFrameFalsePositivesPer12h": 1144.0551724137931,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.907563025210084,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 660,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9114285714285715,
+            "meanError": 0.014516839760191184,
+            "observedCount": 3948,
+            "inferredCount": 0,
+            "missingCount": 12
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9078014184397163,
+            "meanError": 0.014268950800018557,
+            "observedCount": 3948,
+            "inferredCount": 0,
+            "missingCount": 12
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.9210110584518167,
+            "meanError": 0.01156672678834025,
+            "observedCount": 3930,
+            "inferredCount": 0,
+            "missingCount": 30
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9147286821705426,
+            "meanError": 0.01131492653703102,
+            "observedCount": 3906,
+            "inferredCount": 0,
+            "missingCount": 54
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9193037974683544,
+            "meanError": 0.010312205468927855,
+            "observedCount": 3840,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9160063391442155,
+            "meanError": 0.010356996338296572,
+            "observedCount": 3882,
+            "inferredCount": 0,
+            "missingCount": 78
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3960
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3960
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3960
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3960
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3960
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3960
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.9041731066460588,
+            "meanError": 0.021618226730814285,
+            "observedCount": 3816,
+            "inferredCount": 0,
+            "missingCount": 144
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.9058641975308642,
+            "meanError": 0.02134962145135712,
+            "observedCount": 3828,
+            "inferredCount": 0,
+            "missingCount": 132
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.9092702169625246,
+            "meanError": 0.0168336778893151,
+            "observedCount": 3462,
+            "inferredCount": 0,
+            "missingCount": 498
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.9156626506024096,
+            "meanError": 0.015068056027385089,
+            "observedCount": 3456,
+            "inferredCount": 0,
+            "missingCount": 504
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.9105145413870246,
+            "meanError": 0.017759941336999447,
+            "observedCount": 2922,
+            "inferredCount": 0,
+            "missingCount": 1038
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9160997732426304,
+            "meanError": 0.01871506419250443,
+            "observedCount": 2964,
+            "inferredCount": 0,
+            "missingCount": 996
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2802,
+            "inferredCount": 0,
+            "missingCount": 1158
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2784,
+            "inferredCount": 0,
+            "missingCount": 1176
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2832,
+            "inferredCount": 0,
+            "missingCount": 1128
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2928,
+            "inferredCount": 0,
+            "missingCount": 1032
+          }
+        ],
+        "visibleJointDetectionRate": 0.9125315391084945,
+        "meanVisibleJointError": 0.01511370928683738,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.6358974358974359,
+            "retention": 0.9538461538461539
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.6007326007326007,
+            "retention": 0.9010989010989011
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.5952380952380952,
+            "retention": 0.8928571428571429
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.4578313253012048,
+            "retention": 0.6867469879518072
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.4,
+            "retention": 0.6
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6111111111111112,
+            "retention": 0.9166666666666666
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9965322930212397,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 2.1848275862068967
+        },
+        "fusionMsPerTick": 0.0007172018095553349,
+        "heapGrowthBytes": -1270456,
+        "heapGrowthBytesPer12h": -30280661.62758621
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "1144.06 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "90.8%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "91.3%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-384x288-yoloxm075",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.9110669756151385,
+        "emptyFrameFalsePositives": 64,
+        "emptyFrameFalsePositivesPer12h": 1525.4068965517242,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.957983193277311,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 700,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9571428571428572,
+            "meanError": 0.014092547889922181,
+            "observedCount": 4176,
+            "inferredCount": 0,
+            "missingCount": 24
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9574468085106383,
+            "meanError": 0.013583920986814125,
+            "observedCount": 4188,
+            "inferredCount": 0,
+            "missingCount": 12
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.9620853080568721,
+            "meanError": 0.011348553962893684,
+            "observedCount": 4158,
+            "inferredCount": 0,
+            "missingCount": 42
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9612403100775194,
+            "meanError": 0.010822286817702545,
+            "observedCount": 4134,
+            "inferredCount": 0,
+            "missingCount": 66
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9636075949367089,
+            "meanError": 0.010681496565888671,
+            "observedCount": 4116,
+            "inferredCount": 0,
+            "missingCount": 84
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9635499207606973,
+            "meanError": 0.010380401998501853,
+            "observedCount": 4116,
+            "inferredCount": 0,
+            "missingCount": 84
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4200
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4200
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4200
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4200
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4200
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4200
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.9582689335394127,
+            "meanError": 0.02088236198568161,
+            "observedCount": 4080,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.9583333333333334,
+            "meanError": 0.020268074755589352,
+            "observedCount": 4080,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.9664694280078896,
+            "meanError": 0.014476907115990334,
+            "observedCount": 3720,
+            "inferredCount": 0,
+            "missingCount": 480
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.9678714859437751,
+            "meanError": 0.013194263946204305,
+            "observedCount": 3672,
+            "inferredCount": 0,
+            "missingCount": 528
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.9642058165548099,
+            "meanError": 0.015948377650887323,
+            "observedCount": 3150,
+            "inferredCount": 0,
+            "missingCount": 1050
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9591836734693877,
+            "meanError": 0.014916192095801037,
+            "observedCount": 3150,
+            "inferredCount": 0,
+            "missingCount": 1050
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3048,
+            "inferredCount": 0,
+            "missingCount": 1152
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3024,
+            "inferredCount": 0,
+            "missingCount": 1176
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3048,
+            "inferredCount": 0,
+            "missingCount": 1152
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3102,
+            "inferredCount": 0,
+            "missingCount": 1098
+          }
+        ],
+        "visibleJointDetectionRate": 0.9613120269133726,
+        "meanVisibleJointError": 0.014175957327755331,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.6505494505494506,
+            "retention": 0.9758241758241758
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.6153846153846154,
+            "retention": 0.9230769230769231
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.6428571428571429,
+            "retention": 0.9642857142857143
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.5943775100401606,
+            "retention": 0.891566265060241
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.6666666666666666,
+            "retention": 1
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6388888888888888,
+            "retention": 0.9583333333333334
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9953763906949863,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 2.317241379310345
+        },
+        "fusionMsPerTick": 0.0010482180293501049,
+        "heapGrowthBytes": 13641984,
+        "heapGrowthBytesPer12h": 325149632.4413793
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "1525.41 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "95.8%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "96.1%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-384x288-yoloxm080",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.9099635882158226,
+        "emptyFrameFalsePositives": 52,
+        "emptyFrameFalsePositivesPer12h": 1239.393103448276,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.9467787114845938,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 689,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9457142857142857,
+            "meanError": 0.014072043110757692,
+            "observedCount": 4110,
+            "inferredCount": 0,
+            "missingCount": 24
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9460992907801419,
+            "meanError": 0.013522454461987691,
+            "observedCount": 4122,
+            "inferredCount": 0,
+            "missingCount": 12
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.95260663507109,
+            "meanError": 0.011331864979218068,
+            "observedCount": 4098,
+            "inferredCount": 0,
+            "missingCount": 36
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9488372093023256,
+            "meanError": 0.010883030738753857,
+            "observedCount": 4068,
+            "inferredCount": 0,
+            "missingCount": 66
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9541139240506329,
+            "meanError": 0.010715178749688116,
+            "observedCount": 4056,
+            "inferredCount": 0,
+            "missingCount": 78
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9524564183835182,
+            "meanError": 0.01041439902236519,
+            "observedCount": 4050,
+            "inferredCount": 0,
+            "missingCount": 84
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4134
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4134
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4134
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4134
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4134
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4134
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.9474497681607419,
+            "meanError": 0.02084403951357378,
+            "observedCount": 4014,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.9475308641975309,
+            "meanError": 0.020166404881936398,
+            "observedCount": 4014,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.960552268244576,
+            "meanError": 0.014470898121870787,
+            "observedCount": 3666,
+            "inferredCount": 0,
+            "missingCount": 468
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.9618473895582329,
+            "meanError": 0.013197076923567311,
+            "observedCount": 3612,
+            "inferredCount": 0,
+            "missingCount": 522
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.9574944071588367,
+            "meanError": 0.015932555903358427,
+            "observedCount": 3096,
+            "inferredCount": 0,
+            "missingCount": 1038
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9569160997732427,
+            "meanError": 0.01492825610974801,
+            "observedCount": 3108,
+            "inferredCount": 0,
+            "missingCount": 1026
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3006,
+            "inferredCount": 0,
+            "missingCount": 1128
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2976,
+            "inferredCount": 0,
+            "missingCount": 1158
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3012,
+            "inferredCount": 0,
+            "missingCount": 1122
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3060,
+            "inferredCount": 0,
+            "missingCount": 1074
+          }
+        ],
+        "visibleJointDetectionRate": 0.9519203812727782,
+        "meanVisibleJointError": 0.014165242190336796,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.6461538461538462,
+            "retention": 0.9692307692307692
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.6007326007326007,
+            "retention": 0.9010989010989011
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.6428571428571429,
+            "retention": 0.9642857142857143
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.570281124497992,
+            "retention": 0.8554216867469879
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.6666666666666666,
+            "retention": 1
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6388888888888888,
+            "retention": 0.9583333333333334
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9962433174396763,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 2.2808275862068967
+        },
+        "fusionMsPerTick": 0.0009378792894185148,
+        "heapGrowthBytes": 11086240,
+        "heapGrowthBytesPer12h": 264234796.13793105
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "1239.39 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "94.7%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "95.2%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-384x288-yoloxm085",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.9064327485380117,
+        "emptyFrameFalsePositives": 32,
+        "emptyFrameFalsePositivesPer12h": 762.7034482758621,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.9173669467787114,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 663,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9171428571428571,
+            "meanError": 0.014218206574431198,
+            "observedCount": 3960,
+            "inferredCount": 0,
+            "missingCount": 18
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9177304964539007,
+            "meanError": 0.013608760223044218,
+            "observedCount": 3972,
+            "inferredCount": 0,
+            "missingCount": 6
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.9257503949447078,
+            "meanError": 0.011293665862523651,
+            "observedCount": 3948,
+            "inferredCount": 0,
+            "missingCount": 30
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9209302325581395,
+            "meanError": 0.010964019893704822,
+            "observedCount": 3924,
+            "inferredCount": 0,
+            "missingCount": 54
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.930379746835443,
+            "meanError": 0.01064126559710889,
+            "observedCount": 3906,
+            "inferredCount": 0,
+            "missingCount": 72
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9255150554675119,
+            "meanError": 0.010537886808095014,
+            "observedCount": 3900,
+            "inferredCount": 0,
+            "missingCount": 78
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3978
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3978
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3978
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3978
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3978
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3978
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.9165378670788253,
+            "meanError": 0.020967806735572275,
+            "observedCount": 3858,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.9166666666666666,
+            "meanError": 0.020291606976349134,
+            "observedCount": 3858,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.9368836291913215,
+            "meanError": 0.014530804716167146,
+            "observedCount": 3540,
+            "inferredCount": 0,
+            "missingCount": 438
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.9377510040160643,
+            "meanError": 0.013232775771031558,
+            "observedCount": 3468,
+            "inferredCount": 0,
+            "missingCount": 510
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.930648769574944,
+            "meanError": 0.015813605307649515,
+            "observedCount": 2988,
+            "inferredCount": 0,
+            "missingCount": 990
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9319727891156463,
+            "meanError": 0.014995159927237954,
+            "observedCount": 3006,
+            "inferredCount": 0,
+            "missingCount": 972
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2904,
+            "inferredCount": 0,
+            "missingCount": 1074
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2880,
+            "inferredCount": 0,
+            "missingCount": 1098
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2922,
+            "inferredCount": 0,
+            "missingCount": 1056
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2952,
+            "inferredCount": 0,
+            "missingCount": 1026
+          }
+        ],
+        "visibleJointDetectionRate": 0.924726661059714,
+        "meanVisibleJointError": 0.014216355247217923,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.6373626373626373,
+            "retention": 0.9560439560439561
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.5714285714285714,
+            "retention": 0.8571428571428571
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.6190476190476191,
+            "retention": 0.9285714285714286
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.5060240963855421,
+            "retention": 0.7590361445783133
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.6666666666666666,
+            "retention": 1
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6111111111111112,
+            "retention": 0.9166666666666666
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9976881953474931,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 2.194758620689655
+        },
+        "fusionMsPerTick": 0.0007172018095553349,
+        "heapGrowthBytes": -7932872,
+        "heapGrowthBytesPer12h": -189075900.91034484
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "762.70 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "91.7%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "92.5%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-384x288-yoloxt050",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 18126,
+        "durationMs": 1812500,
+        "presenceAccuracy": 0.9070947809776012,
+        "emptyFrameFalsePositives": 140,
+        "emptyFrameFalsePositivesPer12h": 3336.8275862068963,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.9593837535014006,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 721,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9585714285714285,
+            "meanError": 0.014306886138274934,
+            "observedCount": 4308,
+            "inferredCount": 0,
+            "missingCount": 18
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9588652482269504,
+            "meanError": 0.013838520762398273,
+            "observedCount": 4296,
+            "inferredCount": 0,
+            "missingCount": 30
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.9620853080568721,
+            "meanError": 0.011712458344510493,
+            "observedCount": 4284,
+            "inferredCount": 0,
+            "missingCount": 42
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9627906976744186,
+            "meanError": 0.011125536182958964,
+            "observedCount": 4254,
+            "inferredCount": 0,
+            "missingCount": 72
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9620253164556962,
+            "meanError": 0.011233954852214637,
+            "observedCount": 4188,
+            "inferredCount": 0,
+            "missingCount": 138
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9587955625990491,
+            "meanError": 0.010721740530376568,
+            "observedCount": 4182,
+            "inferredCount": 0,
+            "missingCount": 144
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4326
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4326
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4326
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4326
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4326
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 4326
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.9567233384853169,
+            "meanError": 0.02136878484558044,
+            "observedCount": 4164,
+            "inferredCount": 0,
+            "missingCount": 162
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.9583333333333334,
+            "meanError": 0.021013275938427556,
+            "observedCount": 4158,
+            "inferredCount": 0,
+            "missingCount": 168
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.9467455621301775,
+            "meanError": 0.014404197138822579,
+            "observedCount": 3750,
+            "inferredCount": 0,
+            "missingCount": 576
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.9538152610441767,
+            "meanError": 0.014117293672803816,
+            "observedCount": 3726,
+            "inferredCount": 0,
+            "missingCount": 600
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.9530201342281879,
+            "meanError": 0.018651252113294433,
+            "observedCount": 3246,
+            "inferredCount": 0,
+            "missingCount": 1080
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9546485260770975,
+            "meanError": 0.017541728594389516,
+            "observedCount": 3240,
+            "inferredCount": 0,
+            "missingCount": 1086
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3114,
+            "inferredCount": 0,
+            "missingCount": 1212
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3060,
+            "inferredCount": 0,
+            "missingCount": 1266
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3054,
+            "inferredCount": 0,
+            "missingCount": 1272
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 3162,
+            "inferredCount": 0,
+            "missingCount": 1164
+          }
+        ],
+        "visibleJointDetectionRate": 0.9576675077095599,
+        "meanVisibleJointError": 0.014862449611169413,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.6564102564102564,
+            "retention": 0.9846153846153847
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.6446886446886447,
+            "retention": 0.967032967032967
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.6547619047619048,
+            "retention": 0.9821428571428571
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.5461847389558233,
+            "retention": 0.8192771084337349
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.6666666666666666,
+            "retention": 1
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.5833333333333334,
+            "retention": 0.875
+          },
+          {
+            "condition": "empty",
+            "ticks": 13842,
+            "presenceAccuracy": 0.9898858546452824,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 2.384
+        },
+        "fusionMsPerTick": 0.0011033873993158997,
+        "heapGrowthBytes": -54931528,
+        "heapGrowthBytesPer12h": -1309264557.0206897
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "3336.83 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "95.9%",
+          "passed": true
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "95.8%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-l-384x288",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 6534,
+        "durationMs": 653300,
+        "presenceAccuracy": 0.7404346495255586,
+        "emptyFrameFalsePositives": 0,
+        "emptyFrameFalsePositivesPer12h": 0,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.9061624649859944,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 647,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.91,
+            "meanError": 0.014531327650317628,
+            "observedCount": 3870,
+            "inferredCount": 0,
+            "missingCount": 12
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.9063829787234042,
+            "meanError": 0.014323396680333235,
+            "observedCount": 3882,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.919431279620853,
+            "meanError": 0.011563296283027543,
+            "observedCount": 3864,
+            "inferredCount": 0,
+            "missingCount": 18
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9131782945736434,
+            "meanError": 0.011263877938048224,
+            "observedCount": 3846,
+            "inferredCount": 0,
+            "missingCount": 36
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9177215189873418,
+            "meanError": 0.010288004251769886,
+            "observedCount": 3786,
+            "inferredCount": 0,
+            "missingCount": 96
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9144215530903328,
+            "meanError": 0.01037849956952417,
+            "observedCount": 3822,
+            "inferredCount": 0,
+            "missingCount": 60
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3882
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3882
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3882
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3882
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3882
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3882
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.9026275115919629,
+            "meanError": 0.021606101156544686,
+            "observedCount": 3762,
+            "inferredCount": 0,
+            "missingCount": 120
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.904320987654321,
+            "meanError": 0.021359147285707657,
+            "observedCount": 3768,
+            "inferredCount": 0,
+            "missingCount": 114
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.9092702169625246,
+            "meanError": 0.01685197421838188,
+            "observedCount": 3396,
+            "inferredCount": 0,
+            "missingCount": 486
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.9156626506024096,
+            "meanError": 0.015032684991153535,
+            "observedCount": 3390,
+            "inferredCount": 0,
+            "missingCount": 492
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.9105145413870246,
+            "meanError": 0.01770780282352153,
+            "observedCount": 2862,
+            "inferredCount": 0,
+            "missingCount": 1020
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9160997732426304,
+            "meanError": 0.01871610342130391,
+            "observedCount": 2904,
+            "inferredCount": 0,
+            "missingCount": 978
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2754,
+            "inferredCount": 0,
+            "missingCount": 1128
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2742,
+            "inferredCount": 0,
+            "missingCount": 1140
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2784,
+            "inferredCount": 0,
+            "missingCount": 1098
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2874,
+            "inferredCount": 0,
+            "missingCount": 1008
+          }
+        ],
+        "visibleJointDetectionRate": 0.9114101485842445,
+        "meanVisibleJointError": 0.015111546422443134,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.6344322344322344,
+            "retention": 0.9516483516483516
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.6007326007326007,
+            "retention": 0.9010989010989011
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.5952380952380952,
+            "retention": 0.8928571428571429
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.4578313253012048,
+            "retention": 0.6867469879518072
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.4,
+            "retention": 0.6
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6111111111111112,
+            "retention": 0.9166666666666666
+          },
+          {
+            "condition": "empty",
+            "ticks": 2250,
+            "presenceAccuracy": 1,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 5.942139905097199
+        },
+        "fusionMsPerTick": 0.0019895928986838076,
+        "heapGrowthBytes": 54558304,
+        "heapGrowthBytesPer12h": 3607712739.629573
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "0.00 / 12h",
+          "passed": true
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "90.6%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "91.1%",
+          "passed": true
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val-rtmw-m-256x192",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 6534,
+        "durationMs": 653300,
+        "presenceAccuracy": 0.7361493725130088,
+        "emptyFrameFalsePositives": 4,
+        "emptyFrameFalsePositivesPer12h": 264.5032909842339,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.8977591036414566,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 642,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.9,
+            "meanError": 0.01891141422946563,
+            "observedCount": 3840,
+            "inferredCount": 0,
+            "missingCount": 12
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.8964539007092198,
+            "meanError": 0.017087457597858548,
+            "observedCount": 3840,
+            "inferredCount": 0,
+            "missingCount": 12
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.9036334913112164,
+            "meanError": 0.018508593297606745,
+            "observedCount": 3816,
+            "inferredCount": 0,
+            "missingCount": 36
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.9007751937984496,
+            "meanError": 0.0176531047911796,
+            "observedCount": 3828,
+            "inferredCount": 0,
+            "missingCount": 24
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.9082278481012658,
+            "meanError": 0.01772985775078598,
+            "observedCount": 3768,
+            "inferredCount": 0,
+            "missingCount": 84
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.9049128367670365,
+            "meanError": 0.0174192508632362,
+            "observedCount": 3786,
+            "inferredCount": 0,
+            "missingCount": 66
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3852
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3852
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3852
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3852
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3852
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 0,
+            "inferredCount": 0,
+            "missingCount": 3852
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.8902627511591963,
+            "meanError": 0.02659562149306887,
+            "observedCount": 3762,
+            "inferredCount": 0,
+            "missingCount": 90
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.8950617283950617,
+            "meanError": 0.02604531367643291,
+            "observedCount": 3750,
+            "inferredCount": 0,
+            "missingCount": 102
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.8875739644970414,
+            "meanError": 0.02395630303425784,
+            "observedCount": 3414,
+            "inferredCount": 0,
+            "missingCount": 438
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.8875502008032129,
+            "meanError": 0.02299614728653607,
+            "observedCount": 3354,
+            "inferredCount": 0,
+            "missingCount": 498
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.8970917225950783,
+            "meanError": 0.027995640630705414,
+            "observedCount": 2988,
+            "inferredCount": 0,
+            "missingCount": 864
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.9024943310657596,
+            "meanError": 0.028702038280625647,
+            "observedCount": 3000,
+            "inferredCount": 0,
+            "missingCount": 852
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2862,
+            "inferredCount": 0,
+            "missingCount": 990
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2802,
+            "inferredCount": 0,
+            "missingCount": 1050
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2784,
+            "inferredCount": 0,
+            "missingCount": 1068
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2928,
+            "inferredCount": 0,
+            "missingCount": 924
+          }
+        ],
+        "visibleJointDetectionRate": 0.8980936361087749,
+        "meanVisibleJointError": 0.021492089982079413,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.63003663003663,
+            "retention": 0.945054945054945
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.608058608058608,
+            "retention": 0.9120879120879121
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.5833333333333334,
+            "retention": 0.875
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.43373493975903615,
+            "retention": 0.6506024096385542
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.4,
+            "retention": 0.6
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.6111111111111112,
+            "retention": 0.9166666666666666
+          },
+          {
+            "condition": "empty",
+            "ticks": 2250,
+            "presenceAccuracy": 0.9982222222222222,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 5.896219194856881
+        },
+        "fusionMsPerTick": 0.002448729721456994,
+        "heapGrowthBytes": -7369728,
+        "heapGrowthBytesPer12h": -487329327.41466403
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "264.50 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "89.8%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "89.8%",
+          "passed": false
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "result": {
+        "scenario": "coco-wholebody-val",
+        "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody, annotations sha256=f8272e9c12f3a424...) over COCO val2017 images (http://images.cocodataset.org/zips/val2017.zip)",
+        "ticks": 6534,
+        "durationMs": 653300,
+        "presenceAccuracy": 0.6859504132231405,
+        "emptyFrameFalsePositives": 4,
+        "emptyFrameFalsePositivesPer12h": 264.5032909842339,
+        "recognitionLatencyMs": 200,
+        "worstRecognitionLatencyMs": 200,
+        "torsoRetention": 0.7829131652661064,
+        "objectSwitches": 0,
+        "maxConcurrentTracks": 1,
+        "distinctTrackIds": 560,
+        "joints": [
+          {
+            "index": 11,
+            "detectionRate": 0.7914285714285715,
+            "meanError": 0.02670806914257056,
+            "observedCount": 3360,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 12,
+            "detectionRate": 0.7886524822695036,
+            "meanError": 0.02406598734473662,
+            "observedCount": 3360,
+            "inferredCount": 0,
+            "missingCount": 0
+          },
+          {
+            "index": 13,
+            "detectionRate": 0.7061611374407583,
+            "meanError": 0.02659202306152471,
+            "observedCount": 2808,
+            "inferredCount": 0,
+            "missingCount": 552
+          },
+          {
+            "index": 14,
+            "detectionRate": 0.6573643410852713,
+            "meanError": 0.022613690812733934,
+            "observedCount": 2640,
+            "inferredCount": 0,
+            "missingCount": 720
+          },
+          {
+            "index": 15,
+            "detectionRate": 0.694620253164557,
+            "meanError": 0.02464048514695741,
+            "observedCount": 2706,
+            "inferredCount": 0,
+            "missingCount": 654
+          },
+          {
+            "index": 16,
+            "detectionRate": 0.6830427892234548,
+            "meanError": 0.02022501178973071,
+            "observedCount": 2670,
+            "inferredCount": 0,
+            "missingCount": 690
+          },
+          {
+            "index": 17,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2748,
+            "inferredCount": 0,
+            "missingCount": 612
+          },
+          {
+            "index": 18,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2700,
+            "inferredCount": 0,
+            "missingCount": 660
+          },
+          {
+            "index": 19,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2772,
+            "inferredCount": 0,
+            "missingCount": 588
+          },
+          {
+            "index": 20,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2694,
+            "inferredCount": 0,
+            "missingCount": 666
+          },
+          {
+            "index": 21,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2742,
+            "inferredCount": 0,
+            "missingCount": 618
+          },
+          {
+            "index": 22,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 2652,
+            "inferredCount": 0,
+            "missingCount": 708
+          },
+          {
+            "index": 23,
+            "detectionRate": 0.7789799072642968,
+            "meanError": 0.044183202064819425,
+            "observedCount": 3252,
+            "inferredCount": 0,
+            "missingCount": 108
+          },
+          {
+            "index": 24,
+            "detectionRate": 0.7777777777777778,
+            "meanError": 0.04344265308473387,
+            "observedCount": 3258,
+            "inferredCount": 0,
+            "missingCount": 102
+          },
+          {
+            "index": 25,
+            "detectionRate": 0.6449704142011834,
+            "meanError": 0.03207592890275929,
+            "observedCount": 2238,
+            "inferredCount": 0,
+            "missingCount": 1122
+          },
+          {
+            "index": 26,
+            "detectionRate": 0.6506024096385542,
+            "meanError": 0.034676133675423715,
+            "observedCount": 2274,
+            "inferredCount": 0,
+            "missingCount": 1086
+          },
+          {
+            "index": 27,
+            "detectionRate": 0.6554809843400448,
+            "meanError": 0.03007913366730653,
+            "observedCount": 1932,
+            "inferredCount": 0,
+            "missingCount": 1428
+          },
+          {
+            "index": 28,
+            "detectionRate": 0.6417233560090703,
+            "meanError": 0.03238607704149846,
+            "observedCount": 1944,
+            "inferredCount": 0,
+            "missingCount": 1416
+          },
+          {
+            "index": 29,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 1962,
+            "inferredCount": 0,
+            "missingCount": 1398
+          },
+          {
+            "index": 30,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 1908,
+            "inferredCount": 0,
+            "missingCount": 1452
+          },
+          {
+            "index": 31,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 1998,
+            "inferredCount": 0,
+            "missingCount": 1362
+          },
+          {
+            "index": 32,
+            "detectionRate": 0,
+            "meanError": null,
+            "observedCount": 1932,
+            "inferredCount": 0,
+            "missingCount": 1428
+          }
+        ],
+        "visibleJointDetectionRate": 0.7129240257919821,
+        "meanVisibleJointError": 0.03009274962000083,
+        "conditions": [
+          {
+            "condition": "front",
+            "ticks": 2730,
+            "presenceAccuracy": 0.5860805860805861,
+            "retention": 0.8791208791208791
+          },
+          {
+            "condition": "partial_body",
+            "ticks": 546,
+            "presenceAccuracy": 0.5347985347985348,
+            "retention": 0.8021978021978022
+          },
+          {
+            "condition": "back",
+            "ticks": 336,
+            "presenceAccuracy": 0.5119047619047619,
+            "retention": 0.7678571428571429
+          },
+          {
+            "condition": "distant",
+            "ticks": 498,
+            "presenceAccuracy": 0.21686746987951808,
+            "retention": 0.3253012048192771
+          },
+          {
+            "condition": "side",
+            "ticks": 30,
+            "presenceAccuracy": 0.4,
+            "retention": 0.6
+          },
+          {
+            "condition": "head_occluded",
+            "ticks": 144,
+            "presenceAccuracy": 0.3611111111111111,
+            "retention": 0.5416666666666666
+          },
+          {
+            "condition": "empty",
+            "ticks": 2250,
+            "presenceAccuracy": 0.9982222222222222,
+            "retention": 1
+          }
+        ],
+        "handoffs": 0,
+        "longestHandoffGapMs": 0,
+        "cameraFps": {
+          "camera1": 5.143119546915659
+        },
+        "fusionMsPerTick": 0.0021426385062748698,
+        "heapGrowthBytes": -10331128,
+        "heapGrowthBytesPer12h": -683154338.8948416
+      },
+      "acceptance": [
+        {
+          "id": "empty_false_positives",
+          "label": "Empty-frame false positives",
+          "target": "< 1 per camera per 12h",
+          "actual": "264.50 / 12h",
+          "passed": false
+        },
+        {
+          "id": "recognition_latency",
+          "label": "Recognition after entry",
+          "target": "<= 1000 ms",
+          "actual": "200 ms",
+          "passed": true
+        },
+        {
+          "id": "object_switches",
+          "label": "Person-to-object target switches",
+          "target": "0",
+          "actual": "0",
+          "passed": true
+        },
+        {
+          "id": "torso_retention",
+          "label": "Torso tracking retention",
+          "target": ">= 95%",
+          "actual": "78.3%",
+          "passed": false
+        },
+        {
+          "id": "joint_detection",
+          "label": "Visible major-joint detection rate",
+          "target": ">= 90%",
+          "actual": "71.3%",
+          "passed": false
+        },
+        {
+          "id": "single_identity",
+          "label": "Concurrent global person ids",
+          "target": "<= 1",
+          "actual": "1",
+          "passed": true
+        }
+      ]
+    }
+  ]
+}

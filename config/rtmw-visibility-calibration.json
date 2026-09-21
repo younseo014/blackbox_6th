@@ -1,0 +1,58 @@
+{
+  "models": {
+    "rtmw-l-384x288": {
+      "kind": "platt-1d",
+      "note": "visibility = 1 / (1 + exp(-(slope * simcc_peak + intercept))). Fitted on COCO-WholeBody val body keypoints, split by image.",
+      "slope": 1.2133291079147184,
+      "intercept": -2.86769704656492,
+      "trackerThreshold": 0.25,
+      "fit": {
+        "keypoints": 12138,
+        "trainKeypoints": 8483,
+        "testKeypoints": 3655,
+        "heldOutAuc": 0.8047626593124273,
+        "precisionAtThreshold": 0.8267512251369271,
+        "recallAtThreshold": 0.998259658893143,
+        "uncalibratedPrecision": 0.786046511627907,
+        "uncalibratedRecall": 1.0
+      },
+      "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody)"
+    },
+    "rtmw-l-256x192": {
+      "kind": "platt-1d",
+      "note": "visibility = 1 / (1 + exp(-(slope * simcc_peak + intercept))). Fitted on COCO-WholeBody val body keypoints, split by image.",
+      "slope": 7.368371856454311,
+      "intercept": -3.2754082193097642,
+      "trackerThreshold": 0.25,
+      "fit": {
+        "keypoints": 12138,
+        "trainKeypoints": 8483,
+        "testKeypoints": 3655,
+        "heldOutAuc": 0.8141709611400969,
+        "precisionAtThreshold": 0.8441481481481482,
+        "recallAtThreshold": 0.9916463626870867,
+        "uncalibratedPrecision": 0.786046511627907,
+        "uncalibratedRecall": 1.0
+      },
+      "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody)"
+    },
+    "rtmw-m-256x192": {
+      "kind": "platt-1d",
+      "note": "visibility = 1 / (1 + exp(-(slope * simcc_peak + intercept))). Fitted on COCO-WholeBody val body keypoints, split by image.",
+      "slope": 6.320744934530597,
+      "intercept": -2.2786648949036143,
+      "trackerThreshold": 0.25,
+      "fit": {
+        "keypoints": 12138,
+        "trainKeypoints": 8483,
+        "testKeypoints": 3655,
+        "heldOutAuc": 0.799911514114567,
+        "precisionAtThreshold": 0.8219099512474907,
+        "recallAtThreshold": 0.9975635224504003,
+        "uncalibratedPrecision": 0.786046511627907,
+        "uncalibratedRecall": 1.0
+      },
+      "source": "COCO-WholeBody v1.0 val (https://github.com/jin-s13/COCO-WholeBody)"
+    }
+  }
+}

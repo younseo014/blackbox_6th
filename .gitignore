@@ -63,3 +63,10 @@ next-env.d.ts
 
 # ui-craft
 /.ui-craft/
+
+# Public datasets and downloaded model weights. Large, reproducible from
+# docs/model-provenance.md, and not ours to redistribute.
+/data/external/
+/data/eval-scenarios/
+/models/rtmw/
+/models/yolox/

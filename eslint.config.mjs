@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Third-party JS shipped inside the Python virtualenv (matplotlib,
+    // scikit-learn). Not our source, and it is not built or served.
+    ".venv/**",
   ]),
 ]);
 
