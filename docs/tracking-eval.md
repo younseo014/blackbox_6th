@@ -34,6 +34,31 @@ explicit consent.
 
 ## Architecture as it now stands
 
+### Current three-angle data collection mode
+
+The three fixed cameras now target the **same small workspace from different
+angles**. During a new capture, the UI reports a person only when all three
+cameras have individually confirmed, anatomically valid skeletons whose
+observations are no more than 500 ms old. One or two views show a progress
+count (1/3 or 2/3) and do not count as person-present. The 500 ms window
+accounts for sequential per-camera inference; it is an operational definition
+of synchronized observation, not a claim that all three shutters fired at the
+same instant.
+
+The three camera streams remain separate in storage. Post-session action
+label candidates are generated only from time samples with a detected
+skeleton in all three views. Each candidate is held for human ground-truth
+review, and camera tabs preserve the replay time when the reviewer changes
+view. A representative 2D stream feeds the existing motion analysis; the
+reviewer can inspect all three underlying streams. Existing sessions retain
+their stored coordinates and schema compatibility.
+
+These are **three synchronized 2D views**, not triangulated 3D coordinates.
+Camera intrinsics/extrinsics and a validated calibration are still required
+before joint positions can be called 3D. Three agreeing skeleton detections
+also cannot by themselves prove cross-camera identity in a crowded scene;
+the data collection setup assumes one participant in the shared workspace.
+
 ```
 per camera:   PoseLandmarker -> selectLockedPose -> confirmPoseSelection
                                         |
@@ -199,6 +224,37 @@ it cannot see.** If RTMW is adopted, its weaker occlusion awareness is a known
 cost that the `inferred` weighting has to absorb.
 
 ## Detector-driven improvement (the biggest single lever)
+
+### Browser integration (2026-10-11)
+
+The app now tries a YOLOX-tiny person detector in a dedicated browser worker,
+then falls back to its existing EfficientDet-Lite0 detector if loading or
+inference fails. MediaPipe Pose Heavy and the existing pose and global identity
+locks are unchanged. Run `npm run prepare:yolox` after extracting the official
+YOLOX-tiny SDK archive into `models/yolox/yolox_tiny/`; the script copies the
+ONNX model and matching ONNX Runtime Web WASM files into ignored `public/`
+assets. The browser uses the model's actual input dimensions, BGR channel
+order, 114 letterbox fill and no normalisation, matching
+`scripts/person_detector.py`.
+
+The initial YOLOX-tiny threshold is **0.60**. On the existing COCO detector
+sweep this gives 93.6% person recall and 28/2307 people-free false positives,
+compared with 90.2% and 19/2307 for shipping EfficientDet@0.50. These are
+detector-only numbers; they do not establish an end-to-end improvement with
+MediaPipe Pose Heavy or on store cameras.
+
+In one headless Chrome run on the development computer, using the official
+YOLOX SDK sample image, four YOLOX-m WASM inferences took 1372, 1350, 1353
+and 1347 ms, while four YOLOX-tiny inferences took 146, 131, 128 and 129 ms.
+Both found the person (scores 0.955 and 0.949 respectively). A blank frame
+returned score 0 for YOLOX-m. This is a functional and local speed check, not
+a three-camera throughput or store-domain accuracy measurement. The slower
+YOLOX-m therefore remains an offline candidate rather than the browser default.
+
+Before fixing the detector choice for a store deployment, compare both
+detectors on consented developer pre-validation clips with all three cameras:
+entry latency, missed/false person events, identity switches, per-camera
+throughput and UI delays. Do not use study participant recordings for tuning.
 
 The per-tick attribution said the pose model "returned nothing" on 17.9% of
 person ticks. That turned out to be mostly a **detector** problem, not a pose

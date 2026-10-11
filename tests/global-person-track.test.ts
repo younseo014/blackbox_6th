@@ -88,6 +88,33 @@ test("three cameras seeing the same person produce exactly one global track", ()
   assert.equal(track.coordinateFrame !== null, true);
 });
 
+test("three-view capture reports a person only while all cameras have fresh confirmed skeletons", () => {
+  const policy = { requiredCameraSlots: [1, 2, 3] as const, maxObservationAgeMs: 500 };
+  const one = updateGlobalPersonTrack(EMPTY_GLOBAL_TRACK, [
+    observation(1, 100, person()),
+    observation(2, 100, null),
+    observation(3, 100, null),
+  ], 100, () => "person-test", DEFAULT_TUNING, policy);
+  assert.equal(one.presence, "provisional");
+  assert.deepEqual(one.observingCameras, [1]);
+
+  const all = updateGlobalPersonTrack(one, [
+    observation(1, 100, person()),
+    observation(2, 300, person(0.3)),
+    observation(3, 400, person(0.7)),
+  ], 400, () => "person-test", DEFAULT_TUNING, policy);
+  assert.equal(all.presence, "present");
+  assert.deepEqual(all.observingCameras, [1, 2, 3]);
+
+  const stale = updateGlobalPersonTrack(all, [
+    observation(1, 100, person()),
+    observation(2, 550, person(0.3)),
+    observation(3, 600, person(0.7)),
+  ], 650, () => "person-test", DEFAULT_TUNING, policy);
+  assert.equal(stale.presence, "provisional", "a camera older than the sync window cannot keep person present");
+  assert.deepEqual(stale.observingCameras, [2, 3]);
+});
+
 test("presence needs consecutive frames before it is reported as present", () => {
   let track = EMPTY_GLOBAL_TRACK;
   for (let frame = 1; frame < GLOBAL_CONFIRMATION_FRAMES; frame += 1) {

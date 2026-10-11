@@ -48,6 +48,13 @@ export type ObservationEpisode = {
   id: string;
   sessionId: string;
   globalSessionId?: string;
+  multiViewEvidence?: {
+    cameraSlots: [1, 2, 3];
+    synchronizedSampleCount: number;
+    maxSkewMs: number;
+    coordinateSpace: "three_normalized_image_views";
+    calibrated: false;
+  };
   recordedAt: number;
   date: string;
   occupation: OccupationId;

@@ -109,8 +109,12 @@ import {
 import { sliceTargetMotions } from "./motion-segmentation";
 import {
   createGlobalCaptureSession,
+  frameQuality,
   listCameraCandidates,
+  representativeThreeViewFrames,
   selectExternalCameraSlots,
+  synchronizeThreeViewFrames,
+  THREE_VIEW_SYNC_WINDOW_MS,
   type CameraDeviceIdentity,
   type CameraSlot,
   type GlobalCaptureSession,
@@ -159,6 +163,7 @@ import {
   updateBackgroundGate,
   type BackgroundGateState,
 } from "./person-presence-gate";
+import { YoloxPersonDetector, YOLOX_PERSON_THRESHOLD } from "./yolox-person-detector";
 
 type View = "home" | "settings" | "today" | "timeline" | "care" | "onboarding";
 type OnboardingStep = 1 | 2 | 3 | 4;
@@ -700,7 +705,7 @@ export default function Home() {
     right: false,
   });
   const [headDirectionLabel, setHeadDirectionLabel] = useState("대기");
-  const [targetLocked, setTargetLocked] = useState(false);
+  const [threeViewStatus, setThreeViewStatus] = useState<{ slots: CameraSlot[]; present: boolean }>({ slots: [], present: false });
   const [cameraFullscreen, setCameraFullscreen] = useState(false);
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [primaryCameraId, setPrimaryCameraId] = useState("");
@@ -819,6 +824,8 @@ export default function Home() {
   const zonePreviewVideoRef = useRef<HTMLVideoElement>(null);
   const cameraSelectionRef = useRef<[string, string, string]>(["", "", ""]);
   const processingVideoRef = useRef<HTMLVideoElement>(null);
+  const secondaryProcessingVideoRef = useRef<HTMLVideoElement>(null);
+  const tertiaryProcessingVideoRef = useRef<HTMLVideoElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const cameraFrameRef = useRef<HTMLDivElement>(null);
   const cameraFeedLayoutRef = useRef<HTMLDivElement>(null);
@@ -831,6 +838,11 @@ export default function Home() {
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const personDetectorRef = useRef<ObjectDetector | null>(null);
   const personDetectorFailedRef = useRef(false);
+  const yoloxDetectorRef = useRef<YoloxPersonDetector | null>(null);
+  const yoloxDetectorLoadingRef = useRef(false);
+  const yoloxDetectorFailedRef = useRef(false);
+  const yoloxDetectorGenerationRef = useRef(0);
+  const yoloxDetectionPendingRef = useRef<Record<CameraSlot, boolean>>({ 1: false, 2: false, 3: false });
   const lastPersonDetectorRunRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
   const lastPersonDetectorSeenRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
   const personDetectorScoreRef = useRef<Record<CameraSlot, number>>({ 1: 0, 2: 0, 3: 0 });
@@ -1004,6 +1016,14 @@ export default function Home() {
         processingVideoRef.current.srcObject = streamRef.current;
         processingVideoRef.current.play().catch(() => undefined);
       }
+      if (secondaryProcessingVideoRef.current && secondaryStreamRef.current) {
+        secondaryProcessingVideoRef.current.srcObject = secondaryStreamRef.current;
+        secondaryProcessingVideoRef.current.play().catch(() => undefined);
+      }
+      if (tertiaryProcessingVideoRef.current && tertiaryStreamRef.current) {
+        tertiaryProcessingVideoRef.current.srcObject = tertiaryStreamRef.current;
+        tertiaryProcessingVideoRef.current.play().catch(() => undefined);
+      }
       if (quickMotionVideoRef.current) {
         quickMotionVideoRef.current.srcObject = streamRef.current;
         quickMotionVideoRef.current.play().catch(() => undefined);
@@ -1172,6 +1192,8 @@ export default function Home() {
       tertiaryPoseLandmarkerRef.current?.close();
       handLandmarkerRef.current?.close();
       personDetectorRef.current?.close();
+      yoloxDetectorGenerationRef.current += 1;
+      yoloxDetectorRef.current?.close();
     };
   }, []);
 
@@ -1234,7 +1256,7 @@ export default function Home() {
     if (zoneCameraRequestedRef.current) setZoneSetupOpen(true);
     if (observationConsent && pendingCameraStartRef.current) {
       if (!quickMotionCameraRequestedRef.current && !zoneCameraRequestedRef.current) setMultiCameraModalOpen(true);
-      void startCamera(undefined, undefined, undefined, quickMotionCameraRequestedRef.current);
+      void startCamera();
     } else if (pendingCameraStartRef.current && !quickMotionCameraRequestedRef.current && !zoneCameraRequestedRef.current) {
       setMultiCameraModalOpen(false);
     }
@@ -1246,7 +1268,6 @@ export default function Home() {
     requestedPrimaryCameraId?: string,
     requestedSecondaryCameraId?: string,
     requestedTertiaryCameraId?: string,
-    primaryOnly = false,
   ) {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraStatus("error");
@@ -1305,7 +1326,7 @@ export default function Home() {
 
       let secondaryStream: MediaStream | null = null;
       let tertiaryStream: MediaStream | null = null;
-      if (!primaryOnly && preferredSecondary) {
+      if (preferredSecondary) {
         try {
           secondaryStream = await openCameraDevice(preferredSecondary.deviceId);
         } catch (error) {
@@ -1318,7 +1339,7 @@ export default function Home() {
           }
         }
       }
-      if (!primaryOnly && preferredTertiary) {
+      if (preferredTertiary) {
         try {
           tertiaryStream = await openCameraDevice(preferredTertiary.deviceId);
         } catch (error) {
@@ -1353,14 +1374,6 @@ export default function Home() {
         }
       }
 
-      if (primaryOnly && !quickMotionCameraRequestedRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        secondaryStream?.getTracks().forEach((track) => track.stop());
-        tertiaryStream?.getTracks().forEach((track) => track.stop());
-        setCameraStatus("idle");
-        return;
-      }
-
       streamRef.current?.getTracks().forEach((track) => track.stop());
       secondaryStreamRef.current?.getTracks().forEach((track) => track.stop());
       tertiaryStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1376,6 +1389,14 @@ export default function Home() {
       if (processingVideoRef.current) {
         processingVideoRef.current.srcObject = stream;
         await processingVideoRef.current.play();
+      }
+      if (secondaryProcessingVideoRef.current && secondaryStream) {
+        secondaryProcessingVideoRef.current.srcObject = secondaryStream;
+        await secondaryProcessingVideoRef.current.play();
+      }
+      if (tertiaryProcessingVideoRef.current && tertiaryStream) {
+        tertiaryProcessingVideoRef.current.srcObject = tertiaryStream;
+        await tertiaryProcessingVideoRef.current.play();
       }
       if (quickMotionVideoRef.current) {
         quickMotionVideoRef.current.srcObject = stream;
@@ -1430,12 +1451,18 @@ export default function Home() {
     tertiaryPoseLandmarkerRef.current?.close();
     handLandmarkerRef.current?.close();
     personDetectorRef.current?.close();
+    yoloxDetectorGenerationRef.current += 1;
+    yoloxDetectorRef.current?.close();
     poseLandmarkerRef.current = null;
     secondaryPoseLandmarkerRef.current = null;
     tertiaryPoseLandmarkerRef.current = null;
     handLandmarkerRef.current = null;
     personDetectorRef.current = null;
     personDetectorFailedRef.current = false;
+    yoloxDetectorRef.current = null;
+    yoloxDetectorLoadingRef.current = false;
+    yoloxDetectorFailedRef.current = false;
+    yoloxDetectionPendingRef.current = { 1: false, 2: false, 3: false };
   }
 
   async function ensureMotionLandmarkers() {
@@ -1546,6 +1573,24 @@ export default function Home() {
         console.error("Person detector initialization failed", error);
         personDetectorFailedRef.current = true;
       }
+    }
+    if (!yoloxDetectorRef.current && !yoloxDetectorLoadingRef.current && !yoloxDetectorFailedRef.current) {
+      const generation = yoloxDetectorGenerationRef.current;
+      yoloxDetectorLoadingRef.current = true;
+      void YoloxPersonDetector.create().then((detector) => {
+        if (generation !== yoloxDetectorGenerationRef.current) {
+          detector.close();
+          return;
+        }
+        yoloxDetectorRef.current = detector;
+        yoloxDetectorLoadingRef.current = false;
+        console.info("YOLOX-tiny person detector ready");
+      }).catch((error) => {
+        if (generation !== yoloxDetectorGenerationRef.current) return;
+        yoloxDetectorLoadingRef.current = false;
+        yoloxDetectorFailedRef.current = true;
+        console.error("YOLOX-tiny initialization failed; using EfficientDet", error);
+      });
     }
   }
 
@@ -1722,7 +1767,26 @@ export default function Home() {
     if (timestamp - lastPersonDetectorRunRef.current[cameraSlot] >= detectorInterval) {
       lastPersonDetectorRunRef.current[cameraSlot] = timestamp;
       let detectorSawPerson = false;
-      if (personDetectorRef.current) {
+      const yolox = yoloxDetectorRef.current;
+      if (yolox && !yoloxDetectionPendingRef.current[cameraSlot]) {
+        const generation = yoloxDetectorGenerationRef.current;
+        yoloxDetectionPendingRef.current[cameraSlot] = true;
+        void yolox.detect(video).then((score) => {
+          if (generation !== yoloxDetectorGenerationRef.current) return;
+          personDetectorScoreRef.current[cameraSlot] = score;
+          if (score >= YOLOX_PERSON_THRESHOLD && currentMonotonicTime() - timestamp <= 1_200) {
+            lastPersonDetectorSeenRef.current[cameraSlot] = currentMonotonicTime();
+          }
+        }).catch((error) => {
+          if (generation !== yoloxDetectorGenerationRef.current) return;
+          console.error(`Camera ${cameraSlot} YOLOX detection failed; using EfficientDet`, error);
+          yoloxDetectorRef.current?.close();
+          yoloxDetectorRef.current = null;
+          yoloxDetectorFailedRef.current = true;
+        }).finally(() => {
+          if (generation === yoloxDetectorGenerationRef.current) yoloxDetectionPendingRef.current[cameraSlot] = false;
+        });
+      } else if (!yolox && personDetectorRef.current) {
         try {
           const result = personDetectorRef.current.detectForVideo(
             video,
@@ -1738,6 +1802,8 @@ export default function Home() {
           console.error(`Camera ${cameraSlot} person detection failed`, error);
         }
       }
+      detectorSawPerson ||= personDetectorScoreRef.current[cameraSlot] >=
+        (yolox ? YOLOX_PERSON_THRESHOLD : 0.5);
 
       const canvas = backgroundCanvasRef.current[cameraSlot] ?? document.createElement("canvas");
       backgroundCanvasRef.current[cameraSlot] = canvas;
@@ -1758,7 +1824,7 @@ export default function Home() {
           backgroundGateRef.current[cameraSlot],
           signature,
           timestamp,
-          !detectorSawPerson && !confirmation.confirmed,
+          !detectorSawPerson && !yoloxDetectionPendingRef.current[cameraSlot] && !confirmation.confirmed,
         );
       }
     }
@@ -1773,8 +1839,8 @@ export default function Home() {
     return cameraSlot === 1
       ? processingVideoRef.current
       : cameraSlot === 2
-        ? secondaryVideoRef.current
-        : tertiaryVideoRef.current;
+        ? secondaryProcessingVideoRef.current
+        : tertiaryProcessingVideoRef.current;
   }
 
   /**
@@ -1826,13 +1892,22 @@ export default function Home() {
     const observations = ([1, 2, 3] as CameraSlot[]).map((cameraSlot) => {
       const observation = globalObservationsRef.current[cameraSlot];
       const stale = timestamp - observation.timestamp > GLOBAL_OBSERVATION_TTL_MS;
-      return stale ? { ...emptyCameraObservation(cameraSlot), timestamp } : { ...observation, timestamp };
+      return stale ? { ...emptyCameraObservation(cameraSlot), timestamp } : observation;
     });
     globalTrackRef.current = updateGlobalPersonTrack(
       globalTrackRef.current,
       observations,
       timestamp,
       () => `global-person-${crypto.randomUUID()}`,
+      undefined,
+      { requiredCameraSlots: [1, 2, 3], maxObservationAgeMs: THREE_VIEW_SYNC_WINDOW_MS },
+    );
+    const slots = globalTrackRef.current.observingCameras;
+    const present = globalTrackRef.current.presence === "present";
+    setThreeViewStatus((current) =>
+      current.present === present && current.slots.join() === slots.join()
+        ? current
+        : { slots, present },
     );
   }
 
@@ -1890,8 +1965,6 @@ export default function Home() {
           timestamp - lastPoseSeenAtRef.current <= POSE_DISPLAY_HOLD_MS,
         );
         const displayLandmarks = liveLandmarks ?? (holdingLastPose ? lastPoseRef.current : null);
-        const nextTargetLocked = Boolean(liveLandmarks);
-        setTargetLocked((current) => current === nextTargetLocked ? current : nextTargetLocked);
         const fullBody = liveLandmarks ? isFullBodyVisible(liveLandmarks) : false;
         const displayFullBody = displayLandmarks ? isFullBodyVisible(displayLandmarks) : false;
         const head = liveLandmarks ? getHeadDirection(liveLandmarks) : null;
@@ -2017,7 +2090,7 @@ export default function Home() {
   }
 
   function trackAuxiliaryPose(timestamp: number, cameraSlot: 2 | 3) {
-    const video = cameraSlot === 2 ? secondaryVideoRef.current : tertiaryVideoRef.current;
+    const video = cameraSlot === 2 ? secondaryProcessingVideoRef.current : tertiaryProcessingVideoRef.current;
     const canvas = cameraSlot === 2 ? secondaryOverlayCanvasRef.current : tertiaryOverlayCanvasRef.current;
     const landmarker = cameraSlot === 2 ? secondaryPoseLandmarkerRef.current : tertiaryPoseLandmarkerRef.current;
     // Hand detection is stateless enough for our sampled frames; sharing one
@@ -2150,6 +2223,13 @@ export default function Home() {
         endedAt: null,
         timelineOriginMs: globalCaptureSessionRef.current.timelineOriginMs,
         expectedCameraSlots: [1, 2, 3],
+        multiViewCapture: {
+          arrangement: "shared_workspace_three_angles",
+          personConfirmation: "three_synchronized_skeletons",
+          synchronizationWindowMs: THREE_VIEW_SYNC_WINDOW_MS,
+          coordinateSpace: "three_normalized_image_views",
+          calibrated: false,
+        },
         cameras: ([1, 2, 3] as CameraSlot[]).map((slot) => {
           const ids = [primaryId, secondaryId, tertiaryId];
           const sessions = [session, secondaryPoseSessionRef.current, tertiaryPoseSessionRef.current];
@@ -2191,6 +2271,13 @@ export default function Home() {
         3: { startSecond: -1, samples: [] },
       };
       lastPersonSeenByCameraRef.current = { 1: 0, 2: 0, 3: 0 };
+      globalTrackRef.current = { ...EMPTY_GLOBAL_TRACK };
+      globalObservationsRef.current = {
+        1: emptyCameraObservation(1),
+        2: emptyCameraObservation(2),
+        3: emptyCameraObservation(3),
+      };
+      setThreeViewStatus({ slots: [], present: false });
       cameraTrackingErrorRef.current = { 1: false, 2: false, 3: false };
       secondaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
       tertiaryHandsRef.current = { left: null, right: null, leftScore: 0, rightScore: 0 };
@@ -2243,7 +2330,6 @@ export default function Home() {
       setElapsedSeconds(0);
       setDetectedHands(0);
       setDetectedHandSides({ left: false, right: false });
-      setTargetLocked(false);
       setHeadDirectionLabel("머리 방향 미확인");
       setSessionCount((count) => count + 1);
       updatePoseStatus("searching");
@@ -2277,7 +2363,7 @@ export default function Home() {
   async function recordMotionDetections(sessionId: string, globalSessionId?: string) {
     try {
       const rawFrames = globalSessionId
-        ? await getGlobalSessionFrames(globalSessionId)
+        ? representativeThreeViewFrames(synchronizeThreeViewFrames(await getGlobalSessionCameraFrames(globalSessionId)))
         : await getSessionFrames(sessionId);
       const samples = motionSamplesFromRawFrames(rawFrames);
       const detections = detectMotionEvents(samples);
@@ -2302,9 +2388,14 @@ export default function Home() {
       const cameraStreams = globalSessionId
         ? await getGlobalSessionCameraFrames(globalSessionId)
         : [{ cameraSlot: 1 as const, frames: await getSessionFrames(sessionId) }];
+      const threeViewSamples = globalSessionId ? synchronizeThreeViewFrames(cameraStreams) : [];
       const rawFrames = globalSessionId
-        ? await getGlobalSessionFrames(globalSessionId)
+        ? representativeThreeViewFrames(threeViewSamples)
         : cameraStreams[0].frames;
+      if (globalSessionId && threeViewSamples.length === 0) {
+        toast.success("좌표는 저장했고, 3대 동시 관측 구간이 없어 라벨 후보는 만들지 않았어요");
+        return;
+      }
       const motionSlices = sliceTargetMotions(rawFrames);
       if (motionSlices.length === 0) {
         toast.success("기록은 저장했고, 별도의 동작 구간은 감지되지 않았어요");
@@ -2332,12 +2423,20 @@ export default function Home() {
 
       for (const motionSlice of motionSlices) {
         const episodeRecordedAt = sessionStartedAt + motionSlice.startMs;
+        const sliceSamples = threeViewSamples.filter((sample) =>
+          sample.timeMs >= motionSlice.startMs && sample.timeMs <= motionSlice.endMs,
+        );
         const bestCamera = cameraStreams
           .map((stream) => ({
             ...stream,
-            frames: stream.frames.filter((frame) => frame[0] >= motionSlice.startMs && frame[0] <= motionSlice.endMs),
+            frames: globalSessionId
+              ? sliceSamples.map((sample) => sample.frames[stream.cameraSlot])
+              : stream.frames.filter((frame) => frame[0] >= motionSlice.startMs && frame[0] <= motionSlice.endMs),
           }))
-          .sort((a, b) => b.frames.filter((frame) => frame[1] === 1).length - a.frames.filter((frame) => frame[1] === 1).length)[0];
+          .sort((a, b) =>
+            b.frames.reduce((score, frame) => score + frameQuality(frame), 0) -
+            a.frames.reduce((score, frame) => score + frameQuality(frame), 0),
+          )[0];
         const analysisFrames = bestCamera?.frames?.length ? bestCamera.frames : motionSlice.frames;
         const features = extractObservationFeatures(
           analysisFrames,
@@ -2400,7 +2499,8 @@ export default function Home() {
           taskLabel: bestCandidate?.taskLabel ?? "미분류",
           taskConfidence: bestCandidate?.confidence ?? 0,
         };
-        const qualityReasons = [] as Array<"insufficient_frames" | "missing_zone" | "missing_time_context" | "unknown_motion">;
+        const qualityReasons = [] as Array<"insufficient_frames" | "missing_zone" | "missing_time_context" | "unknown_motion" | "ground_truth_review">;
+        if (globalSessionId) qualityReasons.push("ground_truth_review");
         if (analysisFrames.length < 6) qualityReasons.push("insufficient_frames");
         if (!features.dominantZone) qualityReasons.push("missing_zone");
         if (labelOptions.length === 0) qualityReasons.push("missing_time_context");
@@ -2409,10 +2509,21 @@ export default function Home() {
         episode = {
           ...episode,
           globalSessionId,
+          ...(globalSessionId ? {
+            multiViewEvidence: {
+              cameraSlots: [1, 2, 3] as [1, 2, 3],
+              synchronizedSampleCount: sliceSamples.length,
+              maxSkewMs: sliceSamples.reduce((max, sample) => Math.max(max, sample.skewMs), 0),
+              coordinateSpace: "three_normalized_image_views" as const,
+              calibrated: false as const,
+            },
+          } : {}),
           ...(actionReview ? {
             actionReview,
             disposition: "quarantined" as const,
-            dispositionReason: "업무 라벨이 애매해 개발자 검토 전까지 기준선 학습에서 보류했어요.",
+            dispositionReason: globalSessionId
+              ? "3시점 스켈레톤을 검토해 정답 라벨을 확정할 때까지 기준선 학습에서 보류했어요."
+              : "업무 라벨이 애매해 개발자 검토 전까지 기준선 학습에서 보류했어요.",
           } : {}),
         };
         if (actionReview) pendingReviewCount += 1;
@@ -2512,9 +2623,11 @@ export default function Home() {
     if (secondaryVideoRef.current) secondaryVideoRef.current.srcObject = null;
     if (tertiaryVideoRef.current) tertiaryVideoRef.current.srcObject = null;
     if (processingVideoRef.current) processingVideoRef.current.srcObject = null;
+    if (secondaryProcessingVideoRef.current) secondaryProcessingVideoRef.current.srcObject = null;
+    if (tertiaryProcessingVideoRef.current) tertiaryProcessingVideoRef.current.srcObject = null;
     setCameraStatus("idle");
     poseTargetLockRef.current = null;
-    setTargetLocked(false);
+    setThreeViewStatus({ slots: [], present: false });
     setElapsedSeconds(0);
     setCameraMessage("카메라 연결을 멈췄어요.");
     if (notify) toast.success("좌표 기록을 안전하게 저장하고 카메라를 종료했어요");
@@ -2545,8 +2658,8 @@ export default function Home() {
       toast.success("먼저 카메라를 연결해 주세요");
       return;
     }
-    if (!landmarks || !head) {
-      toast.success("스켈레톤이 인식된 뒤 이벤트를 표시해 주세요");
+    if (!landmarks || !head || globalTrackRef.current.presence !== "present") {
+      toast.success("카메라 3대에서 동시에 스켈레톤이 확인된 뒤 이벤트를 표시해 주세요");
       return;
     }
     const event: TimelineEvent = {
@@ -2827,7 +2940,7 @@ export default function Home() {
       return;
     }
     if (cameraStatus === "connected") await stopCamera();
-    await startCamera(undefined, undefined, undefined, true);
+    await startCamera();
   }
 
   async function closeQuickMotionCamera() {
@@ -2843,6 +2956,10 @@ export default function Home() {
       toast.success("카메라 연결이 끝난 뒤 다시 눌러 주세요");
       return;
     }
+    if (globalTrackRef.current.presence !== "present") {
+      toast.success("카메라 3대에서 스켈레톤이 함께 확인된 뒤 시작해 주세요");
+      return;
+    }
     setLearnedMotionResult(null);
     setMotionCapture({
       sessionId: session.id,
@@ -2853,7 +2970,7 @@ export default function Home() {
 
   async function framesForMotionSample(sample: LearnedMotionSample) {
     const frames = sample.globalSessionId
-      ? await getGlobalSessionFrames(sample.globalSessionId)
+      ? representativeThreeViewFrames(synchronizeThreeViewFrames(await getGlobalSessionCameraFrames(sample.globalSessionId)))
       : await getSessionFrames(sample.sessionId);
     return frames.filter((frame) => frame[0] >= sample.startMs && frame[0] <= sample.endMs);
   }
@@ -2869,8 +2986,8 @@ export default function Home() {
     const sample: LearnedMotionSample = { ...motionCapture, endMs };
     setQuickMotionBusy(true);
     try {
-      await Promise.all([flushPoseFrames(1), flushPoseFrames(2)]);
-      await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current]);
+      await Promise.all([flushPoseFrames(1), flushPoseFrames(2), flushPoseFrames(3)]);
+      await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current, tertiaryPoseWriteQueueRef.current]);
       setMotionCapture(null);
 
       if (quickMotionMode === "training") {
@@ -3408,11 +3525,12 @@ export default function Home() {
       <video
         ref={processingVideoRef}
         className="processing-video"
-        hidden
         muted
         playsInline
         aria-hidden="true"
       />
+      <video ref={secondaryProcessingVideoRef} className="processing-video" muted playsInline aria-hidden="true" />
+      <video ref={tertiaryProcessingVideoRef} className="processing-video" muted playsInline aria-hidden="true" />
       <a className="skip-link" href="#main-content">본문으로 건너뛰기</a>
       <aside className="sidebar">
         <div className="brand" aria-label="메모리 가드">
@@ -4286,7 +4404,7 @@ export default function Home() {
                       <span><small>기록 속도</small><strong>카메라당 {MOTION_SAMPLE_RATE} FPS</strong></span>
                       <span><small>누적 프레임</small><strong>{poseStats.frames.toLocaleString()}</strong></span>
                       <span><small>전신 인식률</small><strong>{fullBodyRatio}%</strong></span>
-                      <span><small>예상 용량</small><strong>{formatBytes(poseStats.storageBytes)}</strong></span>
+                      <span><small>저장된 좌표 용량</small><strong>{formatBytes(storedMotionBytes)}</strong></span>
                     </div>
                     <div className="coordinate-actions">
                       <span>얼굴 특징·영상·음성 없이 동작 좌표만 이 브라우저에 저장 · 세션 {sessionCount}개</span>
@@ -4688,7 +4806,7 @@ export default function Home() {
               {interfaceMode === "developer" && (
                 <button type="button" onClick={() => setView("today")}>
                   <span aria-hidden="true">⌁</span>
-                  <span><strong>웹캠 3대 기능 테스트</strong><small>카메라별 재생과 시공간 인계 분석을 확인해요</small></span>
+                  <span><strong>웹캠 3대 기능 테스트</strong><small>한 작업 공간의 3시점 동시 관측을 확인해요</small></span>
                   <i aria-hidden="true">›</i>
                 </button>
               )}
@@ -4697,7 +4815,7 @@ export default function Home() {
             {interfaceMode === "developer" && (
               <section className="settings-note">
                 <strong>개발자 모드 안내</strong>
-                <p>현재는 외장 웹캠 3대를 이용한 동작 테스트와 카메라 간 인계 검증을 지원해요. IoT·POS 연동은 이후 단계에서 추가합니다.</p>
+                <p>외장 웹캠 3대가 같은 좁은 작업 공간을 서로 다른 각도에서 비추도록 설치해 주세요. 세 시점의 스켈레톤이 함께 확인된 구간을 라벨링에 사용합니다.</p>
               </section>
             )}
 
@@ -5069,6 +5187,7 @@ export default function Home() {
             <span className="section-kicker">외장 웹캠 3대 · 영상 저장 안 함</span>
             <h2 id="multi-camera-modal-title">카메라 화면 확인</h2>
             <p>{cameraMessage}</p>
+            <p>세 카메라가 같은 좁은 작업 공간을 서로 다른 각도에서 비추도록 맞춰 주세요. 사람 판정은 세 시점에서 스켈레톤이 함께 확인될 때만 표시됩니다.</p>
           </div>
 
           {availableCameras.length > 0 && (
@@ -5129,7 +5248,11 @@ export default function Home() {
                 <canvas ref={overlayCanvasRef} className="pose-overlay" aria-label="실시간 전신 스켈레톤" />
               </div>
               <div className="tracking-readout">
-                <span className={targetLocked ? "target-locked" : ""}>대상 · {targetLocked ? "고정됨" : "찾는 중"}</span>
+                <span className={threeViewStatus.present ? "target-locked" : ""}>
+                  {threeViewStatus.present
+                    ? "사람 있음 · 3/3 시점 확인"
+                    : `사람 판정 대기 · ${threeViewStatus.slots.length}/3 시점 관측 중`}
+                </span>
                 <span>머리 · {headDirectionLabel}</span>
                 <span
                   className={detectedHands > 0 ? "hands-found hand-status" : "hand-status"}
@@ -5159,7 +5282,7 @@ export default function Home() {
               <section className="secondary-camera-frame" aria-label="카메라 2 화면">
                 <div className="secondary-camera-heading">
                   <span>카메라 2</span>
-                  <small>공통 대상 · 좌표 기록</small>
+                  <small>같은 작업 공간 · 다른 각도</small>
                 </div>
                 <div className="camera-secondary-view">
                   <video ref={secondaryVideoRef} muted playsInline aria-label="카메라 2 영상" />
@@ -5172,7 +5295,7 @@ export default function Home() {
               <section className="secondary-camera-frame" aria-label="카메라 3 화면">
                 <div className="secondary-camera-heading">
                   <span>카메라 3</span>
-                  <small>공통 대상 · 좌표 기록</small>
+                  <small>같은 작업 공간 · 다른 각도</small>
                 </div>
                 <div className="camera-secondary-view">
                   <video ref={tertiaryVideoRef} muted playsInline aria-label="카메라 3 영상" />
@@ -5215,25 +5338,25 @@ export default function Home() {
       >
         <button className="modal-close" type="button" onClick={() => void closeQuickMotionCamera()} aria-label="촬영 창 닫기">×</button>
         <div className="quick-motion-camera-heading">
-          <span className="section-kicker">1번 웹캠 · 영상 저장 안 함</span>
+          <span className="section-kicker">3시점 좌표 · 영상 저장 안 함</span>
           <h2 id="quick-motion-camera-title">
             {quickMotionMode === "training"
               ? `${draftMotionSamples.length + 1}번째 동작을 보여주세요`
               : "판별할 동작을 보여주세요"}
           </h2>
-          <p>얼굴·어깨·양팔이 화면에 들어오도록 선 뒤, 시작 버튼을 누르세요.</p>
+          <p>세 카메라가 같은 작업 공간을 다른 각도에서 비추게 한 뒤, 3/3 시점이 확인되면 시작하세요.</p>
         </div>
 
         <div className={`quick-motion-camera-preview status-${cameraStatus}`}>
-          <video ref={quickMotionVideoRef} muted playsInline aria-label="1번 웹캠 동작 촬영 영상" />
+          <video ref={quickMotionVideoRef} muted playsInline aria-label="카메라 1 동작 미리보기" />
           {cameraStatus !== "connected" && (
             <div className="quick-motion-camera-waiting">
               <strong>
                 {cameraStatus === "error"
-                  ? "1번 웹캠을 연결하지 못했어요"
+                  ? "카메라를 연결하지 못했어요"
                   : cameraStatus === "requesting"
-                    ? <ShimmerText>1번 웹캠을 준비하고 있어요</ShimmerText>
-                    : "1번 웹캠을 준비하고 있어요"}
+                    ? <ShimmerText>카메라 3대를 준비하고 있어요</ShimmerText>
+                    : "카메라 3대를 준비하고 있어요"}
               </strong>
               <span>{cameraMessage}</span>
             </div>
@@ -5241,7 +5364,7 @@ export default function Home() {
           {cameraStatus === "connected" && (
             <div className="quick-motion-camera-status">
               <span className={motionCapture ? "recording" : ""}>{motionCapture ? "● 좌표 기록 중" : "촬영 준비됨"}</span>
-              <span>{targetLocked ? "상반신 인식됨" : "분석 대상 찾는 중"}</span>
+              <span>{threeViewStatus.present ? "3/3 시점 인식됨" : `${threeViewStatus.slots.length}/3 시점 관측 중`}</span>
             </div>
           )}
         </div>
@@ -5267,7 +5390,7 @@ export default function Home() {
             className={motionCapture ? "capture-stop-button" : "primary-button"}
             type="button"
             onClick={() => motionCapture ? void finishQuickMotionCapture() : startQuickMotionCapture()}
-            disabled={cameraStatus !== "connected" || quickMotionBusy}
+            disabled={cameraStatus !== "connected" || quickMotionBusy || (!motionCapture && !threeViewStatus.present)}
           >
             {quickMotionBusy ? "좌표 확인 중…" : motionCapture ? "이번 동작 완료" : "녹화 시작"}
           </button>
@@ -5685,6 +5808,9 @@ export default function Home() {
                     .map((reason) => ACTION_AMBIGUITY_REASON_LABELS[reason])
                     .join(" · ")}
                 </p>
+                {selectedReviewEpisode.multiViewEvidence && (
+                  <small>3개 각도 동기화 · {selectedReviewEpisode.multiViewEvidence.synchronizedSampleCount}개 좌표 표본 · 카메라 탭을 같은 시각으로 비교하세요</small>
+                )}
                 <small>
                   {selectedReviewEpisode.features.dominantZone
                     ? `감지 구역 · ${occupationTemplate.zones.find((zone) => zone.id === selectedReviewEpisode.features.dominantZone)?.label ?? selectedReviewEpisode.features.dominantZone}`

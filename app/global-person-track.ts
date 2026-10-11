@@ -1,5 +1,5 @@
 import type { NormalizedLandmarkLike } from "./motion-analysis";
-import type { CameraSlot } from "./multi-camera";
+import { THREE_VIEW_SYNC_WINDOW_MS, type CameraSlot } from "./multi-camera";
 
 /**
  * Single global person layer.
@@ -105,6 +105,12 @@ export type ObservationSummary = {
 };
 
 export type GlobalPresence = "absent" | "provisional" | "present" | "coasting";
+
+export type PresencePolicy = {
+  /** Capture mode can require simultaneous evidence from all three cameras. */
+  requiredCameraSlots?: readonly CameraSlot[];
+  maxObservationAgeMs?: number;
+};
 
 export type GlobalPersonTrack = {
   id: string;
@@ -361,6 +367,7 @@ export function updateGlobalPersonTrack(
   timestamp: number,
   newId: () => string = () => `person-${Math.round(timestamp)}`,
   tuning: TrackingTuning = DEFAULT_TUNING,
+  policy: PresencePolicy = {},
 ): GlobalPersonTrack {
   const hadTrack = previous.presence !== "absent";
   const summaries = observations.map((observation) => summarize(observation, tuning));
@@ -407,7 +414,7 @@ export function updateGlobalPersonTrack(
       updatedAt: timestamp,
       observations: summaries,
       observingCameras: [],
-      presence: previous.presence === "present" || previous.presence === "coasting"
+      presence: policy.requiredCameraSlots?.length ? "provisional" : previous.presence === "present" || previous.presence === "coasting"
         ? sinceObserved <= GLOBAL_COAST_MS ? "coasting" : "present"
         : "provisional",
       handoffFromCamera: null,
@@ -468,14 +475,25 @@ export function updateGlobalPersonTrack(
     return best?.joint ?? missingJoint(index);
   });
 
-  const observingCameras = usable.map(({ observation }) => observation.cameraSlot).sort();
+  const maxObservationAgeMs = policy.maxObservationAgeMs ?? THREE_VIEW_SYNC_WINDOW_MS;
+  const freshConfirmed = usable.filter(({ observation }) =>
+    observation.confirmed &&
+    observation.timestamp <= timestamp &&
+    timestamp - observation.timestamp <= maxObservationAgeMs,
+  );
+  const observingCameras = (policy.requiredCameraSlots?.length ? freshConfirmed : usable)
+    .map(({ observation }) => observation.cameraSlot).sort();
   const sameTrack = hadTrack;
   const consecutiveFrames = sameTrack ? previous.consecutiveFrames + 1 : 1;
-  const presence: GlobalPresence =
-    previous.presence === "present" || previous.presence === "coasting" ||
-    consecutiveFrames >= tuning.confirmationFrames
-      ? "present"
-      : "provisional";
+  const allRequiredCamerasObserved = policy.requiredCameraSlots?.length
+    ? policy.requiredCameraSlots.every((slot) => observingCameras.includes(slot))
+    : false;
+  const presence: GlobalPresence = policy.requiredCameraSlots?.length
+    ? allRequiredCamerasObserved ? "present" : "provisional"
+    : previous.presence === "present" || previous.presence === "coasting" ||
+      consecutiveFrames >= tuning.confirmationFrames
+        ? "present"
+        : "provisional";
   const handedOff = sameTrack &&
     previous.coordinateFrame !== null &&
     previous.coordinateFrame !== primary.observation.cameraSlot;

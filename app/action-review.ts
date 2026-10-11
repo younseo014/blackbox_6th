@@ -14,7 +14,8 @@ export type ObservationQualityReason =
   | "missing_zone"
   | "missing_time_context"
   | "outside_work_context"
-  | "unknown_motion";
+  | "unknown_motion"
+  | "ground_truth_review";
 
 export type ActionAmbiguityReason =
   | "no_candidates"
@@ -71,6 +72,7 @@ export const ACTION_AMBIGUITY_REASON_LABELS: Record<ActionAmbiguityReason, strin
   missing_time_context: "시간대 업무 정보 없음",
   outside_work_context: "등록된 업무 맥락과 불일치",
   unknown_motion: "학습되지 않은 동작",
+  ground_truth_review: "3시점 정답 라벨 검토 필요",
 };
 
 function clampConfidence(value: number) {

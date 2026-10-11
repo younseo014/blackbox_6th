@@ -1,4 +1,5 @@
 import { mergeCameraFrameStreams, type CameraSlot } from "./multi-camera";
+import { MOTION_CODEC_FRAME_VALUES, decodeMotionChunk, encodeMotionChunk, type MotionChunkCodec } from "./motion-chunk-codec";
 import {
   createDataFolderZip,
   safeDataPathSegment,
@@ -116,6 +117,13 @@ export type CaptureManifestRecord = {
   timeZone?: string;
   utcOffsetMinutes?: number;
   expectedCameraSlots: CameraSlot[];
+  multiViewCapture?: {
+    arrangement: "shared_workspace_three_angles";
+    personConfirmation: "three_synchronized_skeletons";
+    synchronizationWindowMs: number;
+    coordinateSpace: "three_normalized_image_views";
+    calibrated: false;
+  };
   cameras: Array<{
     slot: CameraSlot;
     logicalCameraId: string;
@@ -172,6 +180,8 @@ export type MotionChunkRecord = {
   startFrame: number;
   frameCount: number;
   createdAt: number;
+  /** Missing on pre-optimization Float32 chunks. */
+  codec?: MotionChunkCodec;
   data: ArrayBuffer;
 };
 
@@ -369,20 +379,26 @@ export async function appendMotionChunk(
   fullBodyFrames: number,
   handDetectedFrames: number,
 ) {
+  if (MOTION_FRAME_STRIDE !== MOTION_CODEC_FRAME_VALUES || data.length % MOTION_FRAME_STRIDE !== 0) {
+    throw new Error("Invalid motion frame length.");
+  }
+  // Finish encoding before opening an IndexedDB transaction: transactions
+  // become inactive if an asynchronous compression step runs inside them.
+  const encoded = await encodeMotionChunk(data);
   const database = await openMotionDatabase();
   const transaction = database.transaction(
     [SESSION_STORE, CHUNK_STORE],
     "readwrite",
   );
   const frameCount = data.length / MOTION_FRAME_STRIDE;
-  const storedBuffer = data.buffer.slice(0);
   const chunk: MotionChunkRecord = {
     id: `${session.id}:${startFrame}`,
     sessionId: session.id,
     startFrame,
     frameCount,
     createdAt: Date.now(),
-    data: storedBuffer,
+    codec: encoded.codec,
+    data: encoded.data,
   };
   const updatedSession: MotionSessionRecord = {
     ...session,
@@ -391,7 +407,7 @@ export async function appendMotionChunk(
     fullBodyFrameCount: session.fullBodyFrameCount + fullBodyFrames,
     handDetectedFrameCount:
       session.handDetectedFrameCount + handDetectedFrames,
-    storageBytes: session.storageBytes + storedBuffer.byteLength,
+    storageBytes: session.storageBytes + encoded.data.byteLength,
   };
   transaction.objectStore(CHUNK_STORE).put(chunk);
   transaction.objectStore(SESSION_STORE).put(updatedSession);
@@ -440,7 +456,7 @@ export async function getSessionFrames(sessionId: string): Promise<number[][]> {
   const chunks = await getMotionChunks(sessionId);
   const frames: number[][] = [];
   for (const chunk of chunks) {
-    const values = new Float32Array(chunk.data);
+    const values = await decodeMotionChunk(chunk.codec, chunk.data, chunk.frameCount);
     for (let offset = 0; offset < values.length; offset += MOTION_FRAME_STRIDE) {
       frames.push(Array.from(values.subarray(offset, offset + MOTION_FRAME_STRIDE)));
     }
@@ -686,7 +702,7 @@ async function buildMotionSessionDataset(session: MotionSessionRecord) {
     : [];
   const frames: number[][] = [];
   for (const chunk of chunks) {
-    const values = new Float32Array(chunk.data);
+    const values = await decodeMotionChunk(chunk.codec, chunk.data, chunk.frameCount);
     for (let offset = 0; offset < values.length; offset += MOTION_FRAME_STRIDE) {
       frames.push(
         Array.from(values.subarray(offset, offset + MOTION_FRAME_STRIDE)),
@@ -706,6 +722,8 @@ async function buildMotionSessionDataset(session: MotionSessionRecord) {
     schema: {
       sample_rate_hz: MOTION_SAMPLE_RATE,
       coordinate_space: "normalized_image",
+      source_storage_codecs: [...new Set(chunks.map((chunk) => chunk.codec ?? "f32-v1"))],
+      coordinate_encoding_note: "New sessions quantize normalized coordinates to 16-bit fixed point before gzip. Out-of-range values remain Float32. Exported frames are decoded numbers.",
       mirrored_preview: true,
       time_reference: {
         session_started_at_epoch_ms: session.startedAt,

@@ -1,4 +1,5 @@
 export type CameraSlot = 1 | 2 | 3;
+export const THREE_VIEW_SYNC_WINDOW_MS = 500;
 
 export type CameraDeviceIdentity = Pick<MediaDeviceInfo, "deviceId" | "groupId" | "label">;
 
@@ -77,6 +78,60 @@ export type CameraFrameStream = {
   frames: number[][];
 };
 
+export type ThreeViewSample = {
+  timeMs: number;
+  frames: Record<CameraSlot, number[]>;
+  skewMs: number;
+};
+
+/** Keeps only time points with a detected skeleton from every camera. */
+export function synchronizeThreeViewFrames(
+  streams: CameraFrameStream[],
+  sampleWindowMs = 100,
+  maxAgeMs = THREE_VIEW_SYNC_WINDOW_MS,
+): ThreeViewSample[] {
+  const slots = [1, 2, 3] as const;
+  const ordered = slots.map((slot) => streams.find((stream) => stream.cameraSlot === slot)?.frames
+    .filter((frame) => Number.isFinite(frame[0]))
+    .sort((a, b) => a[0] - b[0]) ?? []);
+  if (ordered.some((frames) => frames.length === 0)) return [];
+  const start = Math.ceil(Math.max(...ordered.map((frames) => frames[0][0])) / sampleWindowMs) * sampleWindowMs;
+  const end = Math.min(...ordered.map((frames) => frames[frames.length - 1][0]));
+  const positions = [-1, -1, -1];
+  const samples: ThreeViewSample[] = [];
+  for (let timeMs = start; timeMs <= end; timeMs += sampleWindowMs) {
+    const selected = slots.map((slot, index) => {
+      const frames = ordered[index];
+      while (positions[index] + 1 < frames.length && frames[positions[index] + 1][0] <= timeMs) {
+        positions[index] += 1;
+      }
+      const frame = frames[positions[index]];
+      return frame && frame[1] === 1 && timeMs - frame[0] <= maxAgeMs ? frame : null;
+    });
+    if (selected.some((frame) => frame === null)) continue;
+    const [first, second, third] = selected as [number[], number[], number[]];
+    const times = selected.map((frame) => frame![0]);
+    const skewMs = Math.max(...times) - Math.min(...times);
+    if (skewMs > maxAgeMs) continue;
+    samples.push({ timeMs, frames: { 1: first, 2: second, 3: third }, skewMs });
+  }
+  return samples;
+}
+
+/** Representative 2D track for existing motion analysis; all three raw views remain available. */
+export function representativeThreeViewFrames(samples: ThreeViewSample[]): number[][] {
+  const streams: CameraFrameStream[] = ([1, 2, 3] as CameraSlot[]).map((cameraSlot) => ({ cameraSlot, frames: [] }));
+  for (const sample of samples) {
+    const best = ([1, 2, 3] as CameraSlot[]).reduce((winner, slot) =>
+      frameQuality(sample.frames[slot]) > frameQuality(sample.frames[winner]) ? slot : winner,
+    1 as CameraSlot);
+    const frame = [...sample.frames[best]];
+    frame[0] = sample.timeMs;
+    streams[best - 1].frames.push(frame);
+  }
+  return mergeCameraFrameStreams(streams);
+}
+
 export type CameraHandoff = {
   from: CameraSlot;
   to: CameraSlot;
@@ -102,7 +157,7 @@ export function createGlobalCaptureSession(cameras: Omit<CameraCalibration, "tim
   };
 }
 
-function frameQuality(frame: number[]) {
+export function frameQuality(frame: number[]) {
   if (frame[1] !== 1) return 0;
   let visibility = 0;
   for (let offset = 13; offset < 98; offset += 4) visibility += frame[offset] ?? 0;

@@ -16,22 +16,23 @@
     "test": "npm run build && node --test tests/rendered-html.test.mjs && npm run test:unit",
     "test:unit": "node --import tsx --test tests/motion-analysis.test.ts tests/care-metrics.test.ts tests/demo-personas.test.ts tests/pose-store.test.ts tests/demo-motion.test.ts tests/motion-detection.test.ts tests/motion-segmentation.test.ts tests/observation-engine.test.ts tests/pose-target-lock.test.ts tests/person-presence-gate.test.ts tests/multi-camera.test.ts tests/custom-motion-training.test.ts tests/epfl-posture-classifier.test.ts tests/action-review.test.ts tests/work-context-inference.test.ts tests/global-person-track.test.ts tests/pose-scheduler.test.ts tests/tracking-eval.test.ts tests/pose-model-adapter.test.ts",
     "test:e2e": "npm run build && node tests/e2e/run-personas.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern dist-desktop --ignore-pattern desktop/dist-desktop --ignore-pattern release --ignore-pattern .next --ignore-pattern public/mediapipe-wasm",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern dist-desktop --ignore-pattern desktop/dist-desktop --ignore-pattern release --ignore-pattern .next --ignore-pattern public/mediapipe-wasm --ignore-pattern public/ort",
     "deploy": "npm run build && wrangler deploy -c dist/server/wrangler.json",
-    "eval:tracking": "tsx scripts/run-tracking-eval.ts"
+    "eval:tracking": "tsx scripts/run-tracking-eval.ts",
+    "prepare:yolox": "node scripts/prepare-yolox-runtime.mjs"
   },
   "dependencies": {
     "@base-ui-components/react": "^1.0.0-rc.0",
     "@mediapipe/tasks-vision": "^1.0.1",
     "@number-flow/react": "^0.6.2",
     "next": "16.2.6",
+    "onnxruntime-web": "^1.30.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "sonner": "^2.0.8"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
-    "@tailwindcss/postcss": "4.2.1",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",

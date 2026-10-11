@@ -20,9 +20,8 @@ import { detectMotionEvents, type DetectedMotionEvent } from "./motion-detection
 import type { ObservationMode } from "./observation-engine";
 import { saveAnalysisFeedback } from "./observation-store";
 import {
-  analyzeCameraContinuity,
   cameraPresenceSegments,
-  type CameraContinuityReport,
+  synchronizeThreeViewFrames,
   type CameraFrameStream,
   type CameraSlot,
 } from "./multi-camera";
@@ -157,16 +156,20 @@ export function SessionReplayPanel({
     return () => { cancelled = true; };
   }, [recordedGlobalSessionId, recordedSessionId, recordedWindowStart, recordedWindowEnd]);
 
-  const continuityReport = useMemo<CameraContinuityReport | null>(
-    () => cameraStreams.length > 1 ? analyzeCameraContinuity(cameraStreams) : null,
+  const threeViewSamples = useMemo(
+    () => synchronizeThreeViewFrames(cameraStreams),
     [cameraStreams],
   );
   function selectCamera(slot: CameraSlot) {
     const stream = cameraStreams.find((item) => item.cameraSlot === slot);
     if (!stream) return;
+    const currentTime = frames?.[frameIndex]?.relativeTimeMs ?? 0;
+    const nearestIndex = stream.frames.reduce((best, frame, index) =>
+      Math.abs(frame[0] - currentTime) < Math.abs(stream.frames[best][0] - currentTime) ? index : best,
+    0);
     setSelectedCameraSlot(slot);
     setFrames(stream.frames.map(parseSessionFrame));
-    setFrameIndex(0);
+    setFrameIndex(nearestIndex);
     setPlaying(false);
   }
 
@@ -317,24 +320,23 @@ export function SessionReplayPanel({
           </div>
         )}
 
-        {showMultiCameraDiagnostics && continuityReport && (
-          <section className={`continuity-check ${continuityReport.status}`} aria-labelledby="continuity-check-title">
+        {showMultiCameraDiagnostics && cameraStreams.length > 1 && (
+          <section className={`continuity-check ${threeViewSamples.length ? "pass" : "warning"}`} aria-labelledby="continuity-check-title">
             <div className="continuity-check-heading">
               <div>
                 <span>개발자 검증</span>
                 <h3 id="continuity-check-title">
-                  {continuityReport.status === "pass" ? "카메라 전환이 연속적으로 연결됐어요" : continuityReport.status === "warning" ? "카메라 사이 관측 공백을 확인해 주세요" : "카메라 사이로 이동해 인계를 테스트해 주세요"}
+                  {threeViewSamples.length ? "같은 작업 공간을 3개 각도에서 관측했어요" : "3대 동시 스켈레톤 관측을 확인해 주세요"}
                 </h3>
               </div>
-              <strong>{continuityReport.status === "pass" ? "통과" : continuityReport.status === "warning" ? "주의" : "대기"}</strong>
+              <strong>{threeViewSamples.length ? "3/3 확인" : "대기"}</strong>
             </div>
-            <p>각 카메라 리플레이는 섞지 않고 분리했습니다. 실제 동작 분석에만 공통 시간축·방향·이동 보정을 적용합니다.</p>
+            <p>세 카메라 좌표를 같은 시간축으로 맞췄습니다. 카메라 탭을 바꾸면 같은 시각의 다른 각도를 보여줍니다.</p>
             <dl className="continuity-facts">
               <div><dt>공통 시간축</dt><dd>동일 기준</dd></div>
-              <div><dt>카메라 인계</dt><dd>{continuityReport.handoffs.length}회</dd></div>
-              <div><dt>동시 관측</dt><dd>{continuityReport.overlapSamples}프레임</dd></div>
-              <div><dt>가장 긴 관측 공백</dt><dd>{(continuityReport.longestBlindGapMs / 1000).toFixed(1)}초</dd></div>
-              <div><dt>시점 방향 보정</dt><dd>{continuityReport.facingCorrectedFrames}프레임</dd></div>
+              <div><dt>3시점 동시 관측</dt><dd>{threeViewSamples.length}표본</dd></div>
+              <div><dt>최대 시차</dt><dd>{threeViewSamples.reduce((max, sample) => Math.max(max, sample.skewMs), 0)}ms</dd></div>
+              <div><dt>좌표 유형</dt><dd>카메라별 2D</dd></div>
             </dl>
             <div className="continuity-tracks" aria-label="카메라별 작업자 인식 시간축">
               {cameraStreams.map((stream) => (
@@ -348,7 +350,7 @@ export function SessionReplayPanel({
                 </div>
               ))}
             </div>
-            <small className="continuity-note">두 줄이 겹치면 동시 관측, 한 줄에서 다른 줄로 이어지면 카메라 인계입니다. 8초가 넘는 공백은 주의로 표시합니다.</small>
+            <small className="continuity-note">3D 공간 좌표를 얻으려면 카메라 보정이 필요합니다. 현재 라벨 검토에는 동기화된 세 각도의 2D 좌표를 사용합니다.</small>
           </section>
         )}
 

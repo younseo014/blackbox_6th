@@ -73,3 +73,6 @@ next-env.d.ts
 /data/eval-scenarios/
 /models/rtmw/
 /models/yolox/
+/public/models/yolox_m.onnx
+/public/models/yolox_tiny.onnx
+/public/ort/

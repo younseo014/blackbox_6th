@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateEventMotion } from "../app/demo-motion.ts";
 import { compareSkeletonMotions } from "../app/motion-classifier.ts";
-import { analyzeCameraContinuity, isExternalCamera, listCameraCandidates, mergeCameraFrameStreams, selectExternalCameraSlots } from "../app/multi-camera.ts";
+import { analyzeCameraContinuity, isExternalCamera, listCameraCandidates, mergeCameraFrameStreams, representativeThreeViewFrames, selectExternalCameraSlots, synchronizeThreeViewFrames } from "../app/multi-camera.ts";
 import { BODY_LANDMARK_COUNT, HAND_LANDMARK_COUNT, MOTION_FRAME_STRIDE } from "../app/pose-store.ts";
 
 function frame(timeMs: number, { body = true, full = true, hands = 0, centerX = 0.5, facing = "front" } = {}) {
@@ -33,6 +33,21 @@ test("two cameras become one owner timeline without duplicate frames", () => {
   assert.equal(merged[1][7], 1, "the clearer second-camera observation should win");
   assert.equal(merged[2][2], 1, "full-body observation should beat a partial duplicate");
   assert.equal(merged[1][10 + 12 * 4], 0.5, "camera handoff should remove the image-coordinate jump");
+});
+
+test("labeling samples contain synchronized detected frames from all three views", () => {
+  const streams = [
+    { cameraSlot: 1 as const, frames: [frame(0), frame(100), frame(200), frame(300)] },
+    { cameraSlot: 2 as const, frames: [frame(30), frame(130), frame(230), frame(330)] },
+    { cameraSlot: 3 as const, frames: [frame(60), frame(160, { body: false }), frame(260), frame(360)] },
+  ];
+  const samples = synchronizeThreeViewFrames(streams, 100, 100);
+  assert.deepEqual(samples.map((sample) => sample.timeMs), [100, 300]);
+  assert.deepEqual(samples[0].frames[1][0], 100);
+  assert.deepEqual(samples[0].frames[2][0], 30);
+  assert.deepEqual(samples[0].frames[3][0], 60);
+  assert.deepEqual(representativeThreeViewFrames(samples).map((item) => item[0]), [100, 300]);
+  assert.deepEqual(synchronizeThreeViewFrames(streams.slice(0, 2)), []);
 });
 
 test("camera handoff canonicalizes front/back shoulder orientation", () => {

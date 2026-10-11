@@ -100,6 +100,15 @@ test("createActionReview only creates metadata for ambiguous episodes", () => {
   assert.equal(createActionReview(episode({ taskConfidence: 0.9 })), null);
 });
 
+test("three-view data collection holds even a confident candidate for ground-truth review", () => {
+  const pending = createActionReview(episode({ taskConfidence: 0.9 }), {
+    candidates: [{ taskType: "DRINK_PREP", taskLabel: "음료 제조", confidence: 0.9 }],
+    qualityReasons: ["ground_truth_review"],
+  });
+  assert.equal(pending?.status, "pending");
+  assert.deepEqual(pending?.reasons, ["ground_truth_review"]);
+});
+
 test("an observation without registered candidates stays unclassified", () => {
   const unclassified = episode({
     taskType: "UNCLASSIFIED",
