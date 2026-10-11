@@ -1,0 +1,8 @@
+{
+  "name": "memory-guard-desktop",
+  "version": "0.1.0",
+  "description": "메모리 가드 Windows 데스크톱 앱",
+  "author": "Memory Guard",
+  "private": true,
+  "main": "main.mjs"
+}

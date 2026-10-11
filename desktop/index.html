@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' data: blob:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="1인 사업자의 업무 흐름을 기록하고 비교하는 로컬 관찰 도구" />
+    <title>메모리 가드 | 매장 안전 스마트 케어</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/renderer.tsx"></script>
+  </body>
+</html>

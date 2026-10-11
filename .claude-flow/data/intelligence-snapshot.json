@@ -1000,5 +1000,71 @@
         "accessCount": 0
       }
     ]
+  },
+  {
+    "timestamp": 1790098382644,
+    "nodes": 6,
+    "edges": 10,
+    "pageRankSum": 1,
+    "confidences": [
+      0.44,
+      0.7000000000000002,
+      0.7000000000000002,
+      0.7000000000000002,
+      0.7000000000000002,
+      0.7000000000000002
+    ],
+    "accessCounts": [
+      0,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "topPatterns": [
+      {
+        "id": "insight-1789350752483-0vng",
+        "summary": "Frequently edited: DESIGN.md (3x)",
+        "confidence": 0.7000000000000002,
+        "pageRank": 0.3699593019001777,
+        "accessCount": 4
+      },
+      {
+        "id": "insight-1789016484400-iqbl",
+        "summary": "Frequently edited: globals.css (3x)",
+        "confidence": 0.7000000000000002,
+        "pageRank": 0.19997804345602838,
+        "accessCount": 4
+      },
+      {
+        "id": "insight-1789006052149-x69i",
+        "summary": "Frequently edited: observation-engine.ts (6x)",
+        "confidence": 0.7000000000000002,
+        "pageRank": 0.14033546603447106,
+        "accessCount": 4
+      },
+      {
+        "id": "insight-1789006052149-d1yv",
+        "summary": "Frequently edited: motion-classifier.ts (3x)",
+        "confidence": 0.7000000000000002,
+        "pageRank": 0.10935229648623004,
+        "accessCount": 4
+      },
+      {
+        "id": "insight-1789006052149-bns2",
+        "summary": "Frequently edited: page.tsx (16x)",
+        "confidence": 0.7000000000000002,
+        "pageRank": 0.0901874460615465,
+        "accessCount": 4
+      },
+      {
+        "id": "mem-feedback_functional_scope_only-----0",
+        "summary": "---",
+        "confidence": 0.44,
+        "pageRank": 0.0901874460615465,
+        "accessCount": 0
+      }
+    ]
   }
 ]

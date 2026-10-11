@@ -204,6 +204,20 @@ npm run dev
 npm run build
 ```
 
+## Windows 실행 파일
+
+64비트 Windows 설치 파일은 macOS, Linux, Windows 개발 환경에서 다음
+명령으로 생성할 수 있습니다.
+
+```bash
+npm run build:win
+```
+
+산출물은 `release/MemoryGuard-Setup-<version>-x64.exe`에 생성됩니다.
+설치 후 첫 카메라 사용 시 Windows의 카메라 권한 요청을 허용해야 합니다.
+배포용 코드 서명 인증서를 설정하지 않은 빌드는 Windows SmartScreen 안내가
+나타날 수 있습니다.
+
 This starter does not use `wrangler.jsonc`.
 
 ## Included Shape
@@ -220,6 +234,8 @@ This starter does not use `wrangler.jsonc`.
 - `npm run test:unit`: fast unit tests for the pure motion/care-metrics logic
 - `npm run test:e2e`: Playwright persona tests (needs `npx playwright install
   chromium` once; see "메모리 가드" section above)
+- `npm run build:desktop`: Electron에 포함할 데스크톱 화면 빌드
+- `npm run build:win`: 64비트 Windows 설치 파일(`.exe`) 생성 (`release/`)
 
 ## Learn More
 
