@@ -71,7 +71,7 @@ export type ObservationEpisode = {
   pauseZScore: number | null;
   contextWeight: 0 | 1 | 2 | 3;
   baselineVersion: number;
-  source?: "real_learning" | "real_analysis";
+  source?: "real_learning" | "real_analysis" | "self_test" | "self_test_training";
   postureClassification?: {
     label: "STAND" | "WALK" | "BEND_DOWN";
     displayLabel: string;
