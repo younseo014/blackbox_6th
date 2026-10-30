@@ -47,6 +47,7 @@ export type ObservationFeatures = {
 export type ObservationEpisode = {
   id: string;
   sessionId: string;
+  selfTestParticipant?: string;
   globalSessionId?: string;
   multiViewEvidence?: {
     cameraSlots: [1, 2, 3];

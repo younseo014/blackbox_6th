@@ -1898,6 +1898,16 @@ input, select {
 .self-test-setup { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-radius: 10px; background: #f7f6f9; }
 .self-test-setup h3 { grid-column: 1 / -1; margin: 0; font-size: 13px; }
 .self-test-camera-setup { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 10px; }
+.self-test-session-setup { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.self-test-session-setup label { min-width: 0; display: grid; gap: 5px; color: var(--text-muted); font-size: 11px; font-weight: 700; }
+.self-test-session-setup input,
+.self-test-session-setup select { width: 100%; min-width: 0; min-height: 40px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); font-size: 12px; }
+.self-test-session-setup small { grid-column: 1 / -1; color: var(--text-muted); font-size: 10.5px; }
+.self-test-stage-control { min-width: 0; display: grid; gap: 5px; color: var(--text-muted); font-size: 11px; font-weight: 700; }
+.self-test-stage-control > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.self-test-stage-control button { min-width: 0; min-height: 40px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.self-test-stage-control button.active { border-color: var(--sky-ink); background: var(--sky-soft); color: var(--sky-ink); }
+.self-test-stage-control button:disabled { cursor: not-allowed; opacity: .6; }
 .self-test-camera-setup label { min-width: 0; display: grid; gap: 5px; color: var(--text-muted); font-size: 11px; font-weight: 700; line-height: 1.35; }
 .self-test-camera-setup select { width: 100%; min-width: 0; min-height: 40px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); font-size: 13px; }
 .self-test-camera-setup .primary-button { min-height: 40px; padding-inline: 12px; font-size: 12px; white-space: nowrap; }
@@ -1950,6 +1960,7 @@ input, select {
   .interface-developer .self-test-evaluation { padding-top: 8px; }
   .self-test-setup { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 12px; }
   .self-test-setup > * { grid-column: 1 / -1; }
+  .self-test-session-setup { grid-template-columns: minmax(0, 1fr); }
   .self-test-camera-setup { grid-template-columns: minmax(0, 1fr) auto; }
   .self-test-controls { grid-template-columns: 1fr; }
   .self-test-results-heading { align-items: flex-start; flex-direction: column; }

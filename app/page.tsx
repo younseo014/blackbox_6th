@@ -314,6 +314,7 @@ type SelfTestTrial = {
 };
 
 const SELF_TEST_STORAGE_KEY = "memory-guard-self-test-trials-v1";
+const SELF_TEST_LEARNED_KEY = "memory-guard-self-test-learned-v1";
 const SELF_TEST_ACTION_LABELS = ["컵 보충", "냉장 재료 꺼내기", "음료 재료 혼합", "테이블 닦기", "식기 세척"];
 const SELF_TEST_CAMERA_KEY = "memory-guard-self-test-camera-v1";
 const SELF_TEST_ZONE_KEY = "memory-guard-self-test-zone-grid-v1";
@@ -353,6 +354,19 @@ function loadSelfTestTrials(): SelfTestTrial[] {
   } catch {
     return [];
   }
+}
+
+function loadSelfTestLearnedMotions(): Record<string, LearnedMotionAction[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SELF_TEST_LEARNED_KEY) ?? "{}") as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, actions]) => Array.isArray(actions))
+      .map(([participant, actions]) => [participant, (actions as unknown[]).filter((action): action is LearnedMotionAction =>
+        Boolean(action) && typeof action === "object" && typeof (action as LearnedMotionAction).label === "string"
+        && Array.isArray((action as LearnedMotionAction).samples),
+      )]));
+  } catch { return {}; }
 }
 
 const DEFAULT_CLOSING_CHECKLIST: ClosingChecklistItem[] = [
@@ -805,6 +819,7 @@ export default function Home() {
   const [observationEpisodes, setObservationEpisodes] = useState<ObservationEpisode[]>([]);
   const [selfTestTrials, setSelfTestTrials] = useState<SelfTestTrial[]>(loadSelfTestTrials);
   const [selfTestParticipant, setSelfTestParticipant] = useState("");
+  const [selfTestLearnedMotions, setSelfTestLearnedMotions] = useState<Record<string, LearnedMotionAction[]>>(loadSelfTestLearnedMotions);
   const [selfTestStage, setSelfTestStage] = useState<"training" | "evaluation">("training");
   const [selfTestLabel, setSelfTestLabel] = useState(SELF_TEST_ACTION_LABELS[0]);
   const [selfTestCameraId, setSelfTestCameraId] = useState(loadSelfTestCameraId);
@@ -1205,6 +1220,10 @@ export default function Home() {
   }, [selfTestTrials]);
 
   useEffect(() => {
+    window.localStorage.setItem(SELF_TEST_LEARNED_KEY, JSON.stringify(selfTestLearnedMotions));
+  }, [selfTestLearnedMotions]);
+
+  useEffect(() => {
     window.localStorage.removeItem("memory-guard-self-test-task-times-v1");
   }, []);
 
@@ -1331,6 +1350,14 @@ export default function Home() {
   }
 
   async function requestSelfTestCameraStart() {
+    if (!selfTestParticipant.trim()) {
+      toast.success("먼저 참가자 이름을 입력해 주세요");
+      return;
+    }
+    if (selfTestStage === "evaluation" && (selfTestLearnedMotions[selfTestParticipant.trim()] ?? []).every((action) => action.samples.length === 0)) {
+      toast.success("먼저 학습 세션에서 이 참가자의 동작 표본을 저장해 주세요");
+      return;
+    }
     quickMotionCameraRequestedRef.current = false;
     zoneCameraRequestedRef.current = false;
     selfTestCameraRequestedRef.current = true;
@@ -2374,7 +2401,7 @@ export default function Home() {
       poseSessionRef.current = session;
       if (cameraSessionPurposeRef.current === "self_test") {
         selfTestSessionIdRef.current = session.id;
-        selfTestSessionStageRef.current = "evaluation";
+        selfTestSessionStageRef.current = selfTestStage;
       }
       secondaryPoseSessionRef.current = secondaryStreamRef.current
         ? await createMotionSession(
@@ -2563,7 +2590,7 @@ export default function Home() {
         ...observationProfile,
         occupation: "cafe" as const,
         occupationName: "자체테스트 카페",
-        mode: "analysis" as const,
+        mode: selfTestStage === "training" ? "learning" as const : "analysis" as const,
         zoneGrid: selfTestZoneGrid,
         secondaryZoneGrid: Array(9).fill(null),
         tertiaryZoneGrid: Array(9).fill(null),
@@ -2594,8 +2621,12 @@ export default function Home() {
       // once when a completed session is ready for local classification.
       const { classifyEpflPosture } = await import("./epfl-posture-classifier");
       const labelOptions = selfTestStage ? selfTestReviewLabelOptions : listWorkContextLabels(workContextConfig);
-      const loadedActions = observationLearnedMotions.length > 0
-        ? await Promise.all(observationLearnedMotions.map(async (action) => ({
+      const participantForRun = selfTestParticipant.trim();
+      const actionsForRun = selfTestStage
+        ? selfTestLearnedMotions[participantForRun] ?? []
+        : observationLearnedMotions;
+      const loadedActions = actionsForRun.length > 0
+        ? await Promise.all(actionsForRun.map(async (action) => ({
           id: action.id,
           label: action.label,
           samples: (await Promise.all(action.samples.map(framesForMotionSample))).filter(
@@ -2604,6 +2635,7 @@ export default function Home() {
         })))
         : [];
       let pendingReviewCount = 0;
+      let learnedTrainingActions = actionsForRun;
 
       for (const motionSlice of motionSlices) {
         const episodeRecordedAt = sessionStartedAt + motionSlice.startMs;
@@ -2667,7 +2699,11 @@ export default function Home() {
           confidence: Math.max(0, Math.min(1, Math.exp(-candidate.distance * 4.2))),
         })) ?? [];
         const candidates = normalizeActionCandidates(selfTestStage
-          ? classifyCafeSelfTest(features, analysisFrames)
+          ? [...classifyCafeSelfTest(features, analysisFrames), ...(selfTestStage === "evaluation"
+            ? motionCandidates.flatMap((candidate) => {
+              const option = labelOptions.find((label) => label.taskLabel === candidate.label);
+              return option ? [{ ...option, confidence: candidate.confidence }] : [];
+            }) : [])]
           : buildWorkContextCandidates({
             config: workContextConfig,
             recordedAt: episodeRecordedAt,
@@ -2688,7 +2724,6 @@ export default function Home() {
           taskConfidence: bestCandidate?.confidence ?? 0,
         };
         const qualityReasons = [] as Array<"insufficient_frames" | "missing_zone" | "missing_time_context" | "unknown_motion" | "ground_truth_review" | "self_test_label">;
-        if (selfTestStage === "training") qualityReasons.push("self_test_label");
         if (globalSessionId) qualityReasons.push("ground_truth_review");
         if (analysisFrames.length < 6) qualityReasons.push("insufficient_frames");
         if (!features.dominantZone) qualityReasons.push("missing_zone");
@@ -2699,6 +2734,7 @@ export default function Home() {
           ...episode,
           ...(selfTestStage ? {
             source: selfTestStage === "evaluation" ? "self_test" as const : "self_test_training" as const,
+            selfTestParticipant: participantForRun,
             disposition: "analysis_only" as const,
             dispositionReason: selfTestStage === "evaluation"
               ? "평가 기록은 기준선과 동작 학습에 반영하지 않아요."
@@ -2724,6 +2760,16 @@ export default function Home() {
         };
         if (actionReview) pendingReviewCount += 1;
         await saveObservationEpisode(episode);
+        if (selfTestStage === "training" && !actionReview && episode.motionSlice && episode.taskType !== "UNCLASSIFIED") {
+          learnedTrainingActions = addObservationMotionSample(learnedTrainingActions, episode.taskLabel, {
+            sessionId: episode.sessionId,
+            startMs: episode.motionSlice.startMs,
+            endMs: episode.motionSlice.endMs,
+          }, nowMs());
+        }
+      }
+      if (selfTestStage === "training") {
+        setSelfTestLearnedMotions((current) => ({ ...current, [participantForRun]: learnedTrainingActions }));
       }
       await refreshObservationData(observationProfile);
       toast.success(
@@ -2731,8 +2777,8 @@ export default function Home() {
           ? `${motionSlices.length}개 동작 구간을 분리했고, ${pendingReviewCount}개는 검토함에 보관했어요`
           : `${motionSlices.length}개 동작 구간을 분리해 각각 기록했어요`,
       );
-    } catch {
-      // Coordinate recording remains available even if contextual analysis fails.
+    } catch (error) {
+      console.error("Observation session classification failed", error);
     }
   }
 
@@ -3014,22 +3060,26 @@ export default function Home() {
   }
 
   function exportSelfTestAutoResults() {
-    const rows = (observationEpisodes.filter((episode) => episode.source === "self_test") as ReviewableObservationEpisode[]).map((episode) => {
+    const rows = (observationEpisodes.filter((episode) => episode.source === "self_test" || episode.source === "self_test_training") as ReviewableObservationEpisode[]).map((episode) => {
       const autoCandidate = episode.actionReview?.candidates[0];
       const manualLabel = episode.actionReview?.manualLabel;
       return [
+        episode.selfTestParticipant ?? "", episode.source === "self_test_training" ? "학습" : "분석",
         new Date(episode.recordedAt).toISOString(), episode.sessionId,
         episode.motionSlice?.startMs ?? "", episode.motionSlice?.endMs ?? "",
         autoCandidate?.taskLabel ?? (manualLabel ? "미분류" : episode.taskLabel),
         Math.round((autoCandidate?.confidence ?? (manualLabel ? 0 : episode.taskConfidence)) * 100),
         manualLabel?.taskLabel ?? "",
-        episode.actionReview?.status === "confirmed" ? "수동 확정" : episode.actionReview?.status === "unresolved" ? "판별 불가" : episode.actionReview?.status === "pending" ? "검토 대기" : "자동 분류",
+        episode.actionReview?.status === "confirmed" ? episode.source === "self_test_training" ? "수동 확정·학습 반영" : "수동 확정"
+          : episode.actionReview?.status === "unresolved" ? "판별 불가"
+            : episode.actionReview?.status === "pending" ? "검토 대기"
+              : episode.source === "self_test_training" ? "자동 확정·학습 반영" : "자동 분류",
         manualLabel?.reviewer ?? (episode.actionReview?.status === "unresolved" ? "developer" : ""),
         manualLabel?.reviewedAt ? new Date(manualLabel.reviewedAt).toISOString()
           : episode.actionReview?.status === "unresolved" ? new Date(episode.actionReview.updatedAt).toISOString() : "",
       ];
     });
-    const csv = [["검출 시각", "세션", "시작(ms)", "종료(ms)", "자동 라벨", "자동 신뢰도(%)", "수동 확정 라벨", "검토 상태", "검토자", "검토 시각"], ...rows]
+    const csv = [["참가자", "세션 단계", "검출 시각", "세션", "시작(ms)", "종료(ms)", "자동 라벨", "자동 신뢰도(%)", "수동 확정 라벨", "검토 상태", "검토자", "검토 시각"], ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
@@ -3386,6 +3436,9 @@ export default function Home() {
     window.localStorage.removeItem(WORK_CONTEXT_CONFIG_STORAGE_KEY);
     window.localStorage.removeItem(USER_INSTALL_STORAGE_KEY);
     window.localStorage.removeItem(SELF_TEST_STORAGE_KEY);
+    window.localStorage.removeItem(SELF_TEST_LEARNED_KEY);
+    window.localStorage.removeItem(SELF_TEST_CAMERA_KEY);
+    window.localStorage.removeItem(SELF_TEST_ZONE_KEY);
     clearLearnedMotionActions();
     clearObservationMotionActions();
     setConsentState(getConsent());
@@ -3399,6 +3452,9 @@ export default function Home() {
     setLearnedMotions([]);
     setObservationLearnedMotions([]);
     setSelfTestTrials([]);
+    setSelfTestLearnedMotions({});
+    setSelfTestCameraId("");
+    setSelfTestZoneGrid(Array(9).fill(null));
     setActiveSelfTestTrial(null);
     setQuickMotionMode("idle");
     setClosingChecklist(DEFAULT_CLOSING_CHECKLIST);
@@ -3738,7 +3794,12 @@ export default function Home() {
   const pendingSelfTestTrainingReviews = listPendingActionReviews(
     currentObservationEpisodes.filter((episode) => episode.source === "self_test_training") as ReviewableObservationEpisode[],
   );
-  const selfTestDetectedEpisodes = currentObservationEpisodes.filter((episode) => episode.source === "self_test") as ReviewableObservationEpisode[];
+  const selfTestDetectedEpisodes = currentObservationEpisodes.filter((episode) =>
+    episode.source === (selfTestStage === "training" ? "self_test_training" : "self_test")
+    && episode.selfTestParticipant === selfTestParticipant.trim(),
+  ) as ReviewableObservationEpisode[];
+  const selfTestParticipantActions = selfTestLearnedMotions[selfTestParticipant.trim()] ?? [];
+  const selfTestSampleCount = selfTestParticipantActions.reduce((total, action) => total + action.samples.length, 0);
   const selfTestRows = selfTestTrials.map((trial) => {
     const slices = observationEpisodes.filter((episode) =>
       episode.source === (trial.stage === "evaluation" ? "self_test" : "self_test_training")
@@ -3823,10 +3884,6 @@ export default function Home() {
 
   async function confirmActionReview() {
     if (!selectedReviewEpisode || !selectedReviewTaskType) return;
-    if (selectedReviewTrainingTrials.length > 1) {
-      toast.success("여러 정답 동작에 걸친 구간은 학습에 넣지 말고 판별 불가로 처리해 주세요");
-      return;
-    }
     const selectedLabel = reviewOptionsForEpisode(selectedReviewEpisode).find((option) => option.taskType === selectedReviewTaskType);
     if (!selectedLabel) return;
     const updated = applyManualActionLabel(selectedReviewEpisode, {
@@ -3834,7 +3891,18 @@ export default function Home() {
       reviewer: "developer",
     });
     await saveObservationEpisode(updated);
-    if (updated.motionSlice && updated.source !== "self_test") {
+    if (updated.motionSlice && updated.source === "self_test_training") {
+      const sample: LearnedMotionSample = {
+        sessionId: updated.sessionId,
+        startMs: updated.motionSlice.startMs,
+        endMs: updated.motionSlice.endMs,
+      };
+      const participant = updated.selfTestParticipant ?? "";
+      setSelfTestLearnedMotions((current) => ({
+        ...current,
+        [participant]: addObservationMotionSample(current[participant] ?? [], selectedLabel.taskLabel, sample, nowMs()),
+      }));
+    } else if (updated.motionSlice && updated.source !== "self_test") {
       const sample: LearnedMotionSample = {
         sessionId: updated.sessionId,
         globalSessionId: updated.globalSessionId,
@@ -4422,6 +4490,17 @@ export default function Home() {
               <p className="self-test-intro">웹캠 1대로 카페 동작 5개를 촬영하고 자동 분류 결과와 비교합니다.</p>
               <section className="self-test-setup" aria-label="자체테스트 환경 설정">
                 <h3>자체테스트 환경</h3>
+                <div className="self-test-session-setup">
+                  <label><span>참가자</span><input value={selfTestParticipant} onChange={(event) => setSelfTestParticipant(event.target.value)} placeholder="예: 참가자 A" disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test")} /></label>
+                  <div className="self-test-stage-control" role="group" aria-label="자체테스트 세션 단계">
+                    <span>세션 단계</span>
+                    <div>
+                      <button type="button" className={selfTestStage === "training" ? "active" : ""} aria-pressed={selfTestStage === "training"} onClick={() => setSelfTestStage("training")} disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test")}>1 · 학습 세션</button>
+                      <button type="button" className={selfTestStage === "evaluation" ? "active" : ""} aria-pressed={selfTestStage === "evaluation"} onClick={() => setSelfTestStage("evaluation")} disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test")}>2 · 분석 세션</button>
+                    </div>
+                  </div>
+                  <small>이 참가자의 학습 표본 {selfTestSampleCount}개 · {selfTestParticipantActions.length}/5개 행동</small>
+                </div>
                 <div className="self-test-camera-setup">
                   {namedSelfTestCameras.length === 0 ? (
                     <>
@@ -4461,26 +4540,27 @@ export default function Home() {
                   <small>아래 3×3 구역표에서 업무 구역을 지정하세요. 이 설정은 자체테스트에만 적용됩니다.</small>
                 </div>
               </section>
-              <h2 className="self-test-flow-title">자동 동작 분류</h2>
-              <p className="self-test-hint">카메라 앞에서 5개 동작을 순서 없이 수행하세요. 촬영을 종료하면 프로그램이 동작 구간을 자동으로 나누고 카페 업무 맥락으로 라벨을 붙입니다.</p>
+              <h2 className="self-test-flow-title">{selfTestStage === "training" ? "개인 동작 학습" : "자동 동작 분석"}</h2>
+              <p className="self-test-hint">{selfTestStage === "training" ? "카메라 앞에서 5개 동작을 반복하세요. 촬영을 종료하면 자동으로 구간을 나누고, 확신이 높은 결과를 이 참가자의 학습 표본으로 저장합니다. 애매한 결과만 리플레이해 라벨을 확정하세요." : "새 분석 세션에서 5개 동작을 임의 순서로 수행하세요. 학습 세션의 개인 표본과 카페 업무 맥락을 함께 사용해 라벨을 붙입니다. 분석 결과는 학습 표본에 추가되지 않습니다."}</p>
+              {selfTestStage === "evaluation" && selfTestSampleCount === 0 && <p className="self-test-warning">이 참가자의 학습 표본이 없습니다. 먼저 학습 세션을 촬영하고 검토 대기 결과의 라벨을 확정해 주세요.</p>}
               {selfTestMappedZoneCount === 0 && <p className="self-test-warning">구역을 지정하면 카페 업무를 더 잘 구별할 수 있어요. 구역이 없거나 확신이 낮은 결과는 검토 대기로 표시됩니다.</p>}
               <p className="self-test-progress">{cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test" ? "촬영 중 · 동작을 수행한 뒤 위의 ‘카메라 끄기’를 누르면 자동 분석합니다." : "카메라를 연결하면 스켈레톤 기록이 시작됩니다."}</p>
               <div className="self-test-results-heading">
-                <strong>자동 검출 결과 {selfTestDetectedEpisodes.length}건</strong>
-                <button type="button" onClick={exportSelfTestAutoResults} disabled={selfTestDetectedEpisodes.length === 0}>결과 CSV 내보내기</button>
+                <strong>{selfTestParticipant.trim() || "현재 참가자"} · {selfTestStage === "training" ? "학습" : "분석"} 결과 {selfTestDetectedEpisodes.length}건</strong>
+                <button type="button" onClick={exportSelfTestAutoResults} disabled={observationEpisodes.every((episode) => episode.source !== "self_test" && episode.source !== "self_test_training")}>전체 결과 CSV 내보내기</button>
               </div>
               {selfTestDetectedEpisodes.length > 0 ? (
                 <div className="self-test-results" role="table" aria-label="자동 검출된 자체테스트 동작">
-                  <div className="self-test-result-row self-test-result-header" role="row"><span role="columnheader">검출 구간</span><span role="columnheader">자동·수동 라벨</span><span role="columnheader">검토 상태</span></div>
+                  <div className="self-test-result-row self-test-result-header" role="row"><span role="columnheader">단계·검출 구간</span><span role="columnheader">자동·수동 라벨</span><span role="columnheader">검토 상태</span></div>
                   {selfTestDetectedEpisodes.slice(0, 30).map((episode) => (
                     <div className="self-test-result-row" role="row" key={episode.id}>
-                      <span role="cell">{new Date(episode.recordedAt).toLocaleTimeString("ko-KR")} · {episode.motionSlice ? `${(episode.motionSlice.startMs / 1000).toFixed(1)}–${(episode.motionSlice.endMs / 1000).toFixed(1)}초` : "구간 미확인"}</span>
+                      <span role="cell">{episode.source === "self_test_training" ? "학습" : "분석"} · {new Date(episode.recordedAt).toLocaleTimeString("ko-KR")} · {episode.motionSlice ? `${(episode.motionSlice.startMs / 1000).toFixed(1)}–${(episode.motionSlice.endMs / 1000).toFixed(1)}초` : "구간 미확인"}</span>
                       <span role="cell">자동 {episode.actionReview?.candidates[0]?.taskLabel ?? (episode.actionReview?.manualLabel ? "미분류" : episode.taskLabel)} · {Math.round((episode.actionReview?.candidates[0]?.confidence ?? (episode.actionReview?.manualLabel ? 0 : episode.taskConfidence)) * 100)}%{episode.actionReview?.manualLabel && <><br />수동 {episode.actionReview.manualLabel.taskLabel}</>}</span>
-                      <span role="cell">{episode.actionReview?.status === "confirmed" ? "수동 확정" : episode.actionReview?.status === "unresolved" ? "판별 불가" : episode.actionReview?.status === "pending" ? "검토 대기" : "자동 분류"}{episode.actionReview?.status === "pending" && <button className="self-test-review-button" type="button" onClick={() => openActionReview(episode)}>스켈레톤 검토</button>}</span>
+                      <span role="cell">{episode.actionReview?.status === "confirmed" ? episode.source === "self_test_training" ? "수동 확정·학습 반영" : "수동 확정" : episode.actionReview?.status === "unresolved" ? "판별 불가" : episode.actionReview?.status === "pending" ? "검토 대기" : episode.source === "self_test_training" ? "자동 확정·학습 반영" : "자동 분류"}{episode.actionReview?.status === "pending" && <button className="self-test-review-button" type="button" onClick={() => openActionReview(episode)}>스켈레톤 검토</button>}</span>
                     </div>
                   ))}
                 </div>
-              ) : <p className="self-test-hint">아직 자동 검출된 동작이 없어요.</p>}
+              ) : <p className="self-test-hint">이 참가자의 {selfTestStage === "training" ? "학습" : "분석"} 결과가 아직 없어요.</p>}
             </section>
           </div>
         )}
@@ -6280,15 +6360,7 @@ export default function Home() {
                 <small>{selectedReviewEpisode.source === "self_test"
                   ? "자체테스트 · 스켈레톤 리플레이와 구역을 보고 실제 동작을 선택하세요. 이 검토 결과는 자동 분류 학습에 추가되지 않습니다."
                   : "확정 기준 · 신뢰도 60% 이상, 2순위와 12%p 이상 차이, 좌표·구역·시간 정보 정상"}</small>
-                {selectedReviewEpisode.source === "self_test_training" && (
-                  <small>
-                    자체테스트 정답 기록 · {selectedReviewTrainingTrials.length === 1
-                      ? selectedReviewTrainingTrials[0].label
-                      : selectedReviewTrainingTrials.length > 1
-                        ? `정답 동작 ${selectedReviewTrainingTrials.length}개가 겹침 · 학습 표본으로 확정하지 마세요`
-                        : "정답 구간과 겹치지 않음 · 판별 불가로 처리하세요"}
-                  </small>
-                )}
+                {selectedReviewEpisode.source === "self_test_training" && <small>학습 세션 · 라벨을 확정하면 이 참가자의 동작 표본에 추가됩니다.</small>}
               </div>
 
               {selectedReviewLabelOptions.length > 0 ? (
@@ -6309,7 +6381,7 @@ export default function Home() {
                     ))}
                   </div>
                   <div className="manual-review-actions">
-                    <button className="primary-button" type="button" onClick={() => void confirmActionReview()} disabled={!selectedReviewTaskType || selectedReviewTrainingTrials.length !== 1 && selectedReviewEpisode.source === "self_test_training"}>라벨 확정</button>
+                    <button className="primary-button" type="button" onClick={() => void confirmActionReview()} disabled={!selectedReviewTaskType}>라벨 확정</button>
                     <button type="button" onClick={() => void leaveActionReviewUnresolved()}>판별 불가</button>
                   </div>
                 </div>
