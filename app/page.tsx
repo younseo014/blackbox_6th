@@ -106,7 +106,7 @@ import {
   type LearnedMotionResult,
   type LearnedMotionSample,
 } from "./custom-motion-training";
-import { sliceTargetMotions } from "./motion-segmentation";
+import { SELF_TEST_MOTION_SEGMENTATION, sliceTargetMotions } from "./motion-segmentation";
 import { classifyCafeSelfTest } from "./self-test-classifier";
 import {
   createGlobalCaptureSession,
@@ -2607,7 +2607,7 @@ export default function Home() {
         toast.success("좌표는 저장했고, 3대 동시 관측 구간이 없어 라벨 후보는 만들지 않았어요");
         return;
       }
-      const motionSlices = sliceTargetMotions(rawFrames);
+      const motionSlices = sliceTargetMotions(rawFrames, selfTestStage ? SELF_TEST_MOTION_SEGMENTATION : undefined);
       if (motionSlices.length === 0) {
         toast.success("기록은 저장했고, 별도의 동작 구간은 감지되지 않았어요");
         return;
@@ -4541,7 +4541,7 @@ export default function Home() {
                 </div>
               </section>
               <h2 className="self-test-flow-title">{selfTestStage === "training" ? "개인 동작 학습" : "자동 동작 분석"}</h2>
-              <p className="self-test-hint">{selfTestStage === "training" ? "카메라 앞에서 5개 동작을 반복하세요. 촬영을 종료하면 자동으로 구간을 나누고, 확신이 높은 결과를 이 참가자의 학습 표본으로 저장합니다. 애매한 결과만 리플레이해 라벨을 확정하세요." : "새 분석 세션에서 5개 동작을 임의 순서로 수행하세요. 학습 세션의 개인 표본과 카페 업무 맥락을 함께 사용해 라벨을 붙입니다. 분석 결과는 학습 표본에 추가되지 않습니다."}</p>
+              <p className="self-test-hint">{selfTestStage === "training" ? "카메라 앞에서 5개 동작을 반복하세요. 걷기와 손동작은 한 업무 구간으로 묶고, 동작 사이에는 2~3초 정도 멈춰 구간을 구별합니다. 촬영 종료 후 자동으로 나눈 구간을 확인하세요." : "새 분석 세션에서 5개 동작을 임의 순서로 수행하세요. 동작 사이에는 2~3초 정도 멈추세요. 학습 세션의 개인 표본과 카페 업무 맥락을 함께 사용하며, 분석 결과는 학습 표본에 추가되지 않습니다."}</p>
               {selfTestStage === "evaluation" && selfTestSampleCount === 0 && <p className="self-test-warning">이 참가자의 학습 표본이 없습니다. 먼저 학습 세션을 촬영하고 검토 대기 결과의 라벨을 확정해 주세요.</p>}
               {selfTestMappedZoneCount === 0 && <p className="self-test-warning">구역을 지정하면 카페 업무를 더 잘 구별할 수 있어요. 구역이 없거나 확신이 낮은 결과는 검토 대기로 표시됩니다.</p>}
               <p className="self-test-progress">{cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test" ? "촬영 중 · 동작을 수행한 뒤 위의 ‘카메라 끄기’를 누르면 자동 분석합니다." : "카메라를 연결하면 스켈레톤 기록이 시작됩니다."}</p>

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateEventMotion } from "../app/demo-motion.ts";
-import { sliceTargetMotions } from "../app/motion-segmentation.ts";
+import { SELF_TEST_MOTION_SEGMENTATION, sliceTargetMotions } from "../app/motion-segmentation.ts";
 
 function shifted(frames: number[][], offsetMs: number) {
   return frames.map((frame) => {
@@ -115,6 +115,43 @@ test("walking between two tasks becomes its own semantic boundary without a quie
   assert.ok(slices.length >= 3);
   assert.ok(slices.every((slice) => slice.durationSeconds < 3));
   assert.ok(slices.every((slice, index) => index === 0 || slices[index - 1].endMs <= slice.startMs));
+});
+
+test("self-test keeps a continuous walk and hand movement in one task interval", () => {
+  const reach = generateEventMotion("high_reach", 31);
+  const last = reach[reach.length - 1];
+  const travel = Array.from({ length: 18 }, (_, index) => {
+    const frame = translatedX(last, (index + 1) * 0.012);
+    frame[0] = last[0] + (index + 1) * 100;
+    return frame;
+  });
+  const afterTravel = travel[travel.length - 1];
+  const place = generateEventMotion("register_tap", 32).map((frame) => {
+    const moved = translatedX(frame, 18 * 0.012);
+    moved[0] += afterTravel[0] + 100;
+    return moved;
+  });
+
+  const ordinarySlices = sliceTargetMotions([...reach, ...travel, ...place]);
+  const selfTestSlices = sliceTargetMotions([...reach, ...travel, ...place], SELF_TEST_MOTION_SEGMENTATION);
+
+  assert.ok(ordinarySlices.length >= 3);
+  assert.equal(selfTestSlices.length, 1);
+});
+
+test("self-test still separates tasks when the person pauses between them", () => {
+  const first = generateEventMotion("high_reach", 33);
+  const last = first[first.length - 1];
+  const pause = Array.from({ length: 35 }, (_, index) => {
+    const frame = [...last];
+    frame[0] = last[0] + (index + 1) * 100;
+    return frame;
+  });
+  const second = shifted(generateEventMotion("low_bend", 34), pause[pause.length - 1][0] + 100);
+
+  const slices = sliceTargetMotions([...first, ...pause, ...second], SELF_TEST_MOTION_SEGMENTATION);
+
+  assert.equal(slices.length, 2);
 });
 
 test("continuous movement is not allowed to become one unbounded episode", () => {

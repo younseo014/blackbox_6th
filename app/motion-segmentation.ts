@@ -11,6 +11,21 @@ export type TargetMotionSlice = {
   reason: string;
 };
 
+export type MotionSegmentationOptions = {
+  maxActiveGapMs?: number;
+  splitTravelTransitions?: boolean;
+  maxSegmentMs?: number;
+  maxUnusableGapMs?: number;
+};
+
+/** Keep travel and hand activity together when they belong to one self-test task. */
+export const SELF_TEST_MOTION_SEGMENTATION: MotionSegmentationOptions = {
+  maxActiveGapMs: 1800,
+  splitTravelTransitions: false,
+  maxSegmentMs: 20_000,
+  maxUnusableGapMs: 400,
+};
+
 const MIN_USABLE_FRAMES = 6;
 const MAX_TRACKING_GAP_MS = 1200;
 const MAX_ACTIVE_GAP_MS = 1400;
@@ -81,17 +96,20 @@ function percentile(values: number[], ratio: number) {
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))];
 }
 
-function splitTrackedRuns(rawFrames: number[][]) {
+function splitTrackedRuns(rawFrames: number[][], maxUnusableGapMs = 0) {
   const runs: MotionFrame[][] = [];
   let current: MotionFrame[] = [];
   rawFrames.forEach((raw, originalIndex) => {
     const frame = toMotionFrame(raw, originalIndex);
-    if (frame && (
-      !current.length || (
-        frame.originalIndex === current[current.length - 1].originalIndex + 1 &&
-        frame.timeMs - current[current.length - 1].timeMs <= MAX_TRACKING_GAP_MS
+    if (!frame && maxUnusableGapMs > 0) return;
+    const previous = current[current.length - 1];
+    const gapMs = frame && previous ? frame.timeMs - previous.timeMs : 0;
+    if (frame && (!previous || (
+      gapMs <= MAX_TRACKING_GAP_MS && (
+        frame.originalIndex === previous.originalIndex + 1 ||
+        (maxUnusableGapMs > 0 && gapMs <= maxUnusableGapMs)
       )
-    )) {
+    ))) {
       current.push(frame);
       return;
     }
@@ -121,7 +139,7 @@ function frameMotionSpeed(previous: MotionFrame, current: MotionFrame) {
   return frameMotionComponents(previous, current).totalSpeed;
 }
 
-function activeBouts(run: MotionFrame[]) {
+function activeBouts(run: MotionFrame[], maxActiveGapMs = MAX_ACTIVE_GAP_MS) {
   const speeds = run.slice(1).map((frame, index) => frameMotionSpeed(run[index], frame));
   if (!speeds.length) return [];
   const threshold = Math.max(0.11, percentile(speeds, 0.75) * 0.28);
@@ -137,7 +155,7 @@ function activeBouts(run: MotionFrame[]) {
     energy: activeIndexes[0].speed,
   };
   for (const item of activeIndexes.slice(1)) {
-    if (run[item.index].timeMs - run[current.end].timeMs <= MAX_ACTIVE_GAP_MS) {
+    if (run[item.index].timeMs - run[current.end].timeMs <= maxActiveGapMs) {
       current.end = item.index;
       current.energy += item.speed;
     } else {
@@ -191,7 +209,12 @@ function frameIndexAtOrAfter(run: MotionFrame[], timeMs: number, start: number, 
   return low < Math.min(run.length, end) ? low : -1;
 }
 
-function splitContinuousBout(run: MotionFrame[], bout: MotionBout): MotionBout[] {
+function splitContinuousBout(
+  run: MotionFrame[],
+  bout: MotionBout,
+  splitTravelTransitions = true,
+  maxSegmentMs = MAX_SEMANTIC_SEGMENT_MS,
+): MotionBout[] {
   const boundaries: number[] = [];
   let lastBoundaryTime = run[bout.start].timeMs;
   for (
@@ -205,6 +228,7 @@ function splitContinuousBout(run: MotionFrame[], bout: MotionBout): MotionBout[]
       (beforeTravel >= 0.75 && afterTravel <= 0.25);
     const candidateTime = run[index].timeMs;
     if (
+      splitTravelTransitions &&
       changedMode &&
       candidateTime - lastBoundaryTime >= MIN_SEMANTIC_SEGMENT_MS &&
       run[bout.end].timeMs - candidateTime >= MIN_SEMANTIC_SEGMENT_MS
@@ -218,9 +242,9 @@ function splitContinuousBout(run: MotionFrame[], bout: MotionBout): MotionBout[]
   const withMaximumLength: number[] = [];
   let segmentStart = bout.start;
   for (const nextBoundary of [...boundaries, bout.end + 1]) {
-    while (run[Math.min(nextBoundary - 1, bout.end)].timeMs - run[segmentStart].timeMs > MAX_SEMANTIC_SEGMENT_MS) {
-      const earliestCutTime = run[segmentStart].timeMs + MAX_SEMANTIC_SEGMENT_MS * 0.55;
-      const latestCutTime = run[segmentStart].timeMs + MAX_SEMANTIC_SEGMENT_MS;
+    while (run[Math.min(nextBoundary - 1, bout.end)].timeMs - run[segmentStart].timeMs > maxSegmentMs) {
+      const earliestCutTime = run[segmentStart].timeMs + maxSegmentMs * 0.55;
+      const latestCutTime = run[segmentStart].timeMs + maxSegmentMs;
       const earliestCut = frameIndexAtOrAfter(run, earliestCutTime, segmentStart + 1, nextBoundary);
       const latestCut = frameIndexAtOrAfter(run, latestCutTime, segmentStart + 1, nextBoundary);
       const searchStart = earliestCut >= 0 ? earliestCut : segmentStart + 1;
@@ -277,6 +301,7 @@ function emptyFallback(rawFrames: number[][]): TargetMotionSlice {
  */
 export function sliceTargetMotions(
   rawFrames: number[][],
+  options: MotionSegmentationOptions = {},
 ): TargetMotionSlice[] {
   if (rawFrames.length < MIN_USABLE_FRAMES) return [];
   const originalDurationSeconds = rawFrames.length > 1
@@ -284,9 +309,10 @@ export function sliceTargetMotions(
     : 0;
   const slices: TargetMotionSlice[] = [];
 
-  for (const sourceRun of splitTrackedRuns(rawFrames)) {
+  for (const sourceRun of splitTrackedRuns(rawFrames, options.maxUnusableGapMs)) {
     const run = sourceRun;
-    const bouts = activeBouts(run).flatMap((bout) => splitContinuousBout(run, bout));
+    const bouts = activeBouts(run, options.maxActiveGapMs).flatMap((bout) =>
+      splitContinuousBout(run, bout, options.splitTravelTransitions, options.maxSegmentMs));
 
     for (const [boutIndex, bout] of bouts.entries()) {
       const previousBout = bouts[boutIndex - 1];
