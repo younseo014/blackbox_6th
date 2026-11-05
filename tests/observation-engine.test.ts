@@ -6,6 +6,7 @@ import {
   buildBaseline,
   createObservationEpisode,
   extractObservationFeatures,
+  scoreLabeledEpisode,
   safeZScore,
   type ObservationEpisode,
 } from "../app/observation-engine.ts";
@@ -21,6 +22,54 @@ test("occupation templates: all six requested occupations have zones, tasks and 
     assert.ok(template.tasks.some((task) => task.phase === "business"));
     assert.ok(template.sequences.length >= 1);
   }
+});
+
+test("repetitive work compares cycle time while keeping total task duration descriptive", () => {
+  const template = createObservationEpisode({
+    sessionId: "repeated",
+    recordedAt: Date.now(),
+    profile: DEFAULT_PROFILE,
+    phase: "business",
+    features: {
+      durationSeconds: 10, activeRatio: 0.7, pauseCount: 0, longestPauseSeconds: 0,
+      pathLength: 1, routeComplexity: 2, repetitionCount: 3, dominantZone: "DRINK_PREP", zoneTransitions: 0,
+    },
+    baseline: buildBaseline([], 1),
+  });
+  const makeCycles = (duration: number, count: number) => Array.from({ length: count }, (_, index) => ({
+    startMs: index * 1500,
+    endMs: index * 1500 + duration * 1000,
+    durationSeconds: duration,
+    range: 0.1,
+    hand: "right" as const,
+    axis: "x" as const,
+  }));
+  const learned = [0.8, 1, 1.2].map((duration, index) => ({
+    ...template,
+    id: `learned-${index}`,
+    taskType: "WIPE",
+    taskLabel: "테이블 닦기",
+    disposition: "accepted" as const,
+    movementCycles: makeCycles(duration, 3),
+  }));
+  const baseline = buildBaseline(learned);
+  const observed = scoreLabeledEpisode({
+    ...template,
+    taskType: "WIPE",
+    taskLabel: "테이블 닦기",
+    features: { ...template.features, durationSeconds: 13 },
+    movementCycles: makeCycles(1, 4),
+  }, baseline);
+  assert.equal(observed.durationZScore, null);
+  assert.equal(observed.cycleDurationZScore, 0);
+  assert.equal(observed.movementCycles?.length, 4);
+  const slower = scoreLabeledEpisode({ ...observed, movementCycles: makeCycles(1.5, 4) }, baseline);
+  assert.ok((slower.cycleDurationZScore ?? 0) >= 1.5);
+  const changedRange = scoreLabeledEpisode({
+    ...observed,
+    movementCycles: makeCycles(1.5, 4).map((cycle) => ({ ...cycle, range: 0.2 })),
+  }, baseline);
+  assert.equal(changedRange.cycleDurationZScore, null);
 });
 
 test("cafe context includes the expanded teammate dataset and valid references", () => {

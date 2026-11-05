@@ -1,4 +1,5 @@
 import { parseSessionFrame, type BodyProportionProfile } from "./pose-store";
+import type { MovementCycle } from "./movement-units";
 import {
   getOccupationTemplate,
   type OccupationId,
@@ -69,7 +70,9 @@ export type ObservationEpisode = {
   disposition: LearningDisposition;
   dispositionReason: string;
   durationZScore: number | null;
+  cycleDurationZScore?: number | null;
   pauseZScore: number | null;
+  movementCycles?: MovementCycle[];
   contextWeight: 0 | 1 | 2 | 3;
   baselineVersion: number;
   source?: "real_learning" | "real_analysis" | "self_test" | "self_test_training";
@@ -98,6 +101,12 @@ export type TaskBaseline = {
   meanLongestPause: number;
   pauseSD: number;
   meanRouteComplexity: number;
+  cycleSampleCount?: number;
+  meanCycleDuration?: number;
+  cycleDurationSD?: number;
+  meanCycleRange?: number;
+  cycleHand?: MovementCycle["hand"];
+  cycleAxis?: MovementCycle["axis"];
 };
 
 export type BaselineSnapshot = {
@@ -161,6 +170,22 @@ export function buildBaseline(
     const complexities = items.map((episode) => episode.features.routeComplexity);
     const meanDuration = average(durations);
     const meanLongestPause = average(pauses);
+    // One episode contributes one mean, regardless of how many cycles it contains.
+    const eligibleCycles = items
+      .map((episode) => episode.movementCycles ?? [])
+      .filter((cycles) => cycles.length >= 2);
+    const kindCounts = new Map<string, number>();
+    eligibleCycles.forEach((cycles) => {
+      const key = `${cycles[0].hand}:${cycles[0].axis}`;
+      kindCounts.set(key, (kindCounts.get(key) ?? 0) + 1);
+    });
+    const dominantKind = [...kindCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const comparableCycles = eligibleCycles.filter((cycles) => `${cycles[0].hand}:${cycles[0].axis}` === dominantKind);
+    const cycleDurations = comparableCycles
+      .map((cycles) => average(cycles.map((cycle) => cycle.durationSeconds)));
+    const meanCycleDuration = average(cycleDurations);
+    const cycleRanges = comparableCycles
+      .map((cycles) => average(cycles.map((cycle) => cycle.range)));
     return {
       taskType,
       taskLabel: items[0]?.taskLabel ?? taskType,
@@ -170,6 +195,12 @@ export function buildBaseline(
       meanLongestPause,
       pauseSD: standardDeviation(pauses, meanLongestPause),
       meanRouteComplexity: average(complexities),
+      cycleSampleCount: cycleDurations.length,
+      meanCycleDuration,
+      cycleDurationSD: standardDeviation(cycleDurations, meanCycleDuration),
+      meanCycleRange: average(cycleRanges),
+      cycleHand: comparableCycles[0]?.[0].hand,
+      cycleAxis: comparableCycles[0]?.[0].axis,
     };
   });
   const eligibleDays = new Set(accepted.map((episode) => episode.date)).size;
@@ -183,6 +214,43 @@ export function buildBaseline(
     confidence: Math.round((sampleProgress * 0.55 + dayProgress * 0.45) * 100),
     tasks,
   };
+}
+
+/** Score the final work label, after context inference or manual review. */
+export function scoreLabeledEpisode(episode: ObservationEpisode, baseline: BaselineSnapshot): ObservationEpisode {
+  const taskBaseline = baseline.tasks.find((item) => item.taskType === episode.taskType);
+  const cycles = episode.movementCycles ?? [];
+  const comparableRange = cycles.length >= 2
+    && cycles[0].hand === taskBaseline?.cycleHand && cycles[0].axis === taskBaseline?.cycleAxis
+    && (taskBaseline?.meanCycleRange ?? 0) > 0
+    && Math.abs(average(cycles.map((cycle) => cycle.range)) - taskBaseline!.meanCycleRange!)
+      / taskBaseline!.meanCycleRange! <= 0.25;
+  const cycleDurationZScore = comparableRange && (taskBaseline?.cycleSampleCount ?? 0) >= 3
+    ? safeZScore(
+      average(cycles.map((cycle) => cycle.durationSeconds)),
+      taskBaseline!.meanCycleDuration!,
+      taskBaseline!.cycleDurationSD!,
+    )
+    : null;
+  // Total time remains descriptive when repeated work has a usable per-cycle measure.
+  const durationZScore = cycles.length >= 2 || (taskBaseline?.cycleSampleCount ?? 0) >= 3
+    ? null
+    : taskBaseline
+      ? safeZScore(episode.features.durationSeconds, taskBaseline.meanDuration, taskBaseline.durationSD)
+      : null;
+  const pauseZScore = taskBaseline
+    ? safeZScore(episode.features.longestPauseSeconds, taskBaseline.meanLongestPause, taskBaseline.pauseSD)
+    : null;
+  const next = { ...episode, durationZScore, cycleDurationZScore, pauseZScore };
+  if (next.mode === "learning" && next.disposition !== "excluded" && next.disposition !== "quarantined"
+    && ((cycleDurationZScore ?? 0) >= 1.5 || (durationZScore ?? 0) >= 1.5 || (pauseZScore ?? 0) >= 1.5)) {
+    return {
+      ...next,
+      disposition: "quarantined",
+      dispositionReason: "평소 흐름으로 확정하기 어려워 기준선 학습에서 잠시 보류했어요.",
+    };
+  }
+  return next;
 }
 
 type FlatPoint = { x: number; y: number; z: number };

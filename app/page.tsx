@@ -81,11 +81,13 @@ import {
   buildBaseline,
   createObservationEpisode,
   extractObservationFeatures,
+  scoreLabeledEpisode,
   type BaselineSnapshot,
   type ObservationEpisode,
   type ObservationMode,
   type ObservationProfile,
 } from "./observation-engine";
+import { detectMovementCycles } from "./movement-units";
 import {
   deleteAllObservationData,
   getObservationProfile,
@@ -2722,7 +2724,13 @@ export default function Home() {
           taskType: bestCandidate?.taskType ?? "UNCLASSIFIED",
           taskLabel: bestCandidate?.taskLabel ?? "미분류",
           taskConfidence: bestCandidate?.confidence ?? 0,
+          movementCycles: detectMovementCycles(analysisFrames),
+          disposition: profileForRun.mode === "analysis" ? "analysis_only" : "accepted",
+          dispositionReason: profileForRun.mode === "analysis"
+            ? "분석 모드 기록은 개인 기준선에 자동으로 합치지 않아요."
+            : "평소 업무 후보로 개인 기준선에 포함했어요.",
         };
+        episode = scoreLabeledEpisode(episode, observationBaseline);
         const qualityReasons = [] as Array<"insufficient_frames" | "missing_zone" | "missing_time_context" | "unknown_motion" | "ground_truth_review" | "self_test_label">;
         if (globalSessionId) qualityReasons.push("ground_truth_review");
         if (analysisFrames.length < 6) qualityReasons.push("insufficient_frames");
@@ -3785,8 +3793,8 @@ export default function Home() {
   const analysisObservationSignals = currentObservationEpisodes.filter(
     (episode) =>
       episode.mode === "analysis" &&
-      episode.disposition !== "excluded" &&
-      ((episode.durationZScore ?? 0) >= 1.5 || (episode.pauseZScore ?? 0) >= 1.5),
+      episode.disposition === "analysis_only" &&
+      ((episode.cycleDurationZScore ?? 0) >= 1.5 || (episode.durationZScore ?? 0) >= 1.5 || (episode.pauseZScore ?? 0) >= 1.5),
   );
   const pendingActionReviews = listPendingActionReviews(
     currentObservationEpisodes.filter((episode) => episode.source !== "self_test" && episode.source !== "self_test_training") as ReviewableObservationEpisode[],
@@ -3886,10 +3894,10 @@ export default function Home() {
     if (!selectedReviewEpisode || !selectedReviewTaskType) return;
     const selectedLabel = reviewOptionsForEpisode(selectedReviewEpisode).find((option) => option.taskType === selectedReviewTaskType);
     if (!selectedLabel) return;
-    const updated = applyManualActionLabel(selectedReviewEpisode, {
+    const updated = scoreLabeledEpisode(applyManualActionLabel(selectedReviewEpisode, {
       ...selectedLabel,
       reviewer: "developer",
-    });
+    }), observationBaseline);
     await saveObservationEpisode(updated);
     if (updated.motionSlice && updated.source === "self_test_training") {
       const sample: LearnedMotionSample = {
@@ -5635,8 +5643,15 @@ export default function Home() {
                   <p>
                     {observationProfile.mode === "learning"
                       ? `정상 후보 ${acceptedObservationCount}건을 기준선에 포함했고, 확정하기 어려운 ${quarantinedObservationCount}건은 학습에서 보류했어요.`
-                      : `업무별 평균과 표준편차를 따로 비교했습니다. 최근 변화 후보 ${analysisObservationSignals.length}건을 기록했어요.`}
+                      : `업무별 기준선과 반복 동작의 회당 시간을 함께 살폈습니다. 최근 변화 후보 ${analysisObservationSignals.length}건을 기록했어요.`}
                   </p>
+                  {latestObservationEpisode && (latestObservationEpisode.movementCycles?.length ?? 0) > 0 && (
+                    <p>
+                      최근 {latestObservationEpisode.taskLabel}: 전체 {latestObservationEpisode.features.durationSeconds.toFixed(1)}초 ·
+                      왕복 {latestObservationEpisode.movementCycles!.length}회 ·
+                      회당 평균 {(latestObservationEpisode.movementCycles!.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / latestObservationEpisode.movementCycles!.length).toFixed(1)}초
+                    </p>
+                  )}
                   <div className="pattern-summary-grid">
                     <span><small>기준선 완성도</small><strong><NumberFlow value={observationBaseline.confidence} suffix="%" /></strong></span>
                     <span><small>학습된 업무</small><strong>{observationBaseline.tasks.length}개</strong></span>
@@ -6356,6 +6371,13 @@ export default function Home() {
                   {selectedReviewEpisode.features.dominantZone
                     ? `감지 구역 · ${occupationTemplate.zones.find((zone) => zone.id === selectedReviewEpisode.features.dominantZone)?.label ?? selectedReviewEpisode.features.dominantZone}`
                     : "감지 구역을 확인하지 못했어요"}
+                </small>
+                <small>
+                  업무 구간 {selectedReviewEpisode.features.durationSeconds.toFixed(1)}초 ·
+                  검출된 손목 왕복 {selectedReviewEpisode.movementCycles?.length ?? 0}회
+                  {(selectedReviewEpisode.movementCycles?.length ?? 0) > 0
+                    ? ` · 회당 ${selectedReviewEpisode.movementCycles!.map((cycle) => cycle.durationSeconds.toFixed(1)).join(", ")}초`
+                    : ""}
                 </small>
                 <small>{selectedReviewEpisode.source === "self_test"
                   ? "자체테스트 · 스켈레톤 리플레이와 구역을 보고 실제 동작을 선택하세요. 이 검토 결과는 자동 분류 학습에 추가되지 않습니다."
