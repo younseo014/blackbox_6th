@@ -154,6 +154,22 @@ test("self-test still separates tasks when the person pauses between them", () =
   assert.equal(slices.length, 2);
 });
 
+test("self-test keeps a 30-second continuous task in one interval", () => {
+  const base = generateEventMotion("register_tap", 35)[0];
+  const frames = Array.from({ length: 310 }, (_, index) => {
+    const next = [...base];
+    next[0] = index * 100;
+    next[10 + 4 * 4] += Math.sin(index * 0.22) * 0.16;
+    next[10 + 5 * 4] += Math.sin(index * 0.22 + 0.7) * 0.12;
+    return next;
+  });
+
+  const slices = sliceTargetMotions(frames, SELF_TEST_MOTION_SEGMENTATION);
+
+  assert.equal(slices.length, 1);
+  assert.ok(slices[0].durationSeconds > 25);
+});
+
 test("continuous movement is not allowed to become one unbounded episode", () => {
   const source = generateEventMotion("register_tap", 30);
   const frames = Array.from({ length: 32 }, (_, repetition) =>
@@ -168,4 +184,25 @@ test("continuous movement is not allowed to become one unbounded episode", () =>
 
   assert.ok(slices.length >= 2);
   assert.ok(slices.every((slice) => slice.durationSeconds <= 21));
+});
+
+test("hip visibility flicker does not turn a stationary upper body into an action", () => {
+  const base = generateEventMotion("normal_task", 1)[0];
+  const frames = Array.from({ length: 60 }, (_, index) => {
+    const frame = [...base];
+    frame[0] = index * 100;
+    for (let joint = 12; joint < 22; joint++) frame[10 + joint * 4 + 3] = index % 2 ? 0 : 0.95;
+    return frame;
+  });
+  assert.equal(sliceTargetMotions(frames, SELF_TEST_MOTION_SEGMENTATION).length, 0);
+});
+
+test("a single-frame tracking jump during rest does not create an action", () => {
+  const base = generateEventMotion("normal_task", 1)[0];
+  const frames = Array.from({ length: 60 }, (_, index) => {
+    const frame = [...base]; frame[0] = index * 100;
+    if (index === 20 || index === 30) frame[10 + 5 * 4] += 0.5;
+    return frame;
+  });
+  assert.equal(sliceTargetMotions(frames, SELF_TEST_MOTION_SEGMENTATION).length, 0);
 });

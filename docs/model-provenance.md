@@ -66,7 +66,21 @@ in `docs/tracking-eval.md`.
 this work. They belong to the **motion classification** pipeline, not pose
 estimation, and were not retrained here.
 
-## Data policy
+## Local visual action context — added 2026-11-10
+
+- Model: OpenAI CLIP ViT-B/32, Xenova ONNX int8 conversion.
+- Source: https://huggingface.co/Xenova/clip-vit-base-patch32
+- Pinned revision: `6b7c523703ae26e39be4b03774966f8571c7f523`.
+- Runtime weights: `public/models/action-context/vision-int8.onnx`, 89,117,001 bytes.
+- SHA-256: `583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299`.
+- License: MIT (model card; OpenAI code and weights). Attribution bundled in `public/models/action-context/LICENSE.txt`.
+- `scripts/prepare-action-runtime.mjs` downloads only the pinned runtime model and verifies its digest.
+- Fixed text prototypes: `config/cafe-action-prompts.json`, encoded using the same pinned quantized CLIP text model and tokenizer with `scripts/build-local-action-model.py`. No participant data used to construct them.
+- Purpose: transient local image context for cafe task candidates and interruption candidates, combined with observed pose movement. Not a cafe-trained temporal action model; not clinical inference.
+- Calibration status: operating points (cosine >=0.28, margin >=0.04, >=3 samples across >=2 seconds) are **unvalidated on cafe ground truth**. No cafe accuracy claim is made.
+- Original images, image embeddings and audio are not persisted or transmitted. Label, kind, cosine, margin, time and body-observation flag are retained in the capture manifest for provenance.
+
+## Evaluation data policy
 
 Study participant recordings are not used for evaluation, calibration or any
 model fitting. Only public datasets and developer-recorded pre-validation clips

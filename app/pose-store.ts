@@ -1,4 +1,6 @@
 import { mergeCameraFrameStreams, type CameraSlot } from "./multi-camera";
+import type { WorkContextLike } from "./work-context-inference";
+import type { VisualActionSample } from "./local-action-context";
 import { MOTION_CODEC_FRAME_VALUES, decodeMotionChunk, encodeMotionChunk, type MotionChunkCodec } from "./motion-chunk-codec";
 import {
   createDataFolderZip,
@@ -117,6 +119,11 @@ export type CaptureManifestRecord = {
   timeZone?: string;
   utcOffsetMinutes?: number;
   expectedCameraSlots: CameraSlot[];
+  purpose?: "self_test" | "multi_camera";
+  visualContext?: { model: "clip-vit-base-patch32-int8"; cameraSlot: 1; samples: VisualActionSample[] };
+  selfTest?: { participant: string; stage: "training" | "evaluation"; recordingStartMs: number };
+  observationContext?: { occupation: string; mode: "learning" | "analysis"; baselineVersion: number };
+  workContextSnapshot?: WorkContextLike;
   multiViewCapture?: {
     arrangement: "shared_workspace_three_angles";
     personConfirmation: "three_synchronized_skeletons";
@@ -182,11 +189,13 @@ export type MotionChunkRecord = {
   createdAt: number;
   /** Missing on pre-optimization Float32 chunks. */
   codec?: MotionChunkCodec;
+  startMs?: number;
+  endMs?: number;
   data: ArrayBuffer;
 };
 
 const DB_NAME = "memory-guard-motion-v2";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const SESSION_STORE = "motion_sessions";
 const CHUNK_STORE = "motion_chunks";
 const CAPTURE_MANIFEST_STORE = "capture_manifests";
@@ -220,6 +229,10 @@ export function openMotionDatabase() {
           keyPath: "id",
         });
         chunkStore.createIndex("sessionId", "sessionId", { unique: false });
+      }
+      const chunks = request.transaction!.objectStore(CHUNK_STORE);
+      if (!chunks.indexNames.contains("sessionFrame")) {
+        chunks.createIndex("sessionFrame", ["sessionId", "startFrame"], { unique: true });
       }
       if (!database.objectStoreNames.contains(CAPTURE_MANIFEST_STORE)) {
         database.createObjectStore(CAPTURE_MANIFEST_STORE, { keyPath: "id" });
@@ -312,7 +325,7 @@ export async function appendCameraHealthChunk(
   if (samples.length === 0) return;
   const database = await openMotionDatabase();
   const transaction = database.transaction(CAMERA_HEALTH_STORE, "readwrite");
-  const data = samples.buffer.slice(samples.byteOffset, samples.byteOffset + samples.byteLength);
+  const data = samples.slice().buffer;
   const record: CameraHealthChunkRecord = {
     id: `${globalSessionId}:${cameraSlot}:${startSecond}`,
     globalSessionId,
@@ -398,6 +411,8 @@ export async function appendMotionChunk(
     frameCount,
     createdAt: Date.now(),
     codec: encoded.codec,
+    startMs: data[0],
+    endMs: data[data.length - MOTION_FRAME_STRIDE],
     data: encoded.data,
   };
   const updatedSession: MotionSessionRecord = {
@@ -440,31 +455,49 @@ export async function listMotionSessions() {
   return sessions.sort((a, b) => b.startedAt - a.startedAt);
 }
 
-async function getMotionChunks(sessionId: string) {
+export async function getMotionSession(id: string): Promise<MotionSessionRecord | null> {
   const database = await openMotionDatabase();
-  const transaction = database.transaction(CHUNK_STORE, "readonly");
-  const chunks = await requestResult<MotionChunkRecord[]>(
-    transaction.objectStore(CHUNK_STORE).index("sessionId").getAll(sessionId),
-  );
-  await transactionDone(transaction);
-  database.close();
-  return chunks.sort((a, b) => a.startFrame - b.startFrame);
+  try {
+    const transaction = database.transaction(SESSION_STORE, "readonly");
+    const record = await requestResult<MotionSessionRecord | undefined>(transaction.objectStore(SESSION_STORE).get(id));
+    await transactionDone(transaction);
+    return record ?? null;
+  } finally { database.close(); }
+}
+
+async function* iterateMotionChunks(sessionId: string) {
+  const database = await openMotionDatabase();
+  try {
+    let afterFrame = -Infinity;
+    while (true) {
+      // Each read has its own transaction so asynchronous decompression cannot expire it.
+      const transaction = database.transaction(CHUNK_STORE, "readonly");
+      const chunk = await requestResult<MotionChunkRecord | undefined>(transaction.objectStore(CHUNK_STORE)
+        .index("sessionFrame").get(IDBKeyRange.bound([sessionId, afterFrame], [sessionId, Infinity], true)));
+      await transactionDone(transaction);
+      if (!chunk) break;
+      afterFrame = chunk.startFrame;
+      yield chunk;
+    }
+  } finally { database.close(); }
 }
 
 /** Parses a session's stored chunks back into per-frame numeric arrays. */
-export async function getSessionFrames(sessionId: string): Promise<number[][]> {
-  const chunks = await getMotionChunks(sessionId);
+export async function getSessionFrames(sessionId: string, window?: { startMs: number; endMs: number }): Promise<number[][]> {
   const frames: number[][] = [];
-  for (const chunk of chunks) {
+  for await (const chunk of iterateMotionChunks(sessionId)) {
+    if (window && chunk.startMs !== undefined && chunk.endMs !== undefined
+      && (chunk.endMs < window.startMs || chunk.startMs > window.endMs)) continue;
     const values = await decodeMotionChunk(chunk.codec, chunk.data, chunk.frameCount);
     for (let offset = 0; offset < values.length; offset += MOTION_FRAME_STRIDE) {
+      if (window && (values[offset] < window.startMs || values[offset] > window.endMs)) continue;
       frames.push(Array.from(values.subarray(offset, offset + MOTION_FRAME_STRIDE)));
     }
   }
   return frames;
 }
 
-export async function getGlobalSessionCameraFrames(globalSessionId: string) {
+export async function getGlobalSessionCameraFrames(globalSessionId: string, window?: { startMs: number; endMs: number }) {
   const sessions = (await listMotionSessions()).filter(
     (session) => session.globalSessionId === globalSessionId,
   );
@@ -474,7 +507,7 @@ export async function getGlobalSessionCameraFrames(globalSessionId: string) {
     cameraId: session.cameraId ?? "",
     cameraLabel: session.cameraLabel ?? `카메라 ${session.cameraSlot ?? 1}`,
     logicalCameraId: session.logicalCameraId ?? `CAMERA_${session.cameraSlot ?? 1}`,
-    frames: await getSessionFrames(session.id),
+    frames: await getSessionFrames(session.id, window),
   })));
 }
 
@@ -693,7 +726,6 @@ export function buildFrameTimeIndex(frames: number[][], sessionStartedAt: number
 }
 
 async function buildMotionSessionDataset(session: MotionSessionRecord) {
-  const chunks = await getMotionChunks(session.id);
   const captureManifest = session.globalSessionId
     ? await getCaptureManifest(session.globalSessionId)
     : null;
@@ -701,7 +733,9 @@ async function buildMotionSessionDataset(session: MotionSessionRecord) {
     ? await getCameraHealthIntervals(session.globalSessionId)
     : [];
   const frames: number[][] = [];
-  for (const chunk of chunks) {
+  const codecs = new Set<MotionChunkCodec>();
+  for await (const chunk of iterateMotionChunks(session.id)) {
+    codecs.add(chunk.codec ?? "f32-v1");
     const values = await decodeMotionChunk(chunk.codec, chunk.data, chunk.frameCount);
     for (let offset = 0; offset < values.length; offset += MOTION_FRAME_STRIDE) {
       frames.push(
@@ -722,7 +756,7 @@ async function buildMotionSessionDataset(session: MotionSessionRecord) {
     schema: {
       sample_rate_hz: MOTION_SAMPLE_RATE,
       coordinate_space: "normalized_image",
-      source_storage_codecs: [...new Set(chunks.map((chunk) => chunk.codec ?? "f32-v1"))],
+      source_storage_codecs: [...codecs],
       coordinate_encoding_note: "New sessions quantize normalized coordinates to 16-bit fixed point before gzip. Out-of-range values remain Float32. Exported frames are decoded numbers.",
       mirrored_preview: true,
       time_reference: {

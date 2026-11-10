@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addObservationMotionSample, classifyLearnedMotion } from "../app/custom-motion-training.ts";
+import { addObservationMotionSample, classifyLearnedMotion, removeObservationMotionSample } from "../app/custom-motion-training.ts";
 import { generateEventMotion } from "../app/demo-motion.ts";
 
 function upperBodyOnly(frames: number[][]) {
@@ -115,4 +115,22 @@ test("observation labels replace only the exact same slice", () => {
   const updated = addObservationMotionSample(initial, " 설거지 ", sample, 2);
 
   assert.equal(updated[0].samples.length, 1);
+});
+
+test("correcting a label and its bounds replaces the old episode sample across all labels", () => {
+  const initial = addObservationMotionSample([], "테이블 닦기", { episodeId: "episode", sessionId: "session", startMs: 13000, endMs: 30000 });
+  const changed = addObservationMotionSample(initial, "음료 재료 혼합", { episodeId: "episode", sessionId: "session", startMs: 18000, endMs: 32000 });
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].label, "음료 재료 혼합");
+  assert.equal(changed[0].samples[0].startMs, 18000);
+  assert.equal(removeObservationMotionSample(changed, changed[0].samples[0]).length, 0);
+});
+
+test("identical examples with different labels are uncertain even at zero distance", () => {
+  const frames = generateEventMotion("normal_task", 1);
+  const result = classifyLearnedMotion(frames, [
+    { id: "a", label: "혼합", samples: [frames] }, { id: "b", label: "닦기", samples: [frames] },
+  ]);
+  assert.equal(result.status, "uncertain");
+  assert.ok(Number.isFinite(result.confidence));
 });

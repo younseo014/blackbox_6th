@@ -23,7 +23,8 @@ import {
   finishCaptureManifest,
   finishMotionSession,
   getGlobalSessionCameraFrames,
-  getGlobalSessionFrames,
+  getCaptureManifest,
+  getMotionSession,
   getSessionFrames,
   getLatestBodyProportionProfile,
   listMotionSessions,
@@ -97,6 +98,7 @@ import {
 } from "./observation-store";
 import {
   addObservationMotionSample,
+  removeObservationMotionSample,
   classifyLearnedMotion,
   clearLearnedMotionActions,
   clearObservationMotionActions,
@@ -108,8 +110,14 @@ import {
   type LearnedMotionResult,
   type LearnedMotionSample,
 } from "./custom-motion-training";
-import { SELF_TEST_MOTION_SEGMENTATION, sliceTargetMotions } from "./motion-segmentation";
+import { sliceTargetMotions } from "./motion-segmentation";
+import { segmentWorkEpisodes } from "./learned-work-segmentation";
+import { hasCompleteWorkBoundaries } from "./work-episode-segmentation";
+import { RecordingWriteQueue } from "./recording-write-queue";
+import { LocalActionModel } from "./local-action-model";
+import { contextualMotionSlices, visualActionIntervals, isSupportedVisualSample, type VisualActionSample } from "./local-action-context";
 import { classifyCafeSelfTest } from "./self-test-classifier";
+import { detectWorkInterruptions, summarizeInterruptions, normalizeInterruptionSummary, hasInterruptionConfound, INTERRUPTION_LABELS, type InterruptionSummary } from "./work-interruptions";
 import {
   createGlobalCaptureSession,
   frameQuality,
@@ -239,7 +247,7 @@ async function receivesVideoFrames(stream: MediaStream, timeoutMs = 4_000) {
       };
       const timeout = window.setTimeout(() => finish(false), timeoutMs);
 
-      if ("requestVideoFrameCallback" in video) {
+      if (typeof video.requestVideoFrameCallback === "function") {
         video.requestVideoFrameCallback(() => finish(true));
       } else {
         const onFrame = () => finish(video.videoWidth > 0 && video.videoHeight > 0);
@@ -320,6 +328,23 @@ const SELF_TEST_LEARNED_KEY = "memory-guard-self-test-learned-v1";
 const SELF_TEST_ACTION_LABELS = ["컵 보충", "냉장 재료 꺼내기", "음료 재료 혼합", "테이블 닦기", "식기 세척"];
 const SELF_TEST_CAMERA_KEY = "memory-guard-self-test-camera-v1";
 const SELF_TEST_ZONE_KEY = "memory-guard-self-test-zone-grid-v1";
+const SELF_TEST_INTERRUPTION_KEY = "memory-guard-self-test-interruptions-v1";
+type SelfTestInterruptionReport = {
+  sessionId: string;
+  participant: string;
+  stage: "training" | "evaluation";
+  summary: InterruptionSummary;
+};
+function loadSelfTestInterruptionReports(): SelfTestInterruptionReport[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const reports = JSON.parse(window.localStorage.getItem(SELF_TEST_INTERRUPTION_KEY) ?? "[]");
+    return Array.isArray(reports) ? reports.filter((item) => item && typeof item.sessionId === "string"
+      && typeof item.participant === "string" && ["training", "evaluation"].includes(item.stage)
+      && Array.isArray(item.summary?.intervals) && Number.isFinite(item.summary?.remainingSeconds))
+      .map((item: SelfTestInterruptionReport) => ({ ...item, summary: normalizeInterruptionSummary(item.summary) })) : [];
+  } catch { return []; }
+}
 
 function loadSelfTestCameraId() {
   if (typeof window === "undefined") return "";
@@ -798,6 +823,8 @@ export default function Home() {
   const [replaySessionId, setReplaySessionId] = useState<string | null>(null);
   const [selectedReviewEpisodeId, setSelectedReviewEpisodeId] = useState<string | null>(null);
   const [selectedReviewTaskType, setSelectedReviewTaskType] = useState("");
+  const [selectedReviewStartSeconds, setSelectedReviewStartSeconds] = useState(0);
+  const [selectedReviewEndSeconds, setSelectedReviewEndSeconds] = useState(0);
   const [allActionReviewsOpen, setAllActionReviewsOpen] = useState(false);
   const [demoReplay, setDemoReplay] = useState<{
     key: string;
@@ -823,7 +850,19 @@ export default function Home() {
   const [selfTestParticipant, setSelfTestParticipant] = useState("");
   const [selfTestLearnedMotions, setSelfTestLearnedMotions] = useState<Record<string, LearnedMotionAction[]>>(loadSelfTestLearnedMotions);
   const [selfTestStage, setSelfTestStage] = useState<"training" | "evaluation">("training");
-  const [selfTestLabel, setSelfTestLabel] = useState(SELF_TEST_ACTION_LABELS[0]);
+  const [selfTestRecording, setSelfTestRecording] = useState(false);
+  const [selfTestStarting, setSelfTestStarting] = useState(false);
+  const selfTestStartingRef = useRef(false);
+  const [recordingStorageError, setRecordingStorageError] = useState(false);
+  const [actionModelStatus, setActionModelStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [liveActionContext, setLiveActionContext] = useState<VisualActionSample | null>(null);
+  const actionModelRef = useRef<LocalActionModel | null>(null);
+  const actionModelLoadingRef = useRef<Promise<void> | null>(null);
+  const actionModelAbortRef = useRef<AbortController | null>(null);
+  const actionContextPendingRef = useRef<Promise<void> | null>(null);
+  const actionContextSamplesRef = useRef<VisualActionSample[]>([]);
+  const lastActionContextTimeRef = useRef(-Infinity);
+  const [selfTestInterruptionReports, setSelfTestInterruptionReports] = useState(loadSelfTestInterruptionReports);
   const [selfTestCameraId, setSelfTestCameraId] = useState(loadSelfTestCameraId);
   const [selfTestZoneGrid, setSelfTestZoneGrid] = useState<Array<string | null>>(loadSelfTestZoneGrid);
   const [selfTestSelectedZoneId, setSelfTestSelectedZoneId] = useState("INGREDIENT_STORAGE");
@@ -875,12 +914,16 @@ export default function Home() {
   const zoneCameraRequestedRef = useRef(false);
   const checklistTaskStartedRef = useRef(false);
   const bookingShownAtRef = useRef<number | null>(null);
-  const lastTestEventAtRef = useRef<number | null>(null);
   const savepointStartRecordedRef = useRef(false);
   const selfTestSessionIdRef = useRef<string | null>(null);
+  const selfTestRecordingRef = useRef(false);
   const selfTestSessionStageRef = useRef<"training" | "evaluation" | null>(null);
   const selfTestCameraRequestedRef = useRef(false);
   const cameraSessionPurposeRef = useRef<"multi_camera" | "self_test" | null>(null);
+  const cameraConnectionGenerationRef = useRef(0);
+  const cameraStopPendingRef = useRef<Promise<void> | null>(null);
+  const observationRunContextRef = useRef<{ sessionId: string; profile: ObservationProfile; workContext: WorkContextConfig; baseline: typeof observationBaseline } | null>(null);
+  const [cameraSessionPurpose, setCameraSessionPurpose] = useState<"multi_camera" | "self_test" | null>(null);
 
   async function refreshCareData() {
     try {
@@ -893,7 +936,7 @@ export default function Home() {
 
   async function refreshObservationData(profile = observationProfile) {
     try {
-      const episodes = await listObservationEpisodes(500);
+      const episodes = await listObservationEpisodes();
       setObservationEpisodes(episodes);
       const eligible = episodes.filter(
         (episode) =>
@@ -995,10 +1038,10 @@ export default function Home() {
   });
   const schedulerStateRef = useRef<SchedulerState>({ ...EMPTY_SCHEDULER_STATE });
   const lastPoseInferenceAtRef = useRef<Record<CameraSlot, number>>({ 1: -Infinity, 2: -Infinity, 3: -Infinity });
-  const cameraHealthWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const poseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const secondaryPoseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const tertiaryPoseWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const cameraHealthWriteQueueRef = useRef(new RecordingWriteQueue());
+  const poseWriteQueueRef = useRef(new RecordingWriteQueue());
+  const secondaryPoseWriteQueueRef = useRef(new RecordingWriteQueue());
+  const tertiaryPoseWriteQueueRef = useRef(new RecordingWriteQueue());
   const sessionPerformanceStartRef = useRef(0);
   const lastStatsUpdateRef = useRef(0);
   const lastVideoTimeRef = useRef(-1);
@@ -1173,7 +1216,7 @@ export default function Home() {
         setOccupationInput(saved.occupationName || getOccupationTemplate(saved.occupation).label);
         const template = getOccupationTemplate(saved.occupation);
         setSelectedZoneId(template.zones[0]?.id ?? "");
-        const episodes = await listObservationEpisodes(500);
+        const episodes = await listObservationEpisodes();
         setObservationEpisodes(episodes);
         setObservationBaseline(buildBaseline(
           episodes.filter(
@@ -1222,6 +1265,10 @@ export default function Home() {
   }, [selfTestTrials]);
 
   useEffect(() => {
+    window.localStorage.setItem(SELF_TEST_INTERRUPTION_KEY, JSON.stringify(selfTestInterruptionReports));
+  }, [selfTestInterruptionReports]);
+
+  useEffect(() => {
     window.localStorage.setItem(SELF_TEST_LEARNED_KEY, JSON.stringify(selfTestLearnedMotions));
   }, [selfTestLearnedMotions]);
 
@@ -1239,11 +1286,8 @@ export default function Home() {
 
   const namedSelfTestCameras = selfTestCameras.filter((camera) => camera.deviceId && camera.label);
 
-  useEffect(() => {
-    if (namedSelfTestCameras.length > 0 && !namedSelfTestCameras.some((camera) => camera.deviceId === selfTestCameraId)) {
-      setSelfTestCameraId(namedSelfTestCameras[0].deviceId);
-    }
-  }, [namedSelfTestCameras, selfTestCameraId]);
+  const selectedSelfTestCameraId = namedSelfTestCameras.some((camera) => camera.deviceId === selfTestCameraId)
+    ? selfTestCameraId : namedSelfTestCameras[0]?.deviceId ?? "";
 
   const selfTestOccupationTemplate = getOccupationTemplate("cafe");
 
@@ -1260,15 +1304,19 @@ export default function Home() {
   }, [consent.observationConsent, savepointOpen]);
 
   useEffect(() => {
-    if (!consent.observationConsent || !latestSession || latestSession.frameCount < 20) {
+    if (!consent.observationConsent || !latestSession || latestSession.frameCount < 20 || latestSession.endedAt === null) {
       return;
     }
     let cancelled = false;
-    (latestSession.globalSessionId
-      ? getGlobalSessionFrames(latestSession.globalSessionId)
-      : getSessionFrames(latestSession.id))
+    (async () => {
+      const manifest = latestSession.globalSessionId ? await getCaptureManifest(latestSession.globalSessionId) : null;
+      if (manifest?.purpose === "self_test") return null;
+      // A trajectory must stay in one camera's coordinate space.
+      return getSessionFrames(latestSession.id);
+    })()
       .then((frames) => {
         if (cancelled) return;
+        if (!frames) { setMotionSignal(null); return; }
         const rightHandTrajectory = extractHandPointTrajectory(
           frames,
           "right",
@@ -1307,6 +1355,8 @@ export default function Home() {
   useEffect(() => {
     return () => {
       trackingActiveRef.current = false;
+      cameraConnectionGenerationRef.current += 1;
+      actionModelAbortRef.current?.abort();
       if (poseAnimationRef.current !== null) {
         cancelAnimationFrame(poseAnimationRef.current);
       }
@@ -1320,6 +1370,7 @@ export default function Home() {
       personDetectorRef.current?.close();
       yoloxDetectorGenerationRef.current += 1;
       yoloxDetectorRef.current?.close();
+      actionModelRef.current?.close();
     };
   }, []);
 
@@ -1372,7 +1423,7 @@ export default function Home() {
       if (cameraSessionPurposeRef.current === "self_test") await stopSelfTestCamera();
       else await stopCamera({ analyzeSession: false, notify: false });
     }
-    void startCamera(selfTestCameraId, "", "", true);
+    void startCamera(selectedSelfTestCameraId, "", "", true);
   }
 
   async function refreshSelfTestCameras() {
@@ -1432,7 +1483,7 @@ export default function Home() {
     if (observationConsent && pendingCameraStartRef.current) {
       if (selfTestCameraRequestedRef.current) {
         if (cameraStatus === "connected") await stopCamera({ analyzeSession: false, notify: false });
-        void startCamera(selfTestCameraId, "", "", true);
+        void startCamera(selectedSelfTestCameraId, "", "", true);
       } else {
         if (!quickMotionCameraRequestedRef.current && !zoneCameraRequestedRef.current) setMultiCameraModalOpen(true);
         if (cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test") await stopCamera({ analyzeSession: false, notify: false });
@@ -1452,12 +1503,18 @@ export default function Home() {
     requestedTertiaryCameraId?: string,
     singleCameraOnly = false,
   ) {
+    if (cameraStopPendingRef.current) await cameraStopPendingRef.current;
+    const connectionGeneration = ++cameraConnectionGenerationRef.current;
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraStatus("error");
       setCameraMessage("이 브라우저에서는 카메라를 사용할 수 없어요.");
       return;
     }
 
+    if (poseSessionRef.current) {
+      toast.error("이전 촬영의 저장을 먼저 완료해 주세요. 카메라 종료를 다시 눌러 재시도할 수 있어요.");
+      return;
+    }
     setCameraStatus("requesting");
     setCameraMessage("카메라 연결을 기다리고 있어요…");
 
@@ -1504,6 +1561,7 @@ export default function Home() {
       if (singleCameraOnly) {
         setSelfTestCameraId(preferredPrimary.deviceId);
         cameraSessionPurposeRef.current = "self_test";
+      setCameraSessionPurpose("self_test");
       } else {
         setPrimaryCameraId(preferredPrimary.deviceId);
         setSecondaryCameraId(preferredSecondary?.deviceId ?? "");
@@ -1515,6 +1573,7 @@ export default function Home() {
         ];
         window.localStorage.setItem(CAMERA_SLOT_STORAGE_KEY, JSON.stringify(selected));
         cameraSessionPurposeRef.current = "multi_camera";
+      setCameraSessionPurpose("multi_camera");
       }
 
       const stream = await openCameraDevice(preferredPrimary.deviceId, false, singleCameraOnly);
@@ -1569,6 +1628,10 @@ export default function Home() {
         }
       }
 
+      if (connectionGeneration !== cameraConnectionGenerationRef.current) {
+        [stream, secondaryStream, tertiaryStream].forEach((opened) => opened?.getTracks().forEach((track) => track.stop()));
+        return;
+      }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       secondaryStreamRef.current?.getTracks().forEach((track) => track.stop());
       tertiaryStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1626,10 +1689,13 @@ export default function Home() {
           2: preferredSecondary?.label || "카메라 2",
           3: preferredTertiary?.label || "카메라 3",
         },
+        connectionGeneration,
       );
     } catch (error) {
+      if (connectionGeneration !== cameraConnectionGenerationRef.current) return;
       console.error("Camera connection failed", error);
       cameraSessionPurposeRef.current = null;
+      setCameraSessionPurpose(null);
       setCameraStatus("error");
       setCameraMessage(
         "카메라 권한을 허용한 뒤 다시 연결해 주세요. 영상은 외부로 전송되지 않아요.",
@@ -1792,6 +1858,15 @@ export default function Home() {
     }
   }
 
+  function reportRecordingWriteError(error: unknown) {
+    console.error("[recording] 저장 실패: 미저장 묶음을 보존하고 다음 저장에서 재시도합니다", error);
+    trackingActiveRef.current = false;
+    if (poseAnimationRef.current !== null) cancelAnimationFrame(poseAnimationRef.current);
+    poseAnimationRef.current = null;
+    setRecordingStorageError(true);
+    setCameraMessage("좌표 저장 실패 · 저장 공간을 확인한 뒤 카메라 종료를 다시 눌러 주세요. 미저장 기록이 있어 앱을 닫지 마세요.");
+  }
+
   function flushPoseFrames(cameraSlot: CameraSlot = 1) {
     const bufferRef = cameraSlot === 1 ? poseBufferRef : cameraSlot === 2 ? secondaryPoseBufferRef : tertiaryPoseBufferRef;
     const sessionRef = cameraSlot === 1 ? poseSessionRef : cameraSlot === 2 ? secondaryPoseSessionRef : tertiaryPoseSessionRef;
@@ -1799,7 +1874,7 @@ export default function Home() {
     const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : cameraSlot === 2 ? secondaryChunkDetectedFramesRef : tertiaryChunkDetectedFramesRef;
     const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : cameraSlot === 2 ? secondaryChunkFullBodyFramesRef : tertiaryChunkFullBodyFramesRef;
     const handRef = cameraSlot === 1 ? chunkHandFramesRef : cameraSlot === 2 ? secondaryChunkHandFramesRef : tertiaryChunkHandFramesRef;
-    if (bufferRef.current.length === 0 || !sessionRef.current) return writeQueueRef.current;
+    if (bufferRef.current.length === 0 || !sessionRef.current) return writeQueueRef.current.flush();
     const values = new Float32Array(bufferRef.current);
     const detectedFrames = detectedRef.current;
     const fullBodyFrames = fullBodyRef.current;
@@ -1810,9 +1885,9 @@ export default function Home() {
     fullBodyRef.current = 0;
     handRef.current = 0;
 
-    writeQueueRef.current = writeQueueRef.current.then(async () => {
+    return writeQueueRef.current.enqueue(async () => {
       const session = sessionRef.current;
-      if (!session || session.id !== sessionId) return;
+      if (!session || session.id !== sessionId) throw new Error("Unwritten frames belong to another recording session");
       const updated = await appendMotionChunk(
         session,
         session.frameCount,
@@ -1825,7 +1900,6 @@ export default function Home() {
       sessionRef.current = updated;
       if (cameraSlot === 1) setLatestSession(updated);
     });
-    return writeQueueRef.current;
   }
 
   function recordPoseFrame(
@@ -1837,6 +1911,7 @@ export default function Home() {
     cameraSlot: CameraSlot = 1,
   ) {
     if (!landmarks) return;
+    if (cameraSessionPurposeRef.current === "self_test" && !selfTestRecordingRef.current) return;
     const bufferRef = cameraSlot === 1 ? poseBufferRef : cameraSlot === 2 ? secondaryPoseBufferRef : tertiaryPoseBufferRef;
     const detectedRef = cameraSlot === 1 ? chunkDetectedFramesRef : cameraSlot === 2 ? secondaryChunkDetectedFramesRef : tertiaryChunkDetectedFramesRef;
     const fullBodyRef = cameraSlot === 1 ? chunkFullBodyFramesRef : cameraSlot === 2 ? secondaryChunkFullBodyFramesRef : tertiaryChunkFullBodyFramesRef;
@@ -1894,7 +1969,7 @@ export default function Home() {
     }
 
     if (buffer.length / MOTION_FRAME_STRIDE >= CHUNK_FRAME_COUNT) {
-      void flushPoseFrames(cameraSlot);
+      void flushPoseFrames(cameraSlot).catch(reportRecordingWriteError);
     }
   }
 
@@ -1902,15 +1977,14 @@ export default function Home() {
     const globalSessionId = globalCaptureSessionRef.current?.id;
     const buffer = cameraHealthBuffersRef.current[cameraSlot];
     if (!globalSessionId || buffer.startSecond < 0 || buffer.samples.length === 0) {
-      return cameraHealthWriteQueueRef.current;
+      return cameraHealthWriteQueueRef.current.flush();
     }
     const startSecond = buffer.startSecond;
     const samples = Uint8Array.from(buffer.samples);
     cameraHealthBuffersRef.current[cameraSlot] = { startSecond: -1, samples: [] };
-    cameraHealthWriteQueueRef.current = cameraHealthWriteQueueRef.current.then(() =>
+    return cameraHealthWriteQueueRef.current.enqueue(() =>
       appendCameraHealthChunk(globalSessionId, cameraSlot, startSecond, samples),
     );
-    return cameraHealthWriteQueueRef.current;
   }
 
   function sampleCameraHealth(timestamp: number) {
@@ -1942,7 +2016,7 @@ export default function Home() {
         const buffer = cameraHealthBuffersRef.current[cameraSlot];
         if (buffer.startSecond < 0) buffer.startSecond = sampledSecond;
         buffer.samples.push(value);
-        if (buffer.samples.length >= CAMERA_HEALTH_CHUNK_SECONDS) void flushCameraHealth(cameraSlot);
+        if (buffer.samples.length >= CAMERA_HEALTH_CHUNK_SECONDS) void flushCameraHealth(cameraSlot).catch(reportRecordingWriteError);
       });
     }
     lastCameraHealthSecondRef.current = second;
@@ -2260,6 +2334,7 @@ export default function Home() {
           }
         }
 
+        sampleActionContext(video, timestamp, Boolean(liveLandmarks));
         if (timestamp - lastSampleTimeRef.current >= 1000 / MOTION_SAMPLE_RATE) {
           lastSampleTimeRef.current = timestamp;
           const recordingHands = displayLandmarks
@@ -2285,6 +2360,44 @@ export default function Home() {
     updateGlobalTrack(timestamp);
     sampleCameraHealth(timestamp);
     poseAnimationRef.current = requestAnimationFrame(poseTrackingLoop);
+  }
+
+  function prepareActionContext(connectionGeneration: number) {
+    if (actionModelRef.current || actionModelLoadingRef.current) return;
+    setActionModelStatus("loading");
+    const abort = new AbortController(); actionModelAbortRef.current = abort;
+    const loading = LocalActionModel.create(abort.signal).then(model => {
+      if (connectionGeneration !== cameraConnectionGenerationRef.current) { model.close(); return; }
+      actionModelRef.current = model;
+      setActionModelStatus("ready");
+      console.info("[action-context] local CLIP ready; images are not persisted");
+    }).catch(error => {
+      console.error("[action-context] model unavailable", error);
+      if (connectionGeneration === cameraConnectionGenerationRef.current) {
+        setActionModelStatus("error");
+        setCameraMessage("좌표는 기록할 수 있지만 로컬 영상 맥락 모델 준비에 실패했어요. 자동 업무 판별을 위해 카메라를 다시 연결해 주세요.");
+      }
+    }).finally(() => { if (actionModelLoadingRef.current === loading) actionModelLoadingRef.current = null; });
+    actionModelLoadingRef.current = loading;
+  }
+
+  function sampleActionContext(video: HTMLVideoElement, timestamp: number, bodyObserved: boolean) {
+    const session = poseSessionRef.current;
+    if (!session || !actionModelRef.current || actionContextPendingRef.current || timestamp - lastActionContextTimeRef.current < 1000) return;
+    if (cameraSessionPurposeRef.current === "self_test" ? !selfTestRecordingRef.current : observationRunContextRef.current?.profile.occupation !== "cafe") return;
+    lastActionContextTimeRef.current = timestamp;
+    const timeMs = timestamp - sessionPerformanceStartRef.current;
+    actionContextPendingRef.current = actionModelRef.current.classify(video).then(result => {
+      if (poseSessionRef.current?.id !== session.id) return;
+      const sample = { ...result, timeMs, bodyObserved };
+      actionContextSamplesRef.current.push(sample);
+      setLiveActionContext(sample);
+    }).catch(error => {
+      console.error("[action-context] inference failed", error);
+      setActionModelStatus("error");
+      setCameraMessage("로컬 영상 맥락 추론에 실패했어요. 좌표는 보존하며, 카메라를 다시 연결해 주세요.");
+      actionModelRef.current?.close(); actionModelRef.current = null;
+    }).finally(() => { actionContextPendingRef.current = null; });
   }
 
   function trackAuxiliaryPose(timestamp: number, cameraSlot: 2 | 3) {
@@ -2381,9 +2494,11 @@ export default function Home() {
     tertiaryId = tertiaryCameraId,
     connectionMessage = "",
     cameraLabels: Partial<Record<CameraSlot, string>> = {},
+    connectionGeneration = cameraConnectionGenerationRef.current,
   ) {
     try {
       await ensureMotionLandmarkers();
+      if (connectionGeneration !== cameraConnectionGenerationRef.current || !streamRef.current) return;
       const startedAt = currentEpochTime();
       const connectedCameras = [
         { cameraId: primaryId, slot: 1 as const, label: cameraLabels[1] || "카메라 1" },
@@ -2400,7 +2515,12 @@ export default function Home() {
         startedAt,
         { ...sharedSession, cameraId: primaryId, cameraSlot: 1, cameraLabel: cameraLabels[1], logicalCameraId: "CAMERA_1" },
       );
+      if (connectionGeneration !== cameraConnectionGenerationRef.current) {
+        await finishMotionSession(session, currentEpochTime());
+        return;
+      }
       poseSessionRef.current = session;
+      observationRunContextRef.current = { sessionId: session.id, profile: observationProfile, workContext: workContextConfig, baseline: observationBaseline };
       if (cameraSessionPurposeRef.current === "self_test") {
         selfTestSessionIdRef.current = session.id;
         selfTestSessionStageRef.current = selfTestStage;
@@ -2424,14 +2544,17 @@ export default function Home() {
         startedAt,
         endedAt: null,
         timelineOriginMs: globalCaptureSessionRef.current.timelineOriginMs,
-        expectedCameraSlots: [1, 2, 3],
-        multiViewCapture: {
+        purpose: cameraSessionPurposeRef.current ?? "multi_camera",
+        observationContext: { occupation: observationProfile.occupation, mode: observationProfile.mode, baselineVersion: observationProfile.baselineVersion },
+        workContextSnapshot: cameraSessionPurposeRef.current === "self_test" ? undefined : workContextConfig,
+        expectedCameraSlots: cameraSessionPurposeRef.current === "self_test" ? [1] : [1, 2, 3],
+        ...(cameraSessionPurposeRef.current === "self_test" ? {} : { multiViewCapture: {
           arrangement: "shared_workspace_three_angles",
           personConfirmation: "three_synchronized_skeletons",
           synchronizationWindowMs: THREE_VIEW_SYNC_WINDOW_MS,
           coordinateSpace: "three_normalized_image_views",
           calibrated: false,
-        },
+        } }),
         cameras: ([1, 2, 3] as CameraSlot[]).map((slot) => {
           const ids = [primaryId, secondaryId, tertiaryId];
           const sessions = [session, secondaryPoseSessionRef.current, tertiaryPoseSessionRef.current];
@@ -2445,14 +2568,15 @@ export default function Home() {
           };
         }),
         zoneSnapshot: {
-          primary: [...observationProfile.zoneGrid],
-          secondary: [...observationProfile.secondaryZoneGrid],
-          tertiary: [...observationProfile.tertiaryZoneGrid],
-          customZones: observationProfile.customZones.map((zone) => ({ ...zone })),
+          primary: [...(cameraSessionPurposeRef.current === "self_test" ? selfTestZoneGrid : observationProfile.zoneGrid)],
+          secondary: cameraSessionPurposeRef.current === "self_test" ? Array(9).fill(null) : [...observationProfile.secondaryZoneGrid],
+          tertiary: cameraSessionPurposeRef.current === "self_test" ? Array(9).fill(null) : [...observationProfile.tertiaryZoneGrid],
+          customZones: cameraSessionPurposeRef.current === "self_test" ? [] : observationProfile.customZones.map((zone) => ({ ...zone })),
           profileUpdatedAt: observationProfile.updatedAt,
         },
         healthSampleRateHz: 1,
       });
+      if (connectionGeneration !== cameraConnectionGenerationRef.current) return;
       sessionPerformanceStartRef.current = globalCaptureSessionRef.current.timelineOriginMs;
       lastDetectionTimeRef.current = 0;
       lastHandDetectionTimeRef.current = 0;
@@ -2538,6 +2662,10 @@ export default function Home() {
       setSecondaryPoseStatus(secondaryStreamRef.current ? "searching" : "idle");
       setTertiaryPoseStatus(tertiaryStreamRef.current ? "searching" : "idle");
       trackingActiveRef.current = true;
+      actionContextSamplesRef.current = [];
+      lastActionContextTimeRef.current = -Infinity;
+      setLiveActionContext(null);
+      if (cameraSessionPurposeRef.current === "self_test" || observationProfile.occupation === "cafe") prepareActionContext(connectionGeneration);
       if (connectionMessage) {
         setCameraMessage(connectionMessage);
       } else if (handLandmarkerRef.current) {
@@ -2562,22 +2690,21 @@ export default function Home() {
   // and records behavior-pattern events into today's log. Safety-style
   // detections are deliberately ignored: camera movement cannot prove that
   // a device was left on or that a guest entered or exited.
-  async function recordMotionDetections(sessionId: string, globalSessionId?: string) {
+  async function recordMotionDetections(rawFrames: number[][], interruptions: InterruptionSummary["intervals"] = []) {
     try {
-      const rawFrames = globalSessionId
-        ? representativeThreeViewFrames(synchronizeThreeViewFrames(await getGlobalSessionCameraFrames(globalSessionId)))
-        : await getSessionFrames(sessionId);
       const samples = motionSamplesFromRawFrames(rawFrames);
       const detections = detectMotionEvents(samples);
       for (const detection of detections) {
+        if (interruptions.some(i => i.kind !== "stillness" && i.startMs < detection.endMs && i.endMs > detection.startMs)) continue;
         if (detection.type === "double_check") {
           await recordDoubleCheck();
         } else if (detection.type === "micro_delay") {
           await recordMicroDelay((detection.endMs - detection.startMs) / 1000);
         }
       }
-    } catch {
-      // local-only analysis; ignore transient read errors
+    } catch (error) {
+      console.error("Behavior event recording failed", error);
+      toast.error("좌표는 저장했지만 행동 변화 기록을 갱신하지 못했어요.");
     }
   }
 
@@ -2586,8 +2713,12 @@ export default function Home() {
     sessionStartedAt: number,
     globalSessionId?: string,
     selfTestStage?: "training" | "evaluation",
+    recordingEndMs?: number,
   ) {
     try {
+      const runContext = observationRunContextRef.current?.sessionId === sessionId ? observationRunContextRef.current : null;
+      const baselineForRun = runContext?.baseline ?? observationBaseline;
+      const workContextForRun = runContext?.workContext ?? workContextConfig;
       const profileForRun = selfTestStage ? {
         ...observationProfile,
         occupation: "cafe" as const,
@@ -2597,7 +2728,7 @@ export default function Home() {
         secondaryZoneGrid: Array(9).fill(null),
         tertiaryZoneGrid: Array(9).fill(null),
         customZones: [],
-      } : observationProfile;
+      } : runContext?.profile ?? observationProfile;
       const cameraStreams = globalSessionId
         ? await getGlobalSessionCameraFrames(globalSessionId)
         : [{ cameraSlot: 1 as const, frames: await getSessionFrames(sessionId) }];
@@ -2609,7 +2740,45 @@ export default function Home() {
         toast.success("좌표는 저장했고, 3대 동시 관측 구간이 없어 라벨 후보는 만들지 않았어요");
         return;
       }
-      const motionSlices = sliceTargetMotions(rawFrames, selfTestStage ? SELF_TEST_MOTION_SEGMENTATION : undefined);
+      const savedSession = selfTestStage ? await getMotionSession(sessionId) : null;
+      const manifestId = globalSessionId ?? savedSession?.globalSessionId;
+      const savedManifest = manifestId ? await getCaptureManifest(manifestId) : null;
+      const recordingWindow = {
+        startMs: selfTestStage ? savedManifest?.selfTest?.recordingStartMs ?? rawFrames[0]?.[0] ?? 0 : 0,
+        endMs: recordingEndMs ?? rawFrames.at(-1)?.[0] ?? 0,
+      };
+      const contextIntervals = visualActionIntervals(savedManifest?.visualContext?.samples ?? [], recordingWindow);
+      const sessionInterruptions = [...detectWorkInterruptions(rawFrames, recordingWindow),
+        ...contextIntervals.filter(i => i.kind === "phone" || i.kind === "interaction").map(i => ({
+          kind: i.kind === "phone" ? "visual_phone_candidate" as const : "visual_interaction_candidate" as const, startMs: i.startMs, endMs: i.endMs }))];
+      if (!selfTestStage) {
+        await recordMotionDetections(rawFrames, sessionInterruptions);
+        await refreshCareData();
+      }
+      if (selfTestStage && recordingWindow) {
+        const report = {
+          sessionId, participant: selfTestParticipant.trim(), stage: selfTestStage,
+          summary: summarizeInterruptions(sessionInterruptions, recordingWindow.startMs, recordingWindow.endMs),
+        };
+        setSelfTestInterruptionReports((current) => [...current.filter((item) => item.sessionId !== sessionId), report]);
+      }
+      const participantForRun = selfTestParticipant.trim();
+      const actionsForRun = selfTestStage
+        ? selfTestLearnedMotions[participantForRun] ?? []
+        : observationLearnedMotions;
+      let nextLearnedActions = actionsForRun;
+      const loadedActions = actionsForRun.length > 0
+        ? await Promise.all(actionsForRun.map(async action => {
+          const samples = await Promise.all(action.samples.map(framesForMotionSample));
+          const confirmed = samples.filter((frames, index) => frames.length >= 6 && action.samples[index].labelSource === "manual");
+          return { id: action.id, label: action.label, samples: samples.filter(frames => frames.length >= 6),
+            ...(confirmed.length ? { boundarySamples: confirmed } : {}),
+          };
+        }))
+        : [];
+      const motionSlices = contextualMotionSlices(rawFrames,
+        selfTestStage || profileForRun.occupation === "cafe" ? segmentWorkEpisodes(rawFrames, loadedActions)
+          : sliceTargetMotions(rawFrames), contextIntervals);
       if (motionSlices.length === 0) {
         toast.success("기록은 저장했고, 별도의 동작 구간은 감지되지 않았어요");
         return;
@@ -2622,22 +2791,8 @@ export default function Home() {
       // Keep the ~600 KB local model out of the initial UI bundle; load it only
       // once when a completed session is ready for local classification.
       const { classifyEpflPosture } = await import("./epfl-posture-classifier");
-      const labelOptions = selfTestStage ? selfTestReviewLabelOptions : listWorkContextLabels(workContextConfig);
-      const participantForRun = selfTestParticipant.trim();
-      const actionsForRun = selfTestStage
-        ? selfTestLearnedMotions[participantForRun] ?? []
-        : observationLearnedMotions;
-      const loadedActions = actionsForRun.length > 0
-        ? await Promise.all(actionsForRun.map(async (action) => ({
-          id: action.id,
-          label: action.label,
-          samples: (await Promise.all(action.samples.map(framesForMotionSample))).filter(
-            (frames) => frames.length >= 6,
-          ),
-        })))
-        : [];
+      const labelOptions = selfTestStage ? selfTestReviewLabelOptions : listWorkContextLabels(workContextForRun);
       let pendingReviewCount = 0;
-      let learnedTrainingActions = actionsForRun;
 
       for (const motionSlice of motionSlices) {
         const episodeRecordedAt = sessionStartedAt + motionSlice.startMs;
@@ -2671,7 +2826,7 @@ export default function Home() {
           profile: profileForRun,
           phase: phaseForHour(new Date(episodeRecordedAt).getHours()),
           features,
-          baseline: observationBaseline,
+          baseline: baselineForRun,
           motionSlice: {
             startMs: motionSlice.startMs,
             endMs: motionSlice.endMs,
@@ -2679,6 +2834,7 @@ export default function Home() {
             originalDurationSeconds: motionSlice.originalDurationSeconds,
             excludedFrameCount: motionSlice.excludedFrameCount,
             reason: motionSlice.reason,
+            boundaryEvidence: motionSlice.boundaryEvidence,
           },
         });
         const postureResult = classifyEpflPosture(analysisFrames);
@@ -2700,18 +2856,32 @@ export default function Home() {
           label: candidate.label,
           confidence: Math.max(0, Math.min(1, Math.exp(-candidate.distance * 4.2))),
         })) ?? [];
-        const candidates = normalizeActionCandidates(selfTestStage
+        const visualEvidence = motionSlice.visualEvidence;
+        const visualOption = visualEvidence && (selfTestStage || profileForRun.occupation === "cafe")
+          ? { taskType: workContextTaskType(visualEvidence.label), taskLabel: visualEvidence.label, confidence: visualEvidence.similarity } : null;
+        const sequenceEvidence = motionSlice.boundaryEvidence;
+        const sequenceOption = sequenceEvidence?.method === "learned_sequence" && sequenceEvidence.label
+          ? { taskType: workContextTaskType(sequenceEvidence.label), taskLabel: sequenceEvidence.label,
+            confidence: Math.exp(-(sequenceEvidence.distance ?? Infinity) * 4.2) } : null;
+        const candidates = sequenceOption ? [sequenceOption] : visualOption ? [visualOption] : normalizeActionCandidates(selfTestStage
           ? [...classifyCafeSelfTest(features, analysisFrames), ...(selfTestStage === "evaluation"
             ? motionCandidates.flatMap((candidate) => {
               const option = labelOptions.find((label) => label.taskLabel === candidate.label);
               return option ? [{ ...option, confidence: candidate.confidence }] : [];
             }) : [])]
           : buildWorkContextCandidates({
-            config: workContextConfig,
+            config: workContextForRun,
             recordedAt: episodeRecordedAt,
             motionCandidates,
           }));
         const bestCandidate = candidates[0];
+        const hasPersonalTrainingCoverage = selfTestStage === "evaluation" && SELF_TEST_ACTION_LABELS.every((label) =>
+          actionsForRun.some((action) => action.label === label && action.samples.length >= 3),
+        );
+        const hasPersonalMotionSupport = hasPersonalTrainingCoverage
+          && learnedResult?.status === "matched"
+          && learnedResult.label === bestCandidate?.taskLabel
+          && motionCandidates.some((candidate) => candidate.label === bestCandidate?.taskLabel && candidate.confidence >= 0.8);
         const hasGroundedMotionLabel = selfTestStage
           ? Boolean(bestCandidate && bestCandidate.confidence >= 0.55)
           : motionCandidates.some((motionCandidate) =>
@@ -2724,20 +2894,35 @@ export default function Home() {
           taskType: bestCandidate?.taskType ?? "UNCLASSIFIED",
           taskLabel: bestCandidate?.taskLabel ?? "미분류",
           taskConfidence: bestCandidate?.confidence ?? 0,
+          ...(visualOption && visualEvidence ? { visualContext: {
+            model: "clip-vit-base-patch32-int8" as const, label: visualEvidence.label,
+            similarity: visualEvidence.similarity, margin: visualEvidence.margin, sampleCount: visualEvidence.sampleCount,
+          } } : {}),
           movementCycles: detectMovementCycles(analysisFrames),
+          interruptions: summarizeInterruptions(sessionInterruptions, motionSlice.startMs, motionSlice.endMs),
           disposition: profileForRun.mode === "analysis" ? "analysis_only" : "accepted",
           dispositionReason: profileForRun.mode === "analysis"
             ? "분석 모드 기록은 개인 기준선에 자동으로 합치지 않아요."
             : "평소 업무 후보로 개인 기준선에 포함했어요.",
         };
-        episode = scoreLabeledEpisode(episode, observationBaseline);
-        const qualityReasons = [] as Array<"insufficient_frames" | "missing_zone" | "missing_time_context" | "unknown_motion" | "ground_truth_review" | "self_test_label">;
-        if (globalSessionId) qualityReasons.push("ground_truth_review");
-        if (analysisFrames.length < 6) qualityReasons.push("insufficient_frames");
-        if (!features.dominantZone) qualityReasons.push("missing_zone");
-        if (labelOptions.length === 0) qualityReasons.push("missing_time_context");
-        if (!selfTestStage && !hasGroundedMotionLabel) qualityReasons.push("unknown_motion");
-        const actionReview = createActionReview(episode, { candidates, qualityReasons });
+        episode = scoreLabeledEpisode(episode, baselineForRun);
+        const qualityReasons = [] as Array<"insufficient_frames" | "missing_zone" | "missing_time_context" | "unknown_motion" | "ground_truth_review" | "self_test_label" | "work_interruption" | "uncertain_boundaries" | "outside_work_context">;
+        if (motionSlice.contextNonWork) qualityReasons.push("outside_work_context");
+        if (motionSlice.boundaryEvidence && !hasCompleteWorkBoundaries(motionSlice)) qualityReasons.push("uncertain_boundaries");
+        if (sequenceOption && (sequenceEvidence?.margin ?? 0) < 0.04) qualityReasons.push("unknown_motion");
+        if (sequenceOption && visualOption && sequenceOption.taskLabel !== visualOption.taskLabel) qualityReasons.push("unknown_motion");
+        if (hasInterruptionConfound(episode.interruptions)) qualityReasons.push("work_interruption");
+        if (visualOption && learnedResult?.status === "matched" && learnedResult.confidence >= 0.8 && learnedResult.label !== visualOption.taskLabel) qualityReasons.push("unknown_motion");
+        if (globalSessionId && !visualOption && !sequenceOption) qualityReasons.push("ground_truth_review");
+        if (analysisFrames.length < (visualOption ? 20 : 6)) qualityReasons.push("insufficient_frames");
+        if (!features.dominantZone && !visualOption && !sequenceOption) qualityReasons.push("missing_zone");
+        if (labelOptions.length === 0 && !visualOption && !sequenceOption) qualityReasons.push("missing_time_context");
+        if (selfTestStage === "training" && !visualOption && !sequenceOption) qualityReasons.push("self_test_label");
+        if (selfTestStage === "evaluation" && !hasPersonalMotionSupport && !visualOption && !sequenceOption) qualityReasons.push("unknown_motion");
+        if (!selfTestStage && !hasGroundedMotionLabel && !visualOption && !sequenceOption) qualityReasons.push("unknown_motion");
+        const actionReview = createActionReview(episode, { candidates, qualityReasons,
+          ...(sequenceOption ? { thresholds: { minimumConfidence: 0.55, minimumCandidateMargin: 0.04 } }
+            : visualOption ? { thresholds: { minimumConfidence: 0.28, minimumCandidateMargin: 0.04 } } : {}) });
         episode = {
           ...episode,
           ...(selfTestStage ? {
@@ -2768,16 +2953,18 @@ export default function Home() {
         };
         if (actionReview) pendingReviewCount += 1;
         await saveObservationEpisode(episode);
-        if (selfTestStage === "training" && !actionReview && episode.motionSlice && episode.taskType !== "UNCLASSIFIED") {
-          learnedTrainingActions = addObservationMotionSample(learnedTrainingActions, episode.taskLabel, {
-            sessionId: episode.sessionId,
-            startMs: episode.motionSlice.startMs,
-            endMs: episode.motionSlice.endMs,
-          }, nowMs());
+        if ((visualOption || sequenceOption) && !actionReview && !hasInterruptionConfound(episode.interruptions)
+          && episode.disposition !== "quarantined" && episode.disposition !== "excluded"
+          && (selfTestStage === "training" || (!selfTestStage && profileForRun.mode === "learning"))) {
+          nextLearnedActions = addObservationMotionSample(nextLearnedActions, episode.taskLabel, {
+            episodeId: episode.id, sessionId, globalSessionId, startMs: motionSlice.startMs, endMs: motionSlice.endMs,
+            labelSource: sequenceOption ? "sequence_model" : "visual_model",
+          });
         }
       }
-      if (selfTestStage === "training") {
-        setSelfTestLearnedMotions((current) => ({ ...current, [participantForRun]: learnedTrainingActions }));
+      if (nextLearnedActions !== actionsForRun) {
+        if (selfTestStage === "training") setSelfTestLearnedMotions(current => ({ ...current, [participantForRun]: nextLearnedActions }));
+        else { saveObservationMotionActions(nextLearnedActions); setObservationLearnedMotions(nextLearnedActions); }
       }
       await refreshObservationData(observationProfile);
       toast.success(
@@ -2787,10 +2974,13 @@ export default function Home() {
       );
     } catch (error) {
       console.error("Observation session classification failed", error);
+      toast.error("좌표 기록은 저장했지만 동작 분석에 실패했어요. 데이터를 내보내 보존해 주세요.");
     }
   }
 
   async function stopPoseTracking(analyzeSession = true) {
+    const endedAt = currentEpochTime();
+    const recordingEndMs = currentMonotonicTime() - sessionPerformanceStartRef.current;
     sampleCameraHealth(currentMonotonicTime());
     trackingActiveRef.current = false;
     if (poseAnimationRef.current !== null) {
@@ -2798,16 +2988,19 @@ export default function Home() {
       poseAnimationRef.current = null;
     }
     await Promise.all([flushPoseFrames(1), flushPoseFrames(2), flushPoseFrames(3)]);
-    await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current, tertiaryPoseWriteQueueRef.current]);
+    await actionContextPendingRef.current;
+    await Promise.all([poseWriteQueueRef.current.flush(), secondaryPoseWriteQueueRef.current.flush(), tertiaryPoseWriteQueueRef.current.flush()]);
     await Promise.all([flushCameraHealth(1), flushCameraHealth(2), flushCameraHealth(3)]);
-    await cameraHealthWriteQueueRef.current;
+    await cameraHealthWriteQueueRef.current.flush();
     const session = poseSessionRef.current;
     const isSelfTestSession = Boolean(session && selfTestSessionIdRef.current === session.id);
     const selfTestStageForSession = isSelfTestSession ? selfTestSessionStageRef.current : null;
     const secondarySession = secondaryPoseSessionRef.current;
     const tertiarySession = tertiaryPoseSessionRef.current;
-    const endedAt = currentEpochTime();
     if (globalCaptureSessionRef.current) {
+      const manifest = await getCaptureManifest(globalCaptureSessionRef.current.id);
+      if (manifest && actionContextSamplesRef.current.length) await saveCaptureManifest({ ...manifest,
+        visualContext: { model: "clip-vit-base-patch32-int8", cameraSlot: 1, samples: [...actionContextSamplesRef.current] } });
       await finishCaptureManifest(globalCaptureSessionRef.current.id, endedAt);
     }
     let secondaryFrameCount = 0;
@@ -2831,15 +3024,12 @@ export default function Home() {
       setLatestSession(completed);
       setRecentSessions((previous) => [completed, ...previous.filter((s) => s.id !== completed.id)].slice(0, 5));
       poseSessionRef.current = null;
-      if (analyzeSession && (isSelfTestSession || consent.observationConsent) && completed.frameCount + secondaryFrameCount >= 20) {
+      if (analyzeSession && (isSelfTestSession || consent.observationConsent) && (isSelfTestSession || completed.frameCount + secondaryFrameCount >= 20)) {
         setCameraMessage("기록을 동작 구간별로 나누고 있어요…");
         if (isSelfTestSession) {
-          await recordObservationSession(completed.id, completed.startedAt, undefined, selfTestStageForSession ?? "evaluation");
+          await recordObservationSession(completed.id, completed.startedAt, undefined, selfTestStageForSession ?? "evaluation", recordingEndMs);
         } else {
-          await Promise.all([
-            recordMotionDetections(completed.id, completed.globalSessionId).then(refreshCareData),
-            recordObservationSession(completed.id, completed.startedAt, completed.globalSessionId),
-          ]);
+          await recordObservationSession(completed.id, completed.startedAt, completed.globalSessionId, undefined, recordingEndMs);
         }
       }
       if (isSelfTestSession) {
@@ -2871,12 +3061,37 @@ export default function Home() {
     setTertiaryPoseStatus("idle");
   }
 
-  async function stopCamera({ analyzeSession = true, notify = true } = {}) {
+  function stopCamera(options: { analyzeSession?: boolean; notify?: boolean } = {}) {
+    if (cameraStopPendingRef.current) return cameraStopPendingRef.current;
+    const stopping = finishCameraStop(options).finally(() => { cameraStopPendingRef.current = null; });
+    cameraStopPendingRef.current = stopping;
+    return stopping;
+  }
+
+  async function finishCameraStop({ analyzeSession = true, notify = true } = {}) {
+    cameraConnectionGenerationRef.current += 1;
     if (document.fullscreenElement === cameraFeedLayoutRef.current) {
       await document.exitFullscreen().catch(() => undefined);
     }
-    await stopPoseTracking(analyzeSession);
+    try {
+      await stopPoseTracking(analyzeSession);
+    } catch (error) {
+      reportRecordingWriteError(error);
+      toast.error("기록 저장을 완료하지 못했어요. 저장 공간을 확인하고 종료를 다시 눌러 주세요.");
+      return;
+    }
+    if (cameraSessionPurposeRef.current === "self_test") {
+      selfTestRecordingRef.current = false;
+      setSelfTestRecording(false);
+    }
     cameraSessionPurposeRef.current = null;
+    setCameraSessionPurpose(null);
+    actionModelAbortRef.current?.abort(); actionModelLoadingRef.current = null;
+    actionModelRef.current?.close(); actionModelRef.current = null;
+    setActionModelStatus("idle");
+    globalCaptureSessionRef.current = null;
+    actionContextSamplesRef.current = [];
+    setRecordingStorageError(false);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     secondaryStreamRef.current?.getTracks().forEach((track) => track.stop());
     tertiaryStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -2954,69 +3169,23 @@ export default function Home() {
     setEvents((previous) => [event, ...previous]);
     toast.success("이벤트 시점을 좌표 기록에 표시했어요");
 
-    // Gap between consecutive logged moments is used as a rough proxy for
-    // the "미세 지연" (micro-delay) observation metric from the PRD. This is
-    // a coarse stand-in, not a precise task-timer.
-    if (consent.observationConsent) {
-      const now = nowMs();
-      if (lastTestEventAtRef.current !== null) {
-        void recordMicroDelay((now - lastTestEventAtRef.current) / 1000).then(
-          refreshCareData,
-        );
-      }
-      lastTestEventAtRef.current = now;
-    }
+
   }
 
   async function exportPoseData() {
     try {
-      await flushPoseFrames();
-      await poseWriteQueueRef.current;
+      await Promise.all([flushPoseFrames(1), flushPoseFrames(2), flushPoseFrames(3)]);
+      await Promise.all([flushCameraHealth(1), flushCameraHealth(2), flushCameraHealth(3)]);
       const exported = await downloadMotionDataFolder();
       if (!exported) {
         toast.success("내보낼 좌표 기록이 아직 없어요");
         return;
       }
       toast.success("전체 기록을 하나의 데이터 폴더로 내려받았어요");
-    } catch {
-      toast.success("좌표 데이터를 내보내지 못했어요");
+    } catch (error) {
+      console.error("[export] 좌표 내보내기 실패", error);
+      toast.error(error instanceof Error ? error.message : "좌표 데이터를 내보내지 못했어요");
     }
-  }
-
-  function startSelfTestTrial() {
-    const session = poseSessionRef.current;
-    if (cameraStatus !== "connected" || !session) {
-      toast.success("먼저 웹캠 1대를 연결해 주세요");
-      return;
-    }
-    if (cameraSessionPurposeRef.current !== "self_test") {
-      toast.success("자체테스트 메뉴에서 전용 웹캠을 연결해 주세요");
-      return;
-    }
-    if (secondaryStreamRef.current || tertiaryStreamRef.current) {
-      toast.success("자체테스트는 웹캠 1대만 연결한 상태에서 시작해 주세요");
-      return;
-    }
-    if (selfTestSessionIdRef.current === session.id && selfTestSessionStageRef.current !== selfTestStage) {
-      toast.success("한 촬영 세션에서는 학습 또는 평가 중 한 단계만 기록해 주세요");
-      return;
-    }
-    if (!selfTestReviewLabelOptions.some((option) => option.taskLabel === selfTestLabel)) return;
-    const startMs = currentMonotonicTime() - sessionPerformanceStartRef.current;
-    const trial = {
-      id: `self-test-${crypto.randomUUID()}`,
-      participant: selfTestParticipant.trim() || "미입력",
-      sessionId: session.id,
-      stage: selfTestStage,
-      label: selfTestLabel,
-      startMs,
-      recordedAt: nowMs(),
-    };
-    if (selfTestSessionIdRef.current !== session.id) {
-      selfTestSessionIdRef.current = session.id;
-      selfTestSessionStageRef.current = selfTestStage;
-    }
-    setActiveSelfTestTrial(trial);
   }
 
   function finishSelfTestTrial() {
@@ -3028,43 +3197,41 @@ export default function Home() {
 
   async function stopSelfTestCamera() {
     if (activeSelfTestTrial) finishSelfTestTrial();
-    await stopCamera();
+    const analyzeSession = selfTestRecordingRef.current;
+    await stopCamera({ analyzeSession });
   }
 
-  function exportSelfTestResults() {
-    const rows = selfTestTrials.map((trial) => {
-      const related = observationEpisodes.filter((episode) =>
-        episode.source === (trial.stage === "evaluation" ? "self_test" : "self_test_training")
-        && episode.sessionId === trial.sessionId && episode.motionSlice,
-      );
-      const matches = related.filter((episode) =>
-        Math.min(episode.motionSlice!.endMs, trial.endMs) > Math.max(episode.motionSlice!.startMs, trial.startMs),
-      );
-      const merged = matches.some((episode) => selfTestTrials.filter((other) =>
-        other.stage === trial.stage && other.sessionId === trial.sessionId
-        && Math.min(episode.motionSlice!.endMs, other.endMs) > Math.max(episode.motionSlice!.startMs, other.startMs),
-      ).length > 1);
-      const result = trial.stage === "training" ? "학습 단계 · 검토함에서 라벨 확정"
-        : matches.length === 0 ? "미검출"
-          : merged ? "동작 병합 의심"
-            : matches.length > 1 ? "과분할"
-              : (matches[0] as ReviewableObservationEpisode).actionReview?.status === "pending" ? "검토 대기"
-                : matches[0].taskLabel === trial.label ? "자동 분류 일치" : "자동 라벨 오분류";
-      return [trial.participant, trial.stage === "training" ? "학습" : "평가", trial.label, new Date(trial.recordedAt).toISOString(),
-        trial.startMs.toFixed(0), trial.endMs.toFixed(0), matches.length,
-        matches.map((episode) => episode.taskLabel).join(" | "),
-        matches.map((episode) => Math.round(episode.taskConfidence * 100)).join(" | "), result];
-    });
-    const csv = [
-      ["참가자", "단계", "정답 라벨", "기록 시각", "시작(ms)", "종료(ms)", "겹친 구간 수", "예측·확정 라벨", "신뢰도(%)", "결과"],
-      ...rows,
-    ].map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
-    const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "memory-guard-self-test-results.csv";
-    anchor.click();
-    URL.revokeObjectURL(url);
+  async function startSelfTestRecording() {
+    if (cameraStatus !== "connected" || cameraSessionPurposeRef.current !== "self_test" || !poseSessionRef.current) {
+      toast.success("먼저 자체테스트 카메라를 연결해 주세요");
+      return;
+    }
+    if (selfTestRecordingRef.current || selfTestStartingRef.current) return;
+    if (!actionModelRef.current) { toast.error("로컬 영상 맥락 모델이 준비된 뒤 시작해 주세요."); return; }
+    const startingSessionId = poseSessionRef.current.id;
+    selfTestStartingRef.current = true;
+    setSelfTestStarting(true);
+    try {
+      const globalId = globalCaptureSessionRef.current?.id;
+      const manifest = globalId ? await getCaptureManifest(globalId) : null;
+      if (!manifest) throw new Error("Missing self-test capture manifest");
+      await saveCaptureManifest({
+        ...manifest,
+        selfTest: { participant: selfTestParticipant.trim(), stage: selfTestStage,
+          recordingStartMs: currentMonotonicTime() - sessionPerformanceStartRef.current },
+        zoneSnapshot: { ...manifest.zoneSnapshot, primary: [...selfTestZoneGrid], profileUpdatedAt: nowMs() },
+      });
+      if (poseSessionRef.current?.id !== startingSessionId || cameraSessionPurposeRef.current !== "self_test") return;
+      selfTestRecordingRef.current = true;
+      setSelfTestRecording(true);
+    } catch (error) {
+      console.error("[self-test] 촬영 설정 저장 실패", error);
+      toast.error("촬영 설정을 저장하지 못해 시작하지 않았어요. 저장 공간을 확인해 주세요.");
+      return;
+    } finally {
+      selfTestStartingRef.current = false;
+      setSelfTestStarting(false);
+    }
   }
 
   function exportSelfTestAutoResults() {
@@ -3085,14 +3252,57 @@ export default function Home() {
         manualLabel?.reviewer ?? (episode.actionReview?.status === "unresolved" ? "developer" : ""),
         manualLabel?.reviewedAt ? new Date(manualLabel.reviewedAt).toISOString()
           : episode.actionReview?.status === "unresolved" ? new Date(episode.actionReview.updatedAt).toISOString() : "",
+        episode.features.durationSeconds.toFixed(2),
+        episode.movementCycles?.length ?? 0,
+        episode.movementCycles?.length
+          ? (episode.movementCycles.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / episode.movementCycles.length).toFixed(2)
+          : "",
+        episode.features.longestPauseSeconds.toFixed(2),
+        episode.interruptions?.suspectedSeconds.toFixed(2) ?? "",
+        episode.interruptions?.unobservedSeconds.toFixed(2) ?? "",
+        episode.interruptions?.remainingSeconds.toFixed(2) ?? "",
+        episode.interruptions?.unexplainedPauseSeconds?.toFixed(2) ?? "",
+        hasInterruptionConfound(episode.interruptions) ? "중단 의심·좌표 누락 포함 · 비교 보류" : episode.interruptions ? "중단 단서 미검출" : "미분석",
+        JSON.stringify(episode.interruptions?.intervals ?? []),
+        episode.actionReview?.detectedWindow?.startMs ?? episode.motionSlice?.startMs ?? "",
+        episode.actionReview?.detectedWindow?.endMs ?? episode.motionSlice?.endMs ?? "",
+        episode.visualContext?.model ?? "",
+        episode.visualContext?.similarity ?? "",
+        episode.visualContext?.margin ?? "",
+        episode.visualContext?.sampleCount ?? "",
+        manualLabel ? "수동 확정" : episode.visualContext ? "영상 모델 자동 후보" : "규칙·개인 동작 비교",
+        episode.motionSlice?.boundaryEvidence?.method ?? "legacy_movement",
+        episode.motionSlice?.boundaryEvidence?.startObserved ?? "",
+        episode.motionSlice?.boundaryEvidence?.endObserved ?? "",
+        episode.motionSlice?.boundaryEvidence?.trackingGapMs ?? "",
+        hasCompleteWorkBoundaries(episode.motionSlice ?? {}) ? "시작·완료 관측" : "경계 미확인",
       ];
     });
-    const csv = [["참가자", "세션 단계", "검출 시각", "세션", "시작(ms)", "종료(ms)", "자동 라벨", "자동 신뢰도(%)", "수동 확정 라벨", "검토 상태", "검토자", "검토 시각"], ...rows]
+    const csv = [["참가자", "세션 단계", "검출 시각", "세션", "시작(ms)", "종료(ms)", "자동 라벨", "자동 후보 점수", "수동 확정 라벨", "검토 상태", "검토자", "검토 시각", "업무 구간(초)", "검출 왕복(회)", "회당 평균(초)", "최장 정지(초) 원본", "중단 의심(초)", "좌표 누락(초)", "의심·누락 제외 참고시간(초)", "원인 미확인 정지(초) 분석 유지", "시간 지표 비교", "중단 구간 JSON", "최초 자동 시작(ms)", "최초 자동 종료(ms)", "영상 맥락 모델", "영상 문장 유사도", "영상 후보 차이", "연속 영상 표본", "라벨 출처", "구간 판별 방식", "시작 관측", "완료 관측", "추적 공백(ms)", "경계 상태"], ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = "memory-guard-auto-self-test.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportSelfTestInterruptions() {
+    const rows = selfTestInterruptionReports.flatMap((report) =>
+      (report.summary.intervals.length ? report.summary.intervals : [null]).map((item) => [
+        report.participant, report.stage === "training" ? "학습" : "분석", report.sessionId,
+        item ? INTERRUPTION_LABELS[item.kind] : "중단 단서 미검출",
+        item?.startMs ?? "", item?.endMs ?? "",
+        item ? ((item.endMs - item.startMs) / 1000).toFixed(2) : "",
+      ]),
+    );
+    const csv = [["참가자", "세션 단계", "세션", "자동 감지 단서", "시작(ms)", "종료(ms)", "길이(초)"], ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "memory-guard-self-test-interruptions.csv";
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -3220,6 +3430,14 @@ export default function Home() {
 
   async function changeObservationMode(mode: ObservationMode) {
     if (mode === observationProfile.mode) return;
+    if (cameraStatus === "requesting") {
+      toast.error("카메라 연결이 끝난 뒤 모드를 변경해 주세요.");
+      return;
+    }
+    if (cameraStatus === "connected") {
+      await stopCamera();
+      if (poseSessionRef.current) return;
+    }
     const next = await saveObservationProfile({
       ...observationProfile,
       mode,
@@ -3350,8 +3568,8 @@ export default function Home() {
 
   async function framesForMotionSample(sample: LearnedMotionSample) {
     const frames = sample.globalSessionId
-      ? representativeThreeViewFrames(synchronizeThreeViewFrames(await getGlobalSessionCameraFrames(sample.globalSessionId)))
-      : await getSessionFrames(sample.sessionId);
+      ? representativeThreeViewFrames(synchronizeThreeViewFrames(await getGlobalSessionCameraFrames(sample.globalSessionId, sample)))
+      : await getSessionFrames(sample.sessionId, sample);
     return frames.filter((frame) => frame[0] >= sample.startMs && frame[0] <= sample.endMs);
   }
 
@@ -3367,7 +3585,7 @@ export default function Home() {
     setQuickMotionBusy(true);
     try {
       await Promise.all([flushPoseFrames(1), flushPoseFrames(2), flushPoseFrames(3)]);
-      await Promise.all([poseWriteQueueRef.current, secondaryPoseWriteQueueRef.current, tertiaryPoseWriteQueueRef.current]);
+      await Promise.all([poseWriteQueueRef.current.flush(), secondaryPoseWriteQueueRef.current.flush(), tertiaryPoseWriteQueueRef.current.flush()]);
       setMotionCapture(null);
 
       if (quickMotionMode === "training") {
@@ -3460,6 +3678,7 @@ export default function Home() {
     setLearnedMotions([]);
     setObservationLearnedMotions([]);
     setSelfTestTrials([]);
+    setSelfTestInterruptionReports([]);
     setSelfTestLearnedMotions({});
     setSelfTestCameraId("");
     setSelfTestZoneGrid(Array(9).fill(null));
@@ -3781,57 +4000,35 @@ export default function Home() {
       episode.source === "self_test" || episode.source === "self_test_training"
       || (episode.occupation === observationProfile.occupation && episode.baselineVersion === observationProfile.baselineVersion),
   );
-  const acceptedObservationCount = currentObservationEpisodes.filter(
+  const userObservationEpisodes = currentObservationEpisodes.filter((episode) => episode.source !== "self_test" && episode.source !== "self_test_training");
+  const acceptedObservationCount = userObservationEpisodes.filter(
     (episode) => episode.disposition === "accepted",
   ).length;
-  const quarantinedObservationCount = currentObservationEpisodes.filter(
+  const quarantinedObservationCount = userObservationEpisodes.filter(
     (episode) => episode.disposition === "quarantined",
   ).length;
   const mappedZoneCount = new Set(activeZoneGrid.filter(Boolean)).size;
   const selfTestMappedZoneCount = new Set(selfTestZoneGrid.filter(Boolean)).size;
-  const latestObservationEpisode = currentObservationEpisodes[0] ?? null;
-  const analysisObservationSignals = currentObservationEpisodes.filter(
+  const latestObservationEpisode = userObservationEpisodes[0] ?? null;
+  const analysisObservationSignals = userObservationEpisodes.filter(
     (episode) =>
       episode.mode === "analysis" &&
       episode.disposition === "analysis_only" &&
+      episode.source !== "self_test" &&
       ((episode.cycleDurationZScore ?? 0) >= 1.5 || (episode.durationZScore ?? 0) >= 1.5 || (episode.pauseZScore ?? 0) >= 1.5),
   );
   const pendingActionReviews = listPendingActionReviews(
     currentObservationEpisodes.filter((episode) => episode.source !== "self_test" && episode.source !== "self_test_training") as ReviewableObservationEpisode[],
-  );
-  const pendingSelfTestTrainingReviews = listPendingActionReviews(
-    currentObservationEpisodes.filter((episode) => episode.source === "self_test_training") as ReviewableObservationEpisode[],
   );
   const selfTestDetectedEpisodes = currentObservationEpisodes.filter((episode) =>
     episode.source === (selfTestStage === "training" ? "self_test_training" : "self_test")
     && episode.selfTestParticipant === selfTestParticipant.trim(),
   ) as ReviewableObservationEpisode[];
   const selfTestParticipantActions = selfTestLearnedMotions[selfTestParticipant.trim()] ?? [];
+  const latestSelfTestInterruptionReport = selfTestInterruptionReports.filter((report) =>
+    report.participant === selfTestParticipant.trim() && report.stage === selfTestStage,
+  ).at(-1);
   const selfTestSampleCount = selfTestParticipantActions.reduce((total, action) => total + action.samples.length, 0);
-  const selfTestRows = selfTestTrials.map((trial) => {
-    const slices = observationEpisodes.filter((episode) =>
-      episode.source === (trial.stage === "evaluation" ? "self_test" : "self_test_training")
-      && episode.sessionId === trial.sessionId && episode.motionSlice
-      && Math.min(episode.motionSlice.endMs, trial.endMs) > Math.max(episode.motionSlice.startMs, trial.startMs),
-    );
-    const merged = slices.some((episode) => selfTestTrials.some((other) =>
-      other.id !== trial.id && other.stage === trial.stage && other.sessionId === trial.sessionId
-      && Math.min(episode.motionSlice!.endMs, other.endMs) > Math.max(episode.motionSlice!.startMs, other.startMs),
-    ));
-    const result = trial.stage === "training" ? "학습 단계 · 검토함에서 라벨 확정"
-      : slices.length === 0 ? "미검출"
-        : merged ? "동작 병합 의심"
-          : slices.length > 1 ? "과분할"
-            : (slices[0] as ReviewableObservationEpisode).actionReview?.status === "pending" ? "검토 대기"
-              : slices[0].taskLabel === trial.label ? "자동 분류 일치" : "자동 라벨 오분류";
-    return { trial, slices, result };
-  });
-  const selfTestEvaluationRows = selfTestRows.filter((row) => row.trial.stage === "evaluation");
-  const selfTestExpectedCount = selfTestStage === "training" ? 30 : 5;
-  const selfTestCurrentCount = selfTestTrials.filter((trial) =>
-    trial.participant === (selfTestParticipant.trim() || "미입력")
-    && trial.stage === selfTestStage && trial.label === selfTestLabel,
-  ).length;
   const selectedReviewEpisode = selectedReviewEpisodeId
     ? (currentObservationEpisodes.find((episode) => episode.id === selectedReviewEpisodeId) as ReviewableObservationEpisode | undefined)
     : undefined;
@@ -3855,7 +4052,6 @@ export default function Home() {
       && Math.min(episode.motionSlice!.endMs, trial.endMs) > Math.max(episode.motionSlice!.startMs, trial.startMs));
   }
 
-  const selectedReviewTrainingTrials = selectedReviewEpisode ? linkedSelfTestTrials(selectedReviewEpisode) : [];
 
   function actionReviewDisplayCandidate(episode: ReviewableObservationEpisode) {
     return episode.actionReview?.candidates.find((candidate) => registeredReviewTaskTypes.has(candidate.taskType))
@@ -3881,7 +4077,9 @@ export default function Home() {
     const firstOption = truthOption ?? options.find(
       (option) => option.taskType === episode.actionReview?.candidates[0]?.taskType,
     ) ?? options[0];
-    setSelectedReviewTaskType(firstOption?.taskType ?? "");
+    setSelectedReviewTaskType(episode.source === "self_test_training" ? "" : firstOption?.taskType ?? "");
+    setSelectedReviewStartSeconds((episode.motionSlice?.startMs ?? 0) / 1000);
+    setSelectedReviewEndSeconds((episode.motionSlice?.endMs ?? 0) / 1000);
     setSelectedReviewEpisodeId(episode.id);
   }
 
@@ -3890,17 +4088,82 @@ export default function Home() {
     window.requestAnimationFrame(() => openActionReview(episode));
   }
 
+  function removeEpisodeFromLearning(episode: ReviewableObservationEpisode) {
+    if (episode.motionSlice) {
+      const sample = { sessionId: episode.sessionId, ...episode.motionSlice, episodeId: episode.id };
+      if (episode.source === "self_test_training") {
+        const participant = episode.selfTestParticipant ?? "";
+        setSelfTestLearnedMotions((current) => ({ ...current,
+          [participant]: removeObservationMotionSample(current[participant] ?? [], sample) }));
+      } else if (episode.source !== "self_test") {
+        const next = removeObservationMotionSample(observationLearnedMotions, sample);
+        saveObservationMotionActions(next);
+        setObservationLearnedMotions(next);
+      }
+    }
+  }
+
   async function confirmActionReview() {
     if (!selectedReviewEpisode || !selectedReviewTaskType) return;
     const selectedLabel = reviewOptionsForEpisode(selectedReviewEpisode).find((option) => option.taskType === selectedReviewTaskType);
     if (!selectedLabel) return;
-    const updated = scoreLabeledEpisode(applyManualActionLabel(selectedReviewEpisode, {
+    const isSelfTestReview = selectedReviewEpisode.source === "self_test_training" || selectedReviewEpisode.source === "self_test";
+    const originalSlice = selectedReviewEpisode.motionSlice;
+    const startMs = Math.round(selectedReviewStartSeconds * 1000);
+    const endMs = Math.round(selectedReviewEndSeconds * 1000);
+    const sessionFrames = isSelfTestReview && originalSlice
+      ? await getSessionFrames(selectedReviewEpisode.sessionId)
+      : [];
+    if (isSelfTestReview && originalSlice && (!Number.isFinite(startMs) || !Number.isFinite(endMs)
+      || startMs < 0 || endMs <= startMs || endMs > (sessionFrames.at(-1)?.[0] ?? 0) + 1000)) {
+      toast.success("시작·종료 시각을 촬영 범위 안에서 다시 입력해 주세요");
+      return;
+    }
+    const adjustedFrames = isSelfTestReview && originalSlice
+      ? sessionFrames.filter((frame) => frame[0] >= startMs && frame[0] <= endMs)
+      : [];
+    if (isSelfTestReview && originalSlice && adjustedFrames.length < 6) {
+      toast.success("선택한 구간에 스켈레톤 좌표가 부족해요");
+      return;
+    }
+    if (selectedReviewEpisode.source === "self_test_training" && observationEpisodes.some((episode) =>
+      episode.id !== selectedReviewEpisode.id
+      && episode.sessionId === selectedReviewEpisode.sessionId
+      && episode.source === "self_test_training"
+      && (episode as ReviewableObservationEpisode).actionReview?.status === "confirmed"
+      && episode.motionSlice
+      && Math.min(endMs, episode.motionSlice.endMs) > Math.max(startMs, episode.motionSlice.startMs)
+    )) {
+      toast.success("이미 학습한 구간과 겹쳐요. 시작·종료 시각을 다시 확인해 주세요");
+      return;
+    }
+    const recordedSession = isSelfTestReview ? await getMotionSession(selectedReviewEpisode.sessionId) : null;
+    const recordedManifest = recordedSession?.globalSessionId ? await getCaptureManifest(recordedSession.globalSessionId) : null;
+    const correctedFeatures = isSelfTestReview && originalSlice
+      ? extractObservationFeatures(adjustedFrames, recordedManifest?.purpose === "self_test" ? recordedManifest.zoneSnapshot.primary : Array(9).fill(null))
+      : selectedReviewEpisode.features;
+    const adjustedEpisode = isSelfTestReview && originalSlice ? {
+      ...selectedReviewEpisode,
+      recordedAt: selectedReviewEpisode.recordedAt + startMs - originalSlice.startMs,
+      motionSlice: { ...originalSlice, startMs, endMs, durationSeconds: (endMs - startMs) / 1000,
+        excludedFrameCount: sessionFrames.length - adjustedFrames.length,
+        reason: `검토자가 ${selectedReviewStartSeconds.toFixed(1)}–${selectedReviewEndSeconds.toFixed(1)}초 구간을 확인했어요.`,
+        boundaryEvidence: { method: "manual_review" as const, startObserved: true, endObserved: true } },
+      features: { ...correctedFeatures, durationSeconds: (endMs - startMs) / 1000 },
+      movementCycles: detectMovementCycles(adjustedFrames),
+      interruptions: summarizeInterruptions(detectWorkInterruptions(sessionFrames), startMs, endMs),
+    } : selectedReviewEpisode;
+    const updated = scoreLabeledEpisode(applyManualActionLabel(adjustedEpisode, {
       ...selectedLabel,
       reviewer: "developer",
     }), observationBaseline);
     await saveObservationEpisode(updated);
-    if (updated.motionSlice && updated.source === "self_test_training") {
+    const boundaryReady = !updated.motionSlice?.boundaryEvidence || hasCompleteWorkBoundaries(updated.motionSlice);
+    if (hasInterruptionConfound(updated.interruptions) || !boundaryReady) removeEpisodeFromLearning(selectedReviewEpisode);
+    if (updated.motionSlice && updated.source === "self_test_training" && !hasInterruptionConfound(updated.interruptions) && boundaryReady) {
       const sample: LearnedMotionSample = {
+        episodeId: updated.id,
+        labelSource: "manual",
         sessionId: updated.sessionId,
         startMs: updated.motionSlice.startMs,
         endMs: updated.motionSlice.endMs,
@@ -3908,17 +4171,23 @@ export default function Home() {
       const participant = updated.selfTestParticipant ?? "";
       setSelfTestLearnedMotions((current) => ({
         ...current,
-        [participant]: addObservationMotionSample(current[participant] ?? [], selectedLabel.taskLabel, sample, nowMs()),
+        [participant]: addObservationMotionSample(removeObservationMotionSample(current[participant] ?? [], {
+          sessionId: selectedReviewEpisode.sessionId, ...selectedReviewEpisode.motionSlice!, episodeId: updated.id,
+        }), selectedLabel.taskLabel, sample, nowMs()),
       }));
-    } else if (updated.motionSlice && updated.source !== "self_test") {
+    } else if (updated.motionSlice && updated.source !== "self_test" && updated.source !== "self_test_training" && !hasInterruptionConfound(updated.interruptions) && boundaryReady) {
       const sample: LearnedMotionSample = {
+        episodeId: updated.id,
+        labelSource: "manual",
         sessionId: updated.sessionId,
         globalSessionId: updated.globalSessionId,
         startMs: updated.motionSlice.startMs,
         endMs: updated.motionSlice.endMs,
       };
       const next = addObservationMotionSample(
-        observationLearnedMotions,
+        removeObservationMotionSample(observationLearnedMotions, {
+          sessionId: selectedReviewEpisode.sessionId, ...selectedReviewEpisode.motionSlice!, episodeId: updated.id,
+        }),
         selectedLabel.taskLabel,
         sample,
         nowMs(),
@@ -3928,7 +4197,7 @@ export default function Home() {
     }
     await refreshObservationData(observationProfile);
     setSelectedReviewEpisodeId(null);
-    toast.success(updated.source === "self_test"
+    toast.success(!boundaryReady ? `${selectedLabel.taskLabel} 라벨은 확정했고, 시작·완료 경계가 불확실해 동작 학습은 보류했어요` : hasInterruptionConfound(updated.interruptions) ? `${selectedLabel.taskLabel} 업무로 확정했고, 중단 의심 구간이 있어 동작 학습은 보류했어요` : updated.source === "self_test"
       ? `${selectedLabel.taskLabel} 업무로 수동 확정했어요`
       : `${selectedLabel.taskLabel} 업무로 확정하고 학습 표본에 반영했어요`);
   }
@@ -3936,6 +4205,7 @@ export default function Home() {
   async function leaveActionReviewUnresolved() {
     if (!selectedReviewEpisode) return;
     await saveObservationEpisode(markActionReviewUnresolved(selectedReviewEpisode));
+    removeEpisodeFromLearning(selectedReviewEpisode);
     await refreshObservationData(observationProfile);
     setSelectedReviewEpisodeId(null);
     toast.success("판별 불가로 표시하고 기준선 학습에서 제외했어요");
@@ -4008,10 +4278,6 @@ export default function Home() {
               key={item.id}
               className={`t-tab ${view === item.id ? "active" : ""}`}
               onClick={() => {
-                if (interfaceMode === "user" && !userInstall && item.id === "settings") {
-                  beginOnboarding();
-                  return;
-                }
                 if (item.id === "settings") setSettingsSection(null);
                 if (interfaceMode === "developer" && item.id !== "selftest" && cameraSessionPurposeRef.current === "self_test") {
                   void stopSelfTestCamera();
@@ -4492,6 +4758,7 @@ export default function Home() {
           </div>
         )}
 
+        {recordingStorageError && <p role="alert" className="self-test-warning">좌표 저장이 실패해 수집을 일시 중단했어요. 미저장 기록은 메모리에 보관 중입니다. 저장 공간을 확보한 뒤 카메라 종료를 다시 눌러 주세요. 완료 전 앱을 닫지 마세요.</p>}
         {view === "selftest" && (
           <div className={`today-view${pageMotionClass}`}>
             <section className="self-test-evaluation" aria-label="업무 동작 자동 분류 자체테스트">
@@ -4499,12 +4766,12 @@ export default function Home() {
               <section className="self-test-setup" aria-label="자체테스트 환경 설정">
                 <h3>자체테스트 환경</h3>
                 <div className="self-test-session-setup">
-                  <label><span>참가자</span><input value={selfTestParticipant} onChange={(event) => setSelfTestParticipant(event.target.value)} placeholder="예: 참가자 A" disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test")} /></label>
+                  <label><span>참가자</span><input value={selfTestParticipant} onChange={(event) => setSelfTestParticipant(event.target.value)} placeholder="예: 참가자 A" disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurpose === "self_test")} /></label>
                   <div className="self-test-stage-control" role="group" aria-label="자체테스트 세션 단계">
                     <span>세션 단계</span>
                     <div>
-                      <button type="button" className={selfTestStage === "training" ? "active" : ""} aria-pressed={selfTestStage === "training"} onClick={() => setSelfTestStage("training")} disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test")}>1 · 학습 세션</button>
-                      <button type="button" className={selfTestStage === "evaluation" ? "active" : ""} aria-pressed={selfTestStage === "evaluation"} onClick={() => setSelfTestStage("evaluation")} disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test")}>2 · 분석 세션</button>
+                      <button type="button" className={selfTestStage === "training" ? "active" : ""} aria-pressed={selfTestStage === "training"} onClick={() => setSelfTestStage("training")} disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurpose === "self_test")}>1 · 학습 세션</button>
+                      <button type="button" className={selfTestStage === "evaluation" ? "active" : ""} aria-pressed={selfTestStage === "evaluation"} onClick={() => setSelfTestStage("evaluation")} disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurpose === "self_test")}>2 · 분석 세션</button>
                     </div>
                   </div>
                   <small>이 참가자의 학습 표본 {selfTestSampleCount}개 · {selfTestParticipantActions.length}/5개 행동</small>
@@ -4521,19 +4788,19 @@ export default function Home() {
                     <>
                       <label>
                         <span>사용할 카메라 1대</span>
-                        <select value={selfTestCameraId} onChange={(event) => setSelfTestCameraId(event.target.value)} disabled={cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test"}>
+                        <select value={selectedSelfTestCameraId} onChange={(event) => setSelfTestCameraId(event.target.value)} disabled={cameraStatus === "connected" && cameraSessionPurpose === "self_test"}>
                           {namedSelfTestCameras.map((camera) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label}</option>)}
                         </select>
                       </label>
-                      <button className="primary-button" type="button" onClick={() => cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test" ? void stopSelfTestCamera() : void requestSelfTestCameraStart()} disabled={cameraStatus === "requesting"}>
-                        {cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test" ? "카메라 끄기" : "카메라 연결"}
+                      <button className="primary-button" type="button" onClick={() => cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? void stopSelfTestCamera() : void requestSelfTestCameraStart()} disabled={cameraStatus === "requesting"}>
+                        {cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? selfTestRecording ? "촬영 종료·분석" : "카메라 끄기" : "카메라 연결"}
                       </button>
-                      <p>{cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test" ? "자체테스트용 카메라 1대가 연결되어 있어요." : "사용자 모드의 3대 카메라 설정과 별도로 연결됩니다."}</p>
+                      <p>{cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? selfTestRecording ? "촬영 중입니다. 종료하면 구간을 분석합니다." : "화면과 업무 구역을 설정한 뒤 촬영을 시작하세요. 지금은 학습되지 않습니다." : "사용자 모드의 3대 카메라 설정과 별도로 연결됩니다."}</p>
                       <button className="self-test-camera-refresh" type="button" onClick={() => void refreshSelfTestCameras()}>카메라 목록 다시 불러오기</button>
                     </>
                   )}
                 </div>
-                {cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test" && (
+                {cameraStatus === "connected" && cameraSessionPurpose === "self_test" && (
                   <div ref={cameraFeedLayoutRef} className="camera-feed-layout self-test-camera-feed">
                     <div ref={cameraFrameRef} className={`camera-frame ${cameraStatus}`}>
                       <div className="camera-main-view" style={{ aspectRatio: selfTestVideoAspectRatio }}><video ref={videoRef} muted playsInline aria-label="자체테스트 웹캠 영상" onLoadedMetadata={(event) => { const video = event.currentTarget; if (video.videoWidth && video.videoHeight) setSelfTestVideoAspectRatio(`${video.videoWidth} / ${video.videoHeight}`); }} /><canvas ref={overlayCanvasRef} className="pose-overlay" aria-label="실시간 스켈레톤" /></div>
@@ -4541,30 +4808,44 @@ export default function Home() {
                   </div>
                 )}
                 <div className="self-test-zone-setup">
-                  <label><span>선택할 업무 구역</span><select value={selfTestSelectedZoneId} onChange={(event) => setSelfTestSelectedZoneId(event.target.value)}>{selfTestOccupationTemplate.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}</select></label>
+                  <label><span>선택할 업무 구역</span><select disabled={selfTestRecording || selfTestStarting} value={selfTestSelectedZoneId} onChange={(event) => setSelfTestSelectedZoneId(event.target.value)}>{selfTestOccupationTemplate.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}</select></label>
                   <div className="self-test-zone-grid" aria-label="자체테스트 카메라 화면 구역 설정">
-                    {selfTestZoneGrid.map((zoneId, index) => <button type="button" key={index} className={zoneId ? "mapped" : ""} onClick={() => setSelfTestZoneGrid((current) => current.map((value, cell) => cell === index ? value === selfTestSelectedZoneId ? null : selfTestSelectedZoneId : value))}>{zoneId ? selfTestOccupationTemplate.zones.find((zone) => zone.id === zoneId)?.label : `구역 ${index + 1}`}</button>)}
+                    {selfTestZoneGrid.map((zoneId, index) => <button type="button" key={index} className={zoneId ? "mapped" : ""} disabled={selfTestRecording || selfTestStarting} onClick={() => setSelfTestZoneGrid((current) => current.map((value, cell) => cell === index ? value === selfTestSelectedZoneId ? null : selfTestSelectedZoneId : value))}>{zoneId ? selfTestOccupationTemplate.zones.find((zone) => zone.id === zoneId)?.label : `구역 ${index + 1}`}</button>)}
                   </div>
                   <small>아래 3×3 구역표에서 업무 구역을 지정하세요. 이 설정은 자체테스트에만 적용됩니다.</small>
                 </div>
               </section>
+              {cameraSessionPurpose === "self_test" && poseStatus === "error" && <p role="alert" className="self-test-warning">{cameraMessage}</p>}
               <h2 className="self-test-flow-title">{selfTestStage === "training" ? "개인 동작 학습" : "자동 동작 분석"}</h2>
-              <p className="self-test-hint">{selfTestStage === "training" ? "카메라 앞에서 5개 동작을 반복하세요. 걷기와 손동작은 한 업무 구간으로 묶고, 동작 사이에는 2~3초 정도 멈춰 구간을 구별합니다. 촬영 종료 후 자동으로 나눈 구간을 확인하세요." : "새 분석 세션에서 5개 동작을 임의 순서로 수행하세요. 동작 사이에는 2~3초 정도 멈추세요. 학습 세션의 개인 표본과 카페 업무 맥락을 함께 사용하며, 분석 결과는 학습 표본에 추가되지 않습니다."}</p>
-              {selfTestStage === "evaluation" && selfTestSampleCount === 0 && <p className="self-test-warning">이 참가자의 학습 표본이 없습니다. 먼저 학습 세션을 촬영하고 검토 대기 결과의 라벨을 확정해 주세요.</p>}
+              <p className="self-test-hint">{selfTestStage === "training" ? "앵글을 맞춘 뒤 촬영을 시작하고 5개 업무를 수행하세요. 스켈레톤과 연속된 영상 맥락이 충분하면 자동으로 개인 동작 표본을 누적합니다. 불확실한 결과만 검토 대기로 남습니다." : "촬영을 시작하고 5개 업무를 임의 순서로 수행하세요. 영상 맥락과 학습한 개인 동작을 비교하며, 분석 결과는 학습에 추가하지 않습니다."}</p>
+              <p className="self-test-hint">컵·용기·천·싱크대 등 작업 도구도 화면에 보이게 해 주세요. 영상은 로컬에서 일시 처리하며 저장하거나 전송하지 않습니다. 자동 후보와 구간은 아직 카페 실측 데이터로 검증되지 않았습니다.</p>
+              {cameraStatus === "connected" && cameraSessionPurpose === "self_test" && <p className="self-test-hint" role="status">{actionModelStatus === "ready" ? "로컬 영상 맥락 모델 준비 완료" : actionModelStatus === "error" ? "영상 맥락 모델 준비 실패 · 카메라를 다시 연결해 주세요" : "로컬 영상 맥락 모델을 준비하고 있어요…"}{selfTestRecording && liveActionContext ? ` · 최근 ${isSupportedVisualSample(liveActionContext) ? "후보" : "불확실"}: ${liveActionContext.label}` : ""}</p>}
+              {selfTestStage === "evaluation" && selfTestSampleCount === 0 && <p className="self-test-warning">이 참가자의 개인 학습 표본이 없습니다. 영상 맥락만으로 후보를 추정하므로 먼저 학습 세션을 진행하는 것이 좋습니다.</p>}
               {selfTestMappedZoneCount === 0 && <p className="self-test-warning">구역을 지정하면 카페 업무를 더 잘 구별할 수 있어요. 구역이 없거나 확신이 낮은 결과는 검토 대기로 표시됩니다.</p>}
-              <p className="self-test-progress">{cameraStatus === "connected" && cameraSessionPurposeRef.current === "self_test" ? "촬영 중 · 동작을 수행한 뒤 위의 ‘카메라 끄기’를 누르면 자동 분석합니다." : "카메라를 연결하면 스켈레톤 기록이 시작됩니다."}</p>
+              {cameraStatus === "connected" && cameraSessionPurpose === "self_test" && !selfTestRecording && <button className="primary-button" type="button" disabled={selfTestStarting || actionModelStatus !== "ready" || ["idle", "loading", "error"].includes(poseStatus)} onClick={() => void startSelfTestRecording()}>{selfTestStage === "training" ? "학습 촬영 시작" : "분석 촬영 시작"}</button>}
+              <p className="self-test-progress">{selfTestRecording ? "촬영 중 · 동작을 수행한 뒤 ‘촬영 종료·분석’을 누르세요." : cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? "카메라 미리보기 중 · 촬영 시작 전 움직임은 학습하지 않습니다." : "카메라를 연결해 앵글을 확인하세요. 촬영은 별도로 시작합니다."}</p>
               <div className="self-test-results-heading">
                 <strong>{selfTestParticipant.trim() || "현재 참가자"} · {selfTestStage === "training" ? "학습" : "분석"} 결과 {selfTestDetectedEpisodes.length}건</strong>
                 <button type="button" onClick={exportSelfTestAutoResults} disabled={observationEpisodes.every((episode) => episode.source !== "self_test" && episode.source !== "self_test_training")}>전체 결과 CSV 내보내기</button>
               </div>
+              {!!selfTestDetectedEpisodes.length && <p className="self-test-hint">시작·완료 경계 관측 {selfTestDetectedEpisodes.filter(e => hasCompleteWorkBoundaries(e.motionSlice ?? {})).length}건 · 경계 미확인 {selfTestDetectedEpisodes.filter(e => !hasCompleteWorkBoundaries(e.motionSlice ?? {})).length}건. 관측 구간 수를 실제 업무 수행 횟수로 합산하지 않습니다.</p>}
+              <section className="self-test-interruptions" aria-label="업무 중단 자동 감지">
+                <div className="self-test-results-heading"><strong>업무 중단 자동 감지</strong><button type="button" onClick={exportSelfTestInterruptions} disabled={!selfTestInterruptionReports.length}>중단 구간 CSV</button></div>
+                <p className="self-test-hint">촬영 종료 후 외부 중단 의심·원인 미확인 정지·좌표 누락을 구분합니다. 원인 미확인 정지는 분석 신호로 유지합니다. 전화·응대 여부는 확정하지 않으며 제외 시간은 참고값입니다.</p>
+                {latestSelfTestInterruptionReport ? <>
+                  <p className="self-test-hint">최근 촬영 · 중단 의심 {latestSelfTestInterruptionReport.summary.suspectedSeconds.toFixed(1)}초 · 좌표 누락 {latestSelfTestInterruptionReport.summary.unobservedSeconds.toFixed(1)}초 · 의심·누락 제외 참고시간 {latestSelfTestInterruptionReport.summary.remainingSeconds.toFixed(1)}초</p>
+                  {latestSelfTestInterruptionReport.summary.intervals.length ? <ul>{latestSelfTestInterruptionReport.summary.intervals.map((item, index) => <li key={index}>{(item.startMs / 1000).toFixed(1)}–{(item.endMs / 1000).toFixed(1)}초 · {INTERRUPTION_LABELS[item.kind]}</li>)}</ul> : <p className="self-test-hint">중단 단서 미검출 · 업무 외 행동이 없었다는 뜻은 아닙니다.</p>}
+                  <button className="self-test-review-button" type="button" onClick={() => setReplaySessionId(latestSelfTestInterruptionReport.sessionId)}>전체 스켈레톤 리플레이</button>
+                </> : <p className="self-test-hint">새 촬영을 종료하면 업무 구간 사이의 중단까지 확인할 수 있어요.</p>}
+              </section>
               {selfTestDetectedEpisodes.length > 0 ? (
                 <div className="self-test-results" role="table" aria-label="자동 검출된 자체테스트 동작">
                   <div className="self-test-result-row self-test-result-header" role="row"><span role="columnheader">단계·검출 구간</span><span role="columnheader">자동·수동 라벨</span><span role="columnheader">검토 상태</span></div>
-                  {selfTestDetectedEpisodes.slice(0, 30).map((episode) => (
+                  {selfTestDetectedEpisodes.map((episode) => (
                     <div className="self-test-result-row" role="row" key={episode.id}>
-                      <span role="cell">{episode.source === "self_test_training" ? "학습" : "분석"} · {new Date(episode.recordedAt).toLocaleTimeString("ko-KR")} · {episode.motionSlice ? `${(episode.motionSlice.startMs / 1000).toFixed(1)}–${(episode.motionSlice.endMs / 1000).toFixed(1)}초` : "구간 미확인"}</span>
-                      <span role="cell">자동 {episode.actionReview?.candidates[0]?.taskLabel ?? (episode.actionReview?.manualLabel ? "미분류" : episode.taskLabel)} · {Math.round((episode.actionReview?.candidates[0]?.confidence ?? (episode.actionReview?.manualLabel ? 0 : episode.taskConfidence)) * 100)}%{episode.actionReview?.manualLabel && <><br />수동 {episode.actionReview.manualLabel.taskLabel}</>}</span>
-                      <span role="cell">{episode.actionReview?.status === "confirmed" ? episode.source === "self_test_training" ? "수동 확정·학습 반영" : "수동 확정" : episode.actionReview?.status === "unresolved" ? "판별 불가" : episode.actionReview?.status === "pending" ? "검토 대기" : episode.source === "self_test_training" ? "자동 확정·학습 반영" : "자동 분류"}{episode.actionReview?.status === "pending" && <button className="self-test-review-button" type="button" onClick={() => openActionReview(episode)}>스켈레톤 검토</button>}</span>
+                      <span role="cell">{episode.source === "self_test_training" ? "학습" : "분석"} · {new Date(episode.recordedAt).toLocaleTimeString("ko-KR")} · {episode.motionSlice ? `${(episode.motionSlice.startMs / 1000).toFixed(1)}–${(episode.motionSlice.endMs / 1000).toFixed(1)}초` : "구간 미확인"}<br />왕복 {episode.movementCycles?.length ?? 0}회{episode.movementCycles?.length ? ` · 회당 평균 ${(episode.movementCycles.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / episode.movementCycles.length).toFixed(1)}초` : ""}</span>
+                      <span role="cell">자동 후보 {episode.actionReview?.candidates[0]?.taskLabel ?? (episode.actionReview?.manualLabel ? "미분류" : episode.taskLabel)} · {Math.round((episode.actionReview?.candidates[0]?.confidence ?? (episode.actionReview?.manualLabel ? 0 : episode.taskConfidence)) * 100)}점{episode.actionReview?.manualLabel && <><br />수동 {episode.actionReview.manualLabel.taskLabel}</>}</span>
+                      <span role="cell">{episode.actionReview?.status === "confirmed" ? episode.source === "self_test_training" ? "수동 확정·학습 반영" : "수동 확정" : episode.actionReview?.status === "unresolved" ? "판별 불가" : episode.actionReview?.status === "pending" ? "검토 대기" : episode.source === "self_test_training" ? "자동 확정·학습 반영" : "자동 분류"}{<button className="self-test-review-button" type="button" onClick={() => openActionReview(episode)}>스켈레톤 검토</button>}</span>
                     </div>
                   ))}
                 </div>
@@ -4737,7 +5018,7 @@ export default function Home() {
                     <div className={`learned-motion-result status-${learnedMotionResult.status}`} aria-live="polite">
                       <span>{learnedMotionResult.status === "matched" ? "판별 결과" : learnedMotionResult.status === "uncertain" ? "가장 가까운 후보" : "판별 보류"}</span>
                       <strong>{learnedMotionResult.label ?? "상반신 좌표가 부족합니다"}</strong>
-                      <b>신뢰도 <NumberFlow value={Math.round((Number.isFinite(learnedMotionResult.confidence) ? learnedMotionResult.confidence : 0) * 100)} suffix="%" /></b>
+                      <b>일치 점수 <NumberFlow value={Math.round((Number.isFinite(learnedMotionResult.confidence) ? learnedMotionResult.confidence : 0) * 100)} suffix="점" /></b>
                       {learnedMotionResult.candidates.length > 1 && (
                         <small>다음 후보 · {learnedMotionResult.candidates[1].label}</small>
                       )}
@@ -5652,6 +5933,7 @@ export default function Home() {
                       회당 평균 {(latestObservationEpisode.movementCycles!.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / latestObservationEpisode.movementCycles!.length).toFixed(1)}초
                     </p>
                   )}
+                  {!!latestObservationEpisode?.interruptions?.intervals.length && <p>최근 동작의 중단·정지 단서를 확인했어요. 원인 미확인 정지는 분석 신호로 유지합니다. 중단 의심 {latestObservationEpisode.interruptions.suspectedSeconds.toFixed(1)}초 · 좌표 누락 {latestObservationEpisode.interruptions.unobservedSeconds.toFixed(1)}초</p>}
                   <div className="pattern-summary-grid">
                     <span><small>기준선 완성도</small><strong><NumberFlow value={observationBaseline.confidence} suffix="%" /></strong></span>
                     <span><small>학습된 업무</small><strong>{observationBaseline.tasks.length}개</strong></span>
@@ -5936,7 +6218,7 @@ export default function Home() {
           <div className={`learned-motion-result status-${learnedMotionResult.status}`} aria-live="polite">
             <span>{learnedMotionResult.status === "matched" ? "판별 결과" : learnedMotionResult.status === "uncertain" ? "가장 가까운 후보" : "판별 보류"}</span>
             <strong>{learnedMotionResult.label ?? "상반신 좌표가 부족합니다"}</strong>
-            <b>신뢰도 <NumberFlow value={Math.round((Number.isFinite(learnedMotionResult.confidence) ? learnedMotionResult.confidence : 0) * 100)} suffix="%" /></b>
+            <b>일치 점수 <NumberFlow value={Math.round((Number.isFinite(learnedMotionResult.confidence) ? learnedMotionResult.confidence : 0) * 100)} suffix="점" /></b>
             {learnedMotionResult.candidates.length > 1 && <small>다음 후보 · {learnedMotionResult.candidates[1].label}</small>}
           </div>
         )}
@@ -6056,6 +6338,7 @@ export default function Home() {
           얼굴·영상·음성은 저장하지 않고, 좌표 데이터는 이 브라우저에만
           남아요. 동의하지 않아도 기록과 수동 체크리스트는 그대로 사용할 수 있어요.
         </p>
+        <p className="consent-note">카페 업무를 구분하기 위해 화면 속 작업과 도구를 기기 안에서 일시 분석해요. 원본 화면은 전송·저장하지 않으며, 업무 후보·점수·시각만 좌표와 함께 남깁니다.</p>
         <div className="consent-actions">
           <button
             type="button"
@@ -6248,7 +6531,7 @@ export default function Home() {
             {activeZoneGrid.map((zoneId, index) => {
               const zone = zoneOptions.find((item) => item.id === zoneId);
               return (
-                <button key={index} type="button" className={zoneId ? "mapped" : ""} onClick={() => void assignZoneCell(index)}>
+                <button key={index} type="button" className={zoneId ? "mapped" : ""} disabled={selfTestRecording || selfTestStarting} onClick={() => void assignZoneCell(index)}>
                   <small>{index + 1}</small>
                   <strong>{zone?.label ?? "구역 지정"}</strong>
                 </button>
@@ -6340,8 +6623,12 @@ export default function Home() {
             globalSessionId: selectedReviewEpisode.globalSessionId,
             window: selectedReviewEpisode.motionSlice
               ? {
-                startMs: selectedReviewEpisode.motionSlice.startMs,
-                endMs: selectedReviewEpisode.motionSlice.endMs,
+                startMs: selectedReviewEpisode.source === "self_test_training" || selectedReviewEpisode.source === "self_test"
+                  ? Math.max(0, Math.min(selectedReviewEpisode.motionSlice.startMs, selectedReviewStartSeconds * 1000) - 3000)
+                  : selectedReviewEpisode.motionSlice.startMs,
+                endMs: selectedReviewEpisode.source === "self_test_training" || selectedReviewEpisode.source === "self_test"
+                  ? Math.max(selectedReviewEpisode.motionSlice.endMs, selectedReviewEndSeconds * 1000) + 3000
+                  : selectedReviewEpisode.motionSlice.endMs,
               }
               : undefined,
           }}
@@ -6356,7 +6643,7 @@ export default function Home() {
                 <strong id="manual-review-panel-title">
                   {actionReviewDisplayLabel(selectedReviewEpisode)}
                   {actionReviewDisplayCandidate(selectedReviewEpisode) && (
-                    <> · {Math.round(actionReviewDisplayCandidate(selectedReviewEpisode)!.confidence * 100)}%</>
+                    <> · 후보 점수 {Math.round(actionReviewDisplayCandidate(selectedReviewEpisode)!.confidence * 100)}점</>
                   )}
                 </strong>
                 <p>
@@ -6381,8 +6668,19 @@ export default function Home() {
                 </small>
                 <small>{selectedReviewEpisode.source === "self_test"
                   ? "자체테스트 · 스켈레톤 리플레이와 구역을 보고 실제 동작을 선택하세요. 이 검토 결과는 자동 분류 학습에 추가되지 않습니다."
-                  : "확정 기준 · 신뢰도 60% 이상, 2순위와 12%p 이상 차이, 좌표·구역·시간 정보 정상"}</small>
+                  : selectedReviewEpisode.source === "self_test_training"
+                    ? "학습 후보 점수는 정확도가 아닙니다. 동작과 구간을 직접 확인하고 라벨을 선택하세요."
+                    : selectedReviewEpisode.visualContext ? "영상 맥락 기준 · 문장 유사도 0.28 이상, 후보 차이 0.04 이상, 2초 이상 3개 표본 일치. 카페 성능으로 검증된 확률이 아닙니다."
+                    : "확정 기준 · 후보 점수 60점 이상, 2순위와 12점 이상 차이, 좌표·구역·시간 정보 정상. 점수는 검증된 정확도가 아닙니다."}</small>
                 {selectedReviewEpisode.source === "self_test_training" && <small>학습 세션 · 라벨을 확정하면 이 참가자의 동작 표본에 추가됩니다.</small>}
+                {!!selectedReviewEpisode.interruptions?.intervals.length && <small>중단 의심 {selectedReviewEpisode.interruptions.suspectedSeconds.toFixed(1)}초 · 좌표 누락 {selectedReviewEpisode.interruptions.unobservedSeconds.toFixed(1)}초 · 제외 참고시간 {selectedReviewEpisode.interruptions.remainingSeconds.toFixed(1)}초. 외부 중단 의심·좌표 누락이 있으면 비교를 보류하며 원인 미확인 정지는 분석에 유지합니다.</small>}
+                {(selectedReviewEpisode.source === "self_test_training" || selectedReviewEpisode.source === "self_test") && selectedReviewEpisode.motionSlice && (
+                  <div className="self-test-boundary-editor">
+                    <span>실제 업무 구간 (초) · 값을 바꾸면 리플레이 범위도 넓어집니다</span>
+                    <label>시작 <input type="number" min="0" step="0.1" value={selectedReviewStartSeconds} onChange={(event) => setSelectedReviewStartSeconds(Number(event.target.value) || 0)} /></label>
+                    <label>종료 <input type="number" min="0" step="0.1" value={selectedReviewEndSeconds} onChange={(event) => setSelectedReviewEndSeconds(Number(event.target.value) || 0)} /></label>
+                  </div>
+                )}
               </div>
 
               {selectedReviewLabelOptions.length > 0 ? (
@@ -6434,6 +6732,7 @@ export default function Home() {
 
       <Toaster
         position="bottom-center"
+        style={{ zIndex: 90 }}
         icons={{ success: <span aria-hidden="true">✓</span> }}
         toastOptions={{
           unstyled: true,

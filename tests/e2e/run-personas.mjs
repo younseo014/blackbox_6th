@@ -73,6 +73,11 @@ async function withPage(options, run) {
   page.setDefaultTimeout(45000);
   try {
     await run(page, context);
+  } catch (error) {
+    console.error(error);
+    console.error((await page.locator("body").innerText()).slice(-1500));
+    await page.screenshot({ path: `/private/tmp/memory-guard-e2e-failure-${PORT}.png`, fullPage: true }).catch(() => undefined);
+    throw error;
   } finally {
     // Always release the context (and its camera stream / WASM instance)
     // so a failure in one persona test doesn't slow down or destabilize
@@ -84,7 +89,8 @@ async function withPage(options, run) {
 async function openDeveloperCamera(page) {
   const connectButton = page.getByRole("button", { name: "카메라 연결", exact: true });
   if (!(await connectButton.isVisible().catch(() => false))) {
-    await page.getByLabel("개발자 모드로 전환").click();
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.getByRole("button", { name: "개발자 모드 카메라·동작 분석 테스트 도구를 열어요", exact: false }).click();
     await connectButton.waitFor();
   }
   await connectButton.click();
@@ -98,6 +104,11 @@ async function acceptObservationConsent(page) {
   await cameraDialog.waitFor();
   await cameraDialog.getByLabel("카메라 1 영상").waitFor();
   await cameraDialog.getByRole("button", { name: "확인 완료", exact: true }).click();
+}
+
+async function openMyData(page) {
+  await page.getByRole("button", { name: "테스트 설정", exact: true }).click();
+  await page.getByRole("button", { name: "내 데이터 관리", exact: false }).click();
 }
 
 test("개발자 카메라 테스트: 작은 인라인 영상 대신 큰 팝업을 열고 다시 열 수 있다", async () => {
@@ -145,7 +156,7 @@ test("페르소나: 카메라 권한 거부 - 에러 메시지가 뜨고 다른 
 
     await page.getByRole("button", { name: "가상 리포트", exact: true }).click();
     await assert.doesNotReject(
-      page.getByText("가상 페르소나의 일주일 관찰 결과").waitFor(),
+      page.getByRole("heading", { name: "가상 기준선으로 만든 이번 주 기록", exact: true }).waitFor(),
       "케어 기록 (demo) should stay usable without a camera",
     );
   });
@@ -166,7 +177,7 @@ test("페르소나: 관찰 비동의 - 카메라는 꺼진 채로 남고 케어 
       "camera should remain off (still showing the connect button) after declining",
     );
 
-    await page.getByRole("button", { name: "케어 기록", exact: false }).first().click();
+    await page.getByRole("button", { name: "가상 리포트", exact: true }).click();
     await page.locator(".demo-switcher button").click();
     await assert.doesNotReject(
       page.getByText("아직 장기 관찰에 참여하고 있지 않아요").waitFor(),
@@ -196,7 +207,7 @@ test("페르소나: 여러 세션 누적 - 카메라를 두 번 연결하면 세
       .click();
     await page.waitForTimeout(500);
 
-    await page.getByRole("button", { name: "내 데이터 관리", exact: false }).click();
+    await openMyData(page);
     const sessionCountText = await page
       .locator(".my-data-grid article")
       .first()
@@ -215,7 +226,7 @@ test("페르소나: 전체 삭제 - 내 데이터 전체 삭제 후 세션/케�
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     await acceptObservationConsent(page);
 
-    await page.getByRole("button", { name: "내 데이터 관리", exact: false }).click();
+    await openMyData(page);
     await page.getByRole("button", { name: "내 데이터 전체 삭제", exact: true }).click();
     await page.waitForTimeout(500);
 
@@ -253,7 +264,9 @@ test("페르소나: 저시력/고령 사용자 - 주요 제목과 버튼 글자 
 test("시뮬레이션: 페르소나를 전환하면 신호 배지와 요일 데이터가 함께 바뀐다", async () => {
   await withPage({}, async (page) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: "케어 기록", exact: false }).first().click();
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.getByRole("button", { name: /개발자 모드 카메라·동작 분석/ }).click();
+    await page.getByRole("button", { name: "가상 리포트", exact: true }).click();
     await page.waitForTimeout(300);
 
     const personaTabs = page.locator(".persona-switcher button");
@@ -308,7 +321,35 @@ test("개발용 세션 리플레이: 기록된 세션을 재생하면 스켈레�
       .click();
     await page.waitForTimeout(1000);
 
-    await page.getByRole("button", { name: "내 데이터 관리", exact: false }).click();
+    // Chrome's fake camera is a test pattern, not a human. Seed known skeleton
+    // coordinates to test persistence/replay independently of person detection.
+    await page.evaluate(async () => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("memory-guard-motion-v2");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const values = new Float32Array(224 * 20);
+      for (let i = 0; i < 20; i++) {
+        values[i * 224] = i * 100;
+        values[i * 224 + 1] = 1;
+        for (let joint = 0; joint < 22; joint++) {
+          const offset = i * 224 + 10 + joint * 4;
+          values.set([0.42 + (joint % 2) * 0.16 + i * 0.001, 0.2 + Math.floor(joint / 2) * 0.04, 0, 1], offset);
+        }
+      }
+      const tx = db.transaction(["motion_sessions", "motion_chunks"], "readwrite");
+      tx.objectStore("motion_sessions").put({ id: "replay-fixture", startedAt: Date.now(), endedAt: Date.now() + 1900,
+        frameCount: 20, detectedFrameCount: 20, fullBodyFrameCount: 0, handDetectedFrameCount: 0,
+        storageBytes: values.byteLength, sampleRate: 10, bodyLandmarkCount: 22, handLandmarkCount: 21,
+        coordinateSpace: "normalized_image", source: "local_camera", faceLandmarksStored: false, cameraSlot: 1 });
+      tx.objectStore("motion_chunks").put({ id: "replay-fixture:0", sessionId: "replay-fixture", startFrame: 0,
+        frameCount: 20, createdAt: Date.now(), data: values.buffer });
+      await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+      db.close();
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await openMyData(page);
     const replayButtons = page.locator(".my-data-sessions li button:not([disabled])");
     await assert.doesNotReject(
       replayButtons.first().waitFor({ timeout: 8000 }),
@@ -488,7 +529,7 @@ test("개발자 수동 라벨링: 애매한 행동의 스켈레톤을 보고 업
         }
       }
 
-      const motionRequest = indexedDB.open("memory-guard-motion-v2", 1);
+      const motionRequest = indexedDB.open("memory-guard-motion-v2");
       motionRequest.onupgradeneeded = () => {
         const database = motionRequest.result;
         database.createObjectStore("motion_sessions", { keyPath: "id" });

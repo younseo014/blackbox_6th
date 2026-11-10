@@ -18,6 +18,23 @@ import { generateEventMotion, type DemoMotionType } from "../app/demo-motion.ts"
 
 const STEP_MS = 200; // matches MOTION_SAMPLE_RATE (5Hz)
 
+test("missing coordinates cannot form a hesitation between two movements", () => {
+  const samples: MotionSample[] = [
+    { point: { x: 0, y: 0, z: 0 }, relativeTimeMs: 0 },
+    { point: { x: 0.2, y: 0, z: 0 }, relativeTimeMs: 100 },
+    { point: { x: 0.2, y: 0, z: 0 }, relativeTimeMs: 20100 },
+    { point: { x: 0.4, y: 0, z: 0 }, relativeTimeMs: 20200 },
+  ];
+  assert.deepEqual(detectMotionEvents(samples), []);
+});
+
+test("body wrists remain usable when detailed finger landmarks are missing", () => {
+  const frames = generateEventMotion("high_reach", 1).map((raw) => {
+    const frame = [...raw]; frame[6] = frame[7] = 0; return frame;
+  });
+  assert.ok(motionSamplesFromRawFrames(frames).some((sample) => sample.point));
+});
+
 function samplesFrom(points: Array<{ x: number; y: number } | null>): MotionSample[] {
   return points.map((point, index) => ({
     point: point ? { x: point.x, y: point.y, z: 0 } : null,

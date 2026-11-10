@@ -76,3 +76,4 @@ next-env.d.ts
 /public/models/yolox_m.onnx
 /public/models/yolox_tiny.onnx
 /public/ort/
+/public/models/action-context/vision-int8.onnx

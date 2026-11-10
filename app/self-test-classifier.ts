@@ -49,7 +49,8 @@ export function classifyCafeSelfTest(features: ObservationFeatures, rawFrames: n
     .map((task) => {
       const zoneMatch = Boolean(features.dominantZone && task.zones.includes(features.dominantZone));
       const motionMatches = task.motions.filter((motion) => observed.has(motion)).length;
-      const confidence = Math.min(0.78, (zoneMatch ? 0.64 : 0.12) + Math.min(2, motionMatches) * 0.07);
+      // These are weak context hints, not calibrated task probabilities.
+      const confidence = Math.min(0.4, (zoneMatch ? 0.26 : 0.08) + Math.min(2, motionMatches) * 0.06);
       return {
         taskType: workContextTaskType(task.label),
         taskLabel: task.label,

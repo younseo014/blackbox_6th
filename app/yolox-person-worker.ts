@@ -81,8 +81,16 @@ self.onmessage = async (event: MessageEvent<Request>) => {
   try {
     if (!session) throw new Error("YOLOX model has not loaded.");
     const tensor = frameTensor(request.bitmap);
-    const outputs = await session.run({ [session.inputNames[0]]: tensor });
-    self.postMessage({ type: "result", id: request.id, score: bestPersonScore(outputs) });
+    try {
+      const outputs = await session.run({ [session.inputNames[0]]: tensor });
+      try {
+        self.postMessage({ type: "result", id: request.id, score: bestPersonScore(outputs) });
+      } finally {
+        Object.values(outputs).forEach((output) => output.dispose());
+      }
+    } finally {
+      tensor.dispose();
+    }
   } catch (error) {
     self.postMessage({ type: "result-error", id: request.id, error: errorMessage(error) });
   } finally {

@@ -118,18 +118,16 @@ export function synchronizeThreeViewFrames(
   return samples;
 }
 
-/** Representative 2D track for existing motion analysis; all three raw views remain available. */
+/** Keep one 2D coordinate space; camera changes cannot be treated as body movement. */
 export function representativeThreeViewFrames(samples: ThreeViewSample[]): number[][] {
-  const streams: CameraFrameStream[] = ([1, 2, 3] as CameraSlot[]).map((cameraSlot) => ({ cameraSlot, frames: [] }));
-  for (const sample of samples) {
-    const best = ([1, 2, 3] as CameraSlot[]).reduce((winner, slot) =>
-      frameQuality(sample.frames[slot]) > frameQuality(sample.frames[winner]) ? slot : winner,
-    1 as CameraSlot);
+  const slots = [1, 2, 3] as const;
+  const quality = slots.map((slot) => samples.reduce((sum, sample) => sum + frameQuality(sample.frames[slot]), 0));
+  const best = slots.reduce((winner, slot) => quality[slot - 1] > quality[winner - 1] ? slot : winner, 1 as CameraSlot);
+  return samples.map((sample) => {
     const frame = [...sample.frames[best]];
     frame[0] = sample.timeMs;
-    streams[best - 1].frames.push(frame);
-  }
-  return mergeCameraFrameStreams(streams);
+    return frame;
+  });
 }
 
 export type CameraHandoff = {

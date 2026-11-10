@@ -17,6 +17,13 @@ import type { NormalizedLandmarkLike } from "../app/motion-analysis.ts";
 
 type Overrides = Partial<Record<number, Partial<NormalizedLandmarkLike>>>;
 
+test("losing all views cannot restore present status after the short coasting period", () => {
+  const previous: GlobalPersonTrack = { ...EMPTY_GLOBAL_TRACK, id: "owner", presence: "present", lastObservedAt: 1000, updatedAt: 1000 };
+  const lost = updateGlobalPersonTrack(previous, [], 2000);
+  assert.equal(lost.id, "owner");
+  assert.equal(lost.presence, "provisional");
+});
+
 /** Upright person centred at `centerX`, torso length ~0.2 of the frame. */
 function person(centerX = 0.5, overrides: Overrides = {}): NormalizedLandmarkLike[] {
   const base = (x: number, y: number, visible = 0.9) => ({ x, y, z: 0, visibility: visible });

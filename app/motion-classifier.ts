@@ -58,7 +58,7 @@ function frameSignature(rawFrame: number[]): { frame: SignatureFrame; center: { 
   if (!parsed.bodyDetected) return null;
   const leftShoulder = point(parsed.body, 0);
   const rightShoulder = point(parsed.body, 1);
-  if ([leftShoulder, rightShoulder].some((item) => item.visibility < 0.15)) {
+  if ([leftShoulder, rightShoulder].some((item) => item.visibility < 0.15 || !Number.isFinite(item.x) || !Number.isFinite(item.y))) {
     return null;
   }
   const shoulderCenter = midpoint(leftShoulder, rightShoulder);
@@ -71,7 +71,7 @@ function frameSignature(rawFrame: number[]): { frame: SignatureFrame; center: { 
   const mask: number[] = [];
   BODY_JOINTS.forEach((index) => {
     const joint = point(parsed.body, index);
-    const visible = joint.visibility >= 0.25 ? 1 : 0;
+    const visible = joint.visibility >= 0.25 && Number.isFinite(joint.x) && Number.isFinite(joint.y) ? 1 : 0;
     values.push(
       (joint.x - shoulderCenter.x) / upperBodyScale,
       (joint.y - shoulderCenter.y) / upperBodyScale,
@@ -122,7 +122,7 @@ export function buildMotionSignature(rawFrames: number[][]): MotionSignature | n
   const withTravel = usable.map((item) => {
     const values = item.frame.values.map((value, index) => value - firstFrame.values[index]);
     values.push((item.center.x - firstCenter.x) / travelScale, (item.center.y - firstCenter.y) / travelScale);
-    return { values, mask: [...item.frame.mask, 0.8, 0.8] };
+    return { values, mask: [...item.frame.mask.map((weight, index) => Math.min(weight, firstFrame.mask[index])), 0.8, 0.8] };
   });
   return {
     frames: resample(withTravel, SAMPLE_COUNT),

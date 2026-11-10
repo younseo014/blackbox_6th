@@ -12,6 +12,59 @@ import {
 } from "../app/observation-engine.ts";
 import { OCCUPATION_TEMPLATES, getOccupationTemplate, inferOccupationContext, inferZoneContext } from "../app/occupation-templates.ts";
 
+test("interrupted work keeps raw timing but is withheld from baseline and delay scoring", () => {
+  const episode = createObservationEpisode({
+    sessionId: "interrupted", recordedAt: Date.now(), profile: DEFAULT_PROFILE, phase: "business",
+    features: { durationSeconds: 30, activeRatio: 0.5, pauseCount: 1, longestPauseSeconds: 8,
+      pathLength: 1, routeComplexity: 2, repetitionCount: 3, dominantZone: "DRINK_PREP", zoneTransitions: 0 },
+    baseline: buildBaseline([]),
+  });
+  const interrupted: ObservationEpisode = { ...episode, disposition: "accepted", interruptions: {
+    intervals: [{ kind: "raised_hand_hold", startMs: 10000, endMs: 18000 }],
+    suspectedSeconds: 8, unobservedSeconds: 0, remainingSeconds: 22,
+  } };
+  assert.equal(buildBaseline([interrupted]).acceptedSamples, 0);
+  const scored = scoreLabeledEpisode(interrupted, buildBaseline([]));
+  assert.equal(scored.features.durationSeconds, 30);
+  assert.equal(scored.features.longestPauseSeconds, 8);
+  assert.equal(scored.disposition, "quarantined");
+  assert.equal(scored.durationZScore, null);
+  assert.equal(scored.pauseZScore, null);
+});
+
+test("unexplained stillness stays in timing analysis instead of becoming external noise", () => {
+  const episode = createObservationEpisode({
+    sessionId: "pause", recordedAt: Date.now(), profile: DEFAULT_PROFILE, phase: "business",
+    features: { durationSeconds: 30, activeRatio: 0.5, pauseCount: 1, longestPauseSeconds: 8,
+      pathLength: 1, routeComplexity: 2, repetitionCount: 0, dominantZone: "DRINK_PREP", zoneTransitions: 0 },
+    baseline: buildBaseline([]),
+  });
+  const pause: ObservationEpisode = { ...episode, disposition: "accepted", interruptions: {
+    intervals: [{ kind: "stillness", startMs: 10000, endMs: 18000 }],
+    suspectedSeconds: 0, unobservedSeconds: 0, unexplainedPauseSeconds: 8, remainingSeconds: 30,
+  } };
+  assert.equal(buildBaseline([pause]).acceptedSamples, 1);
+  const baseline = buildBaseline([1, 2, 3].map((n) => ({ ...episode, id: String(n), disposition: "accepted" as const,
+    features: { ...episode.features, durationSeconds: n * 2 + 8, longestPauseSeconds: n } })));
+  const scored = scoreLabeledEpisode({ ...pause, mode: "analysis" }, baseline);
+  assert.ok((scored.pauseZScore ?? 0) > 1.5);
+  assert.equal(scored.features.longestPauseSeconds, 8);
+});
+
+test("unobserved task boundaries cannot establish duration or pause abnormalities", () => {
+  const episode = createObservationEpisode({ sessionId: "partial", recordedAt: Date.now(), profile: DEFAULT_PROFILE, phase: "business",
+    features: { durationSeconds: 30, activeRatio: .5, pauseCount: 1, longestPauseSeconds: 8,
+      pathLength: 1, routeComplexity: 2, repetitionCount: 0, dominantZone: "DRINK_PREP", zoneTransitions: 0 }, baseline: buildBaseline([]) });
+  const partial: ObservationEpisode = { ...episode, disposition: "accepted", motionSlice: { startMs: 0, endMs: 30000,
+    durationSeconds: 30, originalDurationSeconds: 30, excludedFrameCount: 0, reason: "partial",
+    boundaryEvidence: { method: "arm_lifecycle", startObserved: false, endObserved: true } } };
+  assert.equal(buildBaseline([partial]).acceptedSamples, 0);
+  const scored = scoreLabeledEpisode(partial, buildBaseline([]));
+  assert.equal(scored.disposition, "quarantined");
+  assert.equal(scored.durationZScore, null); assert.equal(scored.pauseZScore, null);
+  assert.equal(scored.features.durationSeconds, 30);
+});
+
 test("occupation templates: all six requested occupations have zones, tasks and sequences", () => {
   assert.deepEqual(
     OCCUPATION_TEMPLATES.map((item) => item.id).sort(),

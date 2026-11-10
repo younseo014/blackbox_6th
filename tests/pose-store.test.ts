@@ -140,3 +140,7 @@ test("data folder ZIP contains local and central directory records", async () =>
   assert.equal(view.getUint32(bytes.length - 22, true), 0x06054b50);
   assert.equal(view.getUint16(bytes.length - 12, true), 2);
 });
+
+test("ZIP32 rejects excessive file counts rather than silently wrapping archive headers", () => {
+  assert.throws(() => createDataFolderZip(Array.from({ length: 65535 }, () => ({ path: "empty", contents: "" }))), /파일 수/);
+});

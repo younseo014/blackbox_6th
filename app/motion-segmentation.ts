@@ -9,6 +9,15 @@ export type TargetMotionSlice = {
   originalDurationSeconds: number;
   excludedFrameCount: number;
   reason: string;
+  boundaryEvidence?: {
+    method: "arm_lifecycle" | "learned_sequence" | "manual_review";
+    startObserved: boolean;
+    endObserved: boolean;
+    label?: string;
+    distance?: number;
+    margin?: number;
+    trackingGapMs?: number;
+  };
 };
 
 export type MotionSegmentationOptions = {
@@ -22,7 +31,7 @@ export type MotionSegmentationOptions = {
 export const SELF_TEST_MOTION_SEGMENTATION: MotionSegmentationOptions = {
   maxActiveGapMs: 1800,
   splitTravelTransitions: false,
-  maxSegmentMs: 20_000,
+  maxSegmentMs: 45_000,
   maxUnusableGapMs: 400,
 };
 
@@ -44,13 +53,15 @@ type MotionFrame = {
   centerY: number;
   torsoScale: number;
   pose: number[];
+  poseVisible: boolean[];
 };
 
 function bodyPoint(body: number[], index: number) {
   return {
     x: body[index * 4] * ASPECT_RATIO,
     y: body[index * 4 + 1],
-    visibility: body[index * 4 + 3] ?? 0,
+    visibility: Number.isFinite(body[index * 4]) && Number.isFinite(body[index * 4 + 1])
+      && Number.isFinite(body[index * 4 + 3]) ? body[index * 4 + 3] : 0,
   };
 }
 
@@ -59,25 +70,20 @@ function toMotionFrame(raw: number[], originalIndex: number): MotionFrame | null
   if (!parsed.bodyDetected) return null;
   const leftShoulder = bodyPoint(parsed.body, 0);
   const rightShoulder = bodyPoint(parsed.body, 1);
-  const leftHip = bodyPoint(parsed.body, 12);
-  const rightHip = bodyPoint(parsed.body, 13);
   if (leftShoulder.visibility < 0.25 || rightShoulder.visibility < 0.25) return null;
   const armPoints = [2, 3, 4, 5].map((index) => bodyPoint(parsed.body, index));
   if (armPoints.filter((point) => point.visibility >= 0.2).length < 2) return null;
   const shoulderX = (leftShoulder.x + rightShoulder.x) / 2;
   const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-  const hipsVisible = leftHip.visibility >= 0.25 && rightHip.visibility >= 0.25;
-  const centerX = hipsVisible ? (leftHip.x + rightHip.x) / 2 : shoulderX;
-  const centerY = hipsVisible ? (leftHip.y + rightHip.y) / 2 : shoulderY;
+  // Changing the reference when hips disappear creates motion in a stationary torso.
+  const centerX = shoulderX;
+  const centerY = shoulderY;
   const shoulderWidth = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
-  const torsoScale = Math.max(
-    0.08,
-    hipsVisible ? Math.hypot(shoulderX - centerX, shoulderY - centerY) : shoulderWidth,
-  );
-  const pose = armPoints.flatMap((point, index) => {
-    const fallback = index % 2 === 0 ? leftShoulder : rightShoulder;
-    const trackedPoint = point.visibility >= 0.2 ? point : fallback;
-    return [(trackedPoint.x - centerX) / torsoScale, (trackedPoint.y - centerY) / torsoScale];
+  const torsoScale = Math.max(0.08, shoulderWidth);
+  const poseVisible = armPoints.flatMap((point) => [point.visibility >= 0.2, point.visibility >= 0.2]);
+  const pose = armPoints.flatMap((point) => {
+    return point.visibility >= 0.2
+      ? [(point.x - centerX) / torsoScale, (point.y - centerY) / torsoScale] : [0, 0];
   });
   return {
     raw,
@@ -87,6 +93,7 @@ function toMotionFrame(raw: number[], originalIndex: number): MotionFrame | null
     centerY,
     torsoScale,
     pose,
+    poseVisible,
   };
 }
 
@@ -122,8 +129,14 @@ function splitTrackedRuns(rawFrames: number[][], maxUnusableGapMs = 0) {
 
 function frameMotionComponents(previous: MotionFrame, current: MotionFrame) {
   const dtSeconds = Math.max(0.04, (current.timeMs - previous.timeMs) / 1000);
-  const squared = current.pose.reduce((sum, value, index) => sum + (value - previous.pose[index]) ** 2, 0);
-  const poseSpeed = Math.sqrt(squared / current.pose.length) / dtSeconds;
+  let squared = 0;
+  let observed = 0;
+  current.pose.forEach((value, index) => {
+    if (!current.poseVisible[index] || !previous.poseVisible[index]) return;
+    squared += (value - previous.pose[index]) ** 2;
+    observed++;
+  });
+  const poseSpeed = observed ? Math.sqrt(squared / observed) / dtSeconds : 0;
   const travelSpeed = Math.hypot(
     current.centerX - previous.centerX,
     current.centerY - previous.centerY,
@@ -133,6 +146,20 @@ function frameMotionComponents(previous: MotionFrame, current: MotionFrame) {
     travelSpeed,
     totalSpeed: Math.max(poseSpeed, Math.min(3, travelSpeed) * 0.35),
   };
+}
+
+function suppressIsolatedJumps(run: MotionFrame[]) {
+  const median = (a: number, b: number, c: number) => a + b + c - Math.min(a, b, c) - Math.max(a, b, c);
+  return run.map((frame, index) => {
+    const before = run[index - 1], after = run[index + 1];
+    if (!before || !after || after.timeMs - before.timeMs > 400) return frame;
+    return { ...frame,
+      centerX: median(before.centerX, frame.centerX, after.centerX),
+      centerY: median(before.centerY, frame.centerY, after.centerY),
+      pose: frame.pose.map((value, joint) => before.poseVisible[joint] && after.poseVisible[joint]
+        ? median(before.pose[joint], value, after.pose[joint]) : value),
+    };
+  });
 }
 
 function frameMotionSpeed(previous: MotionFrame, current: MotionFrame) {
@@ -310,7 +337,7 @@ export function sliceTargetMotions(
   const slices: TargetMotionSlice[] = [];
 
   for (const sourceRun of splitTrackedRuns(rawFrames, options.maxUnusableGapMs)) {
-    const run = sourceRun;
+    const run = suppressIsolatedJumps(sourceRun);
     const bouts = activeBouts(run, options.maxActiveGapMs).flatMap((bout) =>
       splitContinuousBout(run, bout, options.splitTravelTransitions, options.maxSegmentMs));
 

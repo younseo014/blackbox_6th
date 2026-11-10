@@ -1,0 +1,392 @@
+{
+  "generatedAt": "2026-11-10T08:09:28.299Z",
+  "implementations": {
+    "baseline": "f9f1e114ad0a87b25f71494820dccbf7ef3a7ad29504f950471bc082fef8ff21",
+    "lifecycle": "7142f1f019fd2cee8c48dcd4600b28ab4a0de8648a1e72124da2b51c7ab9d5c1",
+    "sequence": "37420245285a5cffd561159a279c52b14c174225ba7bff9cf3814c6b66680ce4"
+  },
+  "note": "Development-case regression, not population accuracy. No reference taken from ground truth. All candidates and incomplete observations are reported separately.",
+  "results": [
+    {
+      "name": "unlabelled-1",
+      "split": "unlabelled",
+      "frameCount": 1351,
+      "expected": null,
+      "baseline": {
+        "candidates": [
+          {
+            "startMs": 23403.80078125,
+            "endMs": 25303
+          },
+          {
+            "startMs": 28803.5,
+            "endMs": 31869.80078125
+          },
+          {
+            "startMs": 195786.796875,
+            "endMs": 198712.5
+          },
+          {
+            "startMs": 217354,
+            "endMs": 218428.59375
+          },
+          {
+            "startMs": 223203.59375,
+            "endMs": 224645.203125
+          },
+          {
+            "startMs": 270062.90625,
+            "endMs": 274737
+          },
+          {
+            "startMs": 322879.8125,
+            "endMs": 324653.8125
+          },
+          {
+            "startMs": 356387.1875,
+            "endMs": 359279.40625
+          },
+          {
+            "startMs": 370836.1875,
+            "endMs": 372495.6875
+          },
+          {
+            "startMs": 376437.3125,
+            "endMs": 377581.09375
+          },
+          {
+            "startMs": 392413.5,
+            "endMs": 395120.8125
+          },
+          {
+            "startMs": 473579.6875,
+            "endMs": 478277
+          },
+          {
+            "startMs": 563171.6875,
+            "endMs": 567425.375
+          },
+          {
+            "startMs": 568072.125,
+            "endMs": 573996.3125
+          },
+          {
+            "startMs": 581879.5,
+            "endMs": 605943.3125
+          },
+          {
+            "startMs": 608529.625,
+            "endMs": 609813.8125
+          },
+          {
+            "startMs": 613029.6875,
+            "endMs": 619271.125
+          },
+          {
+            "startMs": 622471.875,
+            "endMs": 655171.3125
+          },
+          {
+            "startMs": 655271.3125,
+            "endMs": 678687.8125
+          },
+          {
+            "startMs": 680047.5,
+            "endMs": 687530.375
+          },
+          {
+            "startMs": 716172.5,
+            "endMs": 718205.875
+          }
+        ],
+        "metrics": null
+      },
+      "proposed": {
+        "candidates": [
+          {
+            "startMs": 563312.5,
+            "endMs": 572562.8125,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": false,
+              "endObserved": false,
+              "trackingGapMs": 12208.5625
+            }
+          },
+          {
+            "startMs": 584380.5,
+            "endMs": 622471.875,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": false,
+              "endObserved": true,
+              "trackingGapMs": 6416.625
+            }
+          },
+          {
+            "startMs": 643576.3125,
+            "endMs": 652404.6875,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          },
+          {
+            "startMs": 656738.1875,
+            "endMs": 660613.125,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          },
+          {
+            "startMs": 662554.8125,
+            "endMs": 670388.1875,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          },
+          {
+            "startMs": 674521.3125,
+            "endMs": 687530.375,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": false,
+              "endObserved": false,
+              "trackingGapMs": 0
+            }
+          }
+        ],
+        "allCandidateMetrics": null,
+        "completeMetrics": null,
+        "completeCount": 3,
+        "incompleteCount": 3
+      }
+    },
+    {
+      "name": "unlabelled-2",
+      "split": "unlabelled",
+      "frameCount": 513,
+      "expected": null,
+      "baseline": {
+        "candidates": [
+          {
+            "startMs": 4126.60009765625,
+            "endMs": 38551.6015625
+          },
+          {
+            "startMs": 40111,
+            "endMs": 46727.6015625
+          },
+          {
+            "startMs": 47751.69921875,
+            "endMs": 63151.69921875
+          }
+        ],
+        "metrics": null
+      },
+      "proposed": {
+        "candidates": [
+          {
+            "startMs": 4126.60009765625,
+            "endMs": 10719.099609375,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": false,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          },
+          {
+            "startMs": 14926.5,
+            "endMs": 18759.900390625,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          },
+          {
+            "startMs": 21023.400390625,
+            "endMs": 34126.69921875,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          },
+          {
+            "startMs": 43618.30078125,
+            "endMs": 56076.69921875,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          }
+        ],
+        "allCandidateMetrics": null,
+        "completeMetrics": null,
+        "completeCount": 3,
+        "incompleteCount": 1
+      }
+    },
+    {
+      "name": "unlabelled-3",
+      "split": "unlabelled",
+      "frameCount": 270,
+      "expected": null,
+      "baseline": {
+        "candidates": [
+          {
+            "startMs": 3718.89990234375,
+            "endMs": 34273.30078125
+          }
+        ],
+        "metrics": null
+      },
+      "proposed": {
+        "candidates": [
+          {
+            "startMs": 4176.89990234375,
+            "endMs": 4950.89990234375,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": false,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          },
+          {
+            "startMs": 10484.7998046875,
+            "endMs": 27059.19921875,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          }
+        ],
+        "allCandidateMetrics": null,
+        "completeMetrics": null,
+        "completeCount": 1,
+        "incompleteCount": 1
+      }
+    },
+    {
+      "name": "mixing-known-development",
+      "split": "development",
+      "frameCount": 292,
+      "expected": [
+        {
+          "startMs": 18000,
+          "endMs": 32000
+        }
+      ],
+      "baseline": {
+        "candidates": [
+          {
+            "startMs": 3500.199951171875,
+            "endMs": 11717.900390625
+          },
+          {
+            "startMs": 13310,
+            "endMs": 38084.69921875
+          }
+        ],
+        "metrics": {
+          "truePositive": 1,
+          "falsePositive": 1,
+          "falseNegative": 0,
+          "precision": 0.5,
+          "recall": 1,
+          "f1": 0.6666666666666666,
+          "matched": [
+            {
+              "iou": 0.5650926324629004,
+              "startErrorSeconds": 4.69,
+              "endErrorSeconds": 6.08469921875
+            }
+          ]
+        }
+      },
+      "proposed": {
+        "candidates": [
+          {
+            "startMs": 3500.199951171875,
+            "endMs": 7516.89990234375,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": false,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          },
+          {
+            "startMs": 9325.2998046875,
+            "endMs": 13858.599609375,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 1592.099609375
+            }
+          },
+          {
+            "startMs": 18025.5,
+            "endMs": 32159.099609375,
+            "boundaryEvidence": {
+              "method": "arm_lifecycle",
+              "startObserved": true,
+              "endObserved": true,
+              "trackingGapMs": 0
+            }
+          }
+        ],
+        "allCandidateMetrics": {
+          "truePositive": 1,
+          "falsePositive": 2,
+          "falseNegative": 0,
+          "precision": 0.3333333333333333,
+          "recall": 1,
+          "f1": 0.5,
+          "matched": [
+            {
+              "iou": 0.9869624754067855,
+              "startErrorSeconds": 0.0255,
+              "endErrorSeconds": 0.159099609375
+            }
+          ]
+        },
+        "completeMetrics": {
+          "truePositive": 1,
+          "falsePositive": 0,
+          "falseNegative": 0,
+          "precision": 1,
+          "recall": 1,
+          "f1": 1,
+          "matched": [
+            {
+              "iou": 0.9869624754067855,
+              "startErrorSeconds": 0.0255,
+              "endErrorSeconds": 0.159099609375
+            }
+          ]
+        },
+        "completeCount": 1,
+        "incompleteCount": 2
+      }
+    }
+  ]
+}

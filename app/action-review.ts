@@ -16,7 +16,9 @@ export type ObservationQualityReason =
   | "outside_work_context"
   | "unknown_motion"
   | "ground_truth_review"
-  | "self_test_label";
+  | "self_test_label"
+  | "work_interruption"
+  | "uncertain_boundaries";
 
 export type ActionAmbiguityReason =
   | "no_candidates"
@@ -33,6 +35,7 @@ export type ManualActionLabel = {
 };
 
 export type ActionReviewMetadata = {
+  detectedWindow?: { startMs: number; endMs: number };
   status: ActionReviewStatus;
   candidates: ActionReviewCandidate[];
   reasons: ActionAmbiguityReason[];
@@ -75,6 +78,8 @@ export const ACTION_AMBIGUITY_REASON_LABELS: Record<ActionAmbiguityReason, strin
   unknown_motion: "학습되지 않은 동작",
   ground_truth_review: "3시점 정답 라벨 검토 필요",
   self_test_label: "자체테스트 학습 표본 라벨 확정 필요",
+  work_interruption: "중단 의심 또는 좌표 누락 포함",
+  uncertain_boundaries: "업무 시작·완료 경계 불확실",
 };
 
 function clampConfidence(value: number) {
@@ -153,6 +158,7 @@ export function createActionReview(
   const now = options.createdAt ?? Date.now();
   return {
     status: "pending",
+    detectedWindow: episode.motionSlice ? { startMs: episode.motionSlice.startMs, endMs: episode.motionSlice.endMs } : undefined,
     candidates: assessment.candidates,
     reasons: assessment.reasons,
     topCandidateMargin: assessment.topCandidateMargin,
@@ -169,6 +175,7 @@ export function applyManualActionLabel(
   const reviewedAt = label.reviewedAt ?? Date.now();
   const manualLabel: ManualActionLabel = { ...label, reviewedAt };
   const currentReview = episode.actionReview ?? {
+    detectedWindow: episode.motionSlice ? { startMs: episode.motionSlice.startMs, endMs: episode.motionSlice.endMs } : undefined,
     status: "pending" as const,
     candidates: [{
       taskType: episode.taskType,
@@ -187,7 +194,8 @@ export function applyManualActionLabel(
     taskType: manualLabel.taskType,
     taskLabel: manualLabel.taskLabel,
     taskConfidence: 1,
-    disposition: episode.mode === "learning" ? "accepted" : "analysis_only",
+    disposition: episode.mode === "learning"
+      && episode.source !== "self_test_training" ? "accepted" : "analysis_only",
     dispositionReason: "개발자가 스켈레톤 리플레이를 확인하고 업무 라벨을 확정했어요.",
     actionReview: {
       ...currentReview,
@@ -202,13 +210,13 @@ export function markActionReviewUnresolved(
   episode: ReviewableObservationEpisode,
   reviewedAt = Date.now(),
 ): ReviewableObservationEpisode {
-  if (!episode.actionReview) return episode;
+  const review = episode.actionReview ?? createActionReview(episode, { qualityReasons: ["unknown_motion"], createdAt: reviewedAt })!;
   return {
     ...episode,
     disposition: "excluded",
     dispositionReason: "개발자 검토에서도 업무를 판별할 수 없어 학습에서 제외했어요.",
     actionReview: {
-      ...episode.actionReview,
+      ...review,
       status: "unresolved",
       manualLabel: null,
       updatedAt: reviewedAt,

@@ -8,6 +8,10 @@ export default defineConfig({
   base: "./",
   publicDir: resolve(__dirname, "public"),
   plugins: [react()],
+  optimizeDeps: { include: ["onnxruntime-web/wasm"] },
+  server: {
+    fs: { allow: ["desktop", "app", "models", "node_modules"].map(directory => resolve(__dirname, directory)) },
+  },
   css: {
     postcss: {
       plugins: [tailwindcss()],

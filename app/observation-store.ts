@@ -4,6 +4,7 @@ import {
   type ObservationEpisode,
   type ObservationProfile,
 } from "./observation-engine";
+import { normalizeInterruptionSummary } from "./work-interruptions";
 
 const DB_NAME = "memory-guard-observation-v1";
 const DB_VERSION = 1;
@@ -89,7 +90,7 @@ export async function saveObservationEpisode(episode: ObservationEpisode) {
   return episode;
 }
 
-export async function listObservationEpisodes(limit = 200): Promise<ObservationEpisode[]> {
+export async function listObservationEpisodes(limit = Infinity): Promise<ObservationEpisode[]> {
   const database = await openObservationDatabase();
   const transaction = database.transaction(EPISODE_STORE, "readonly");
   const episodes = await requestResult<ObservationEpisode[]>(
@@ -97,7 +98,8 @@ export async function listObservationEpisodes(limit = 200): Promise<ObservationE
   );
   await transactionDone(transaction);
   database.close();
-  return episodes.sort((a, b) => b.recordedAt - a.recordedAt).slice(0, limit);
+  return episodes.sort((a, b) => b.recordedAt - a.recordedAt).slice(0, limit)
+    .map((episode) => episode.interruptions ? { ...episode, interruptions: normalizeInterruptionSummary(episode.interruptions) } : episode);
 }
 
 export async function saveAnalysisFeedback(feedback: AnalysisFeedback) {

@@ -5,7 +5,6 @@ import {
   approximateHeadCenterFromShoulders,
   computeHandMotionVariability,
   computeMovementSmoothness,
-  type Point3D,
 } from "./motion-analysis";
 import {
   MOTION_SAMPLE_RATE,
@@ -16,7 +15,7 @@ import {
 } from "./pose-store";
 import { drawMotionSkeleton } from "./skeleton-draw";
 import type { DemoDetectionExplanation } from "./demo-personas";
-import { detectMotionEvents, type DetectedMotionEvent } from "./motion-detection";
+import { detectMotionEvents, motionSamplesFromParsedFrames, type DetectedMotionEvent } from "./motion-detection";
 import type { ObservationMode } from "./observation-engine";
 import { saveAnalysisFeedback } from "./observation-store";
 import {
@@ -31,15 +30,6 @@ const CANVAS_WIDTH = 640;
 const CANVAS_HEIGHT = 360;
 const SPARKLINE_WIDTH = 640;
 const SPARKLINE_HEIGHT = 40;
-
-function wristPoint(frame: ParsedMotionFrame, hand: "left" | "right"): Point3D | null {
-  const source = hand === "left" ? frame.leftHand : frame.rightHand;
-  return source ? { x: source[0], y: source[1], z: source[2] } : null;
-}
-
-function primaryHandPoint(frame: ParsedMotionFrame): Point3D | null {
-  return wristPoint(frame, "right") ?? wristPoint(frame, "left");
-}
 
 function formatRelativeTime(ms: number) {
   return `${(Math.max(0, ms) / 1000).toFixed(1)}초`;
@@ -135,9 +125,11 @@ export function SessionReplayPanel({
   useEffect(() => {
     if (!recordedSessionId) return;
     let cancelled = false;
+    const requestedWindow = recordedWindowStart !== undefined && recordedWindowEnd !== undefined
+      ? { startMs: recordedWindowStart, endMs: recordedWindowEnd } : undefined;
     (recordedGlobalSessionId
-      ? getGlobalSessionCameraFrames(recordedGlobalSessionId)
-      : getSessionFrames(recordedSessionId).then((frames) => [{ cameraSlot: 1 as const, frames }]))
+      ? getGlobalSessionCameraFrames(recordedGlobalSessionId, requestedWindow)
+      : getSessionFrames(recordedSessionId, requestedWindow).then((frames) => [{ cameraSlot: 1 as const, frames }]))
       .then((streams) => {
         if (cancelled) return;
         const replayWindow = recordedWindowStart !== undefined && recordedWindowEnd !== undefined
@@ -151,6 +143,9 @@ export function SessionReplayPanel({
         setCameraStreams(sorted);
         setSelectedCameraSlot(first?.cameraSlot ?? 1);
         setFrames((first?.frames ?? []).map(parseSessionFrame));
+        setFrameIndex(0);
+        setPlaying(true);
+        setLoadFailed(false);
       })
       .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
@@ -173,7 +168,7 @@ export function SessionReplayPanel({
     setPlaying(false);
   }
 
-  const primaryPoints = useMemo(() => (frames ? frames.map(primaryHandPoint) : []), [frames]);
+  const primaryPoints = useMemo(() => motionSamplesFromParsedFrames(frames ?? []).map((sample) => sample.point), [frames]);
   const variabilitySeries = useMemo(() => primaryPoints.map((_, index) => {
     const start = Math.max(0, index - ROLLING_WINDOW + 1);
     return computeHandMotionVariability(primaryPoints.slice(start, index + 1)) ?? 0;
@@ -186,10 +181,7 @@ export function SessionReplayPanel({
   const detectedEvents = useMemo(() => {
     if (detectionExplanation) return detectionExplanation.detected;
     if (!frames) return [];
-    return detectMotionEvents(frames.map((frame) => ({
-      point: primaryHandPoint(frame),
-      relativeTimeMs: frame.relativeTimeMs,
-    })));
+    return detectMotionEvents(motionSamplesFromParsedFrames(frames));
   }, [detectionExplanation, frames]);
 
   const analysis = useMemo(() => {

@@ -1,6 +1,8 @@
 import { compareSkeletonMotions } from "./motion-classifier";
 
 export type LearnedMotionSample = {
+  episodeId?: string;
+  labelSource?: "manual" | "visual_model" | "sequence_model";
   sessionId: string;
   globalSessionId?: string;
   startMs: number;
@@ -18,6 +20,7 @@ export type LoadedLearnedMotionAction = {
   id: string;
   label: string;
   samples: number[][][];
+  boundarySamples?: number[][][];
 };
 
 export type LearnedMotionResult = {
@@ -90,6 +93,7 @@ export function addObservationMotionSample(
   sample: LearnedMotionSample,
   createdAt = Date.now(),
 ) {
+  actions = removeObservationMotionSample(actions, sample);
   const normalizedLabel = label.trim().toLocaleLowerCase();
   const matching = actions.find((action) => action.label.trim().toLocaleLowerCase() === normalizedLabel);
   if (!matching) {
@@ -137,16 +141,23 @@ export function classifyLearnedMotion(
   const best = candidates[0];
   const runnerUpDistance = candidates[1]?.distance;
   const shapeScore = Math.exp(-best.distance * 4.2);
-  const margin = runnerUpDistance
-    ? clamp((runnerUpDistance - best.distance) / runnerUpDistance, 0, 1)
+  const margin = runnerUpDistance !== undefined
+    ? runnerUpDistance > 0 ? clamp((runnerUpDistance - best.distance) / runnerUpDistance, 0, 1) : 0
     : 0.5;
   const confidence = clamp(0.18 + shapeScore * 0.58 + margin * 0.24, 0.05, 0.99);
 
   return {
-    status: confidence >= MATCH_CONFIDENCE ? "matched" : "uncertain",
+    status: confidence >= MATCH_CONFIDENCE && (runnerUpDistance === undefined || runnerUpDistance - best.distance > 1e-6) ? "matched" : "uncertain",
     actionId: best.actionId,
     label: best.label,
     confidence,
     candidates: candidates.slice(0, 3),
   };
+}
+
+export function removeObservationMotionSample(actions: LearnedMotionAction[], sample: LearnedMotionSample) {
+  return actions.map((action) => ({ ...action, samples: action.samples.filter((item) =>
+    !(sample.episodeId && item.episodeId === sample.episodeId)
+    && !(item.sessionId === sample.sessionId && item.startMs === sample.startMs && item.endMs === sample.endMs),
+  ) })).filter((action) => action.samples.length > 0);
 }

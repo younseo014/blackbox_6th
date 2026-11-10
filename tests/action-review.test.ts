@@ -150,6 +150,17 @@ test("applyManualActionLabel confirms the label without mutating the source epis
   assert.equal(baseline.tasks[0]?.taskLabel, "세척");
 });
 
+test("manually labeled self-test training stays outside the user baseline", () => {
+  const source = episode({ source: "self_test_training" });
+  const result = applyManualActionLabel(source, {
+    taskType: "WIPE", taskLabel: "테이블 닦기", reviewer: "developer", reviewedAt: 300,
+  });
+  assert.equal(result.actionReview?.status, "confirmed");
+  assert.equal(result.disposition, "analysis_only");
+  assert.equal(buildBaseline([result], 1).acceptedSamples, 0);
+  assert.equal(buildBaseline([{ ...result, disposition: "accepted" }], 1).acceptedSamples, 0);
+});
+
 test("unresolved reviews are excluded and pending queue is chronological", () => {
   const first = { ...episode({ id: "first", recordedAt: 100 }), actionReview: createActionReview(episode(), { createdAt: 100 })! };
   const second = { ...episode({ id: "second", recordedAt: 200 }), actionReview: createActionReview(episode(), { createdAt: 200 })! };

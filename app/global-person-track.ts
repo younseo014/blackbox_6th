@@ -415,7 +415,7 @@ export function updateGlobalPersonTrack(
       observations: summaries,
       observingCameras: [],
       presence: policy.requiredCameraSlots?.length ? "provisional" : previous.presence === "present" || previous.presence === "coasting"
-        ? sinceObserved <= GLOBAL_COAST_MS ? "coasting" : "present"
+        ? sinceObserved <= GLOBAL_COAST_MS ? "coasting" : "provisional"
         : "provisional",
       handoffFromCamera: null,
       handoffGapMs: 0,

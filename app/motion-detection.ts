@@ -197,7 +197,7 @@ function detectDoubleCheck(samples: MotionSample[]): DetectedMotionEvent[] {
  * purely from the coordinates: no label, seed, or intended-type is used as
  * an input here, so this is a genuine measurement, not a lookup.
  */
-export function detectMotionEvents(samples: MotionSample[]): DetectedMotionEvent[] {
+function detectContiguousMotionEvents(samples: MotionSample[]): DetectedMotionEvent[] {
   const steps = computeSteps(samples);
   if (steps.length === 0) return [];
 
@@ -215,6 +215,26 @@ export function detectMotionEvents(samples: MotionSample[]): DetectedMotionEvent
   return [...doubleChecks, ...microDelaysNotExplainedByDoubleCheck];
 }
 
+export function detectMotionEvents(samples: MotionSample[]): DetectedMotionEvent[] {
+  const runs: MotionSample[][] = [];
+  let current: MotionSample[] = [];
+  for (const sample of samples) {
+    const previous = current.at(-1);
+    if (!sample.point || !Object.values(sample.point).every(Number.isFinite) || !Number.isFinite(sample.relativeTimeMs)) {
+      if (current.length) runs.push(current);
+      current = [];
+      continue;
+    }
+    if (previous && (sample.relativeTimeMs - previous.relativeTimeMs > 1200 || sample.relativeTimeMs <= previous.relativeTimeMs)) {
+      runs.push(current);
+      current = [];
+    }
+    current.push(sample);
+  }
+  if (current.length) runs.push(current);
+  return runs.flatMap(detectContiguousMotionEvents);
+}
+
 /**
  * Converts the raw stored-frame layout (see MOTION_FRAME_STRIDE in
  * pose-store.ts) into the right-hand trajectory `detectMotionEvents` needs.
@@ -224,8 +244,20 @@ export function detectMotionEvents(samples: MotionSample[]): DetectedMotionEvent
  * hand-typed label, and a real session is analyzed the exact same way.
  */
 export function motionSamplesFromRawFrames(frames: number[][]): MotionSample[] {
-  return frames.map(parseSessionFrame).map((frame) => ({
-    point: frame.rightHand ? { x: frame.rightHand[0], y: frame.rightHand[1], z: frame.rightHand[2] } : null,
+  return motionSamplesFromParsedFrames(frames.map(parseSessionFrame));
+}
+
+export function motionSamplesFromParsedFrames(parsed: ReturnType<typeof parseSessionFrame>[]): MotionSample[] {
+  const wrist = (frame: typeof parsed[number], side: "left" | "right"): Point3D | null => {
+    if (!frame.bodyDetected) return null;
+    const hand = side === "right" ? frame.rightHand : frame.leftHand;
+    const joint = side === "right" ? 5 : 4;
+    const values = hand?.slice(0, 3) ?? ((frame.body[joint * 4 + 3] ?? 0) >= 0.25 ? frame.body.slice(joint * 4, joint * 4 + 3) : null);
+    return values?.every(Number.isFinite) ? { x: values[0], y: values[1], z: values[2] } : null;
+  };
+  const side = parsed.filter((frame) => wrist(frame, "left")).length > parsed.filter((frame) => wrist(frame, "right")).length ? "left" : "right";
+  return parsed.map((frame) => ({
+    point: wrist(frame, side),
     relativeTimeMs: frame.relativeTimeMs,
   }));
 }

@@ -34,16 +34,20 @@ function writeUint32(view: DataView, offset: number, value: number) {
 
 /** Builds a standards-compliant, store-only ZIP so no third-party compressor is needed. */
 export function createDataFolderZip(entries: DataFolderEntry[]) {
+  if (entries.length >= 0xffff) throw new RangeError("ZIP32 내보내기 파일 수 한도를 초과했어요. 촬영 기간별로 나누어 내보내야 합니다.");
   const encoder = new TextEncoder();
   const files = entries.map((entry) => ({
     name: encoder.encode(entry.path),
     data: encoder.encode(entry.contents),
   }));
-  const localParts: Uint8Array[] = [];
-  const centralParts: Uint8Array[] = [];
+  const localParts: Uint8Array<ArrayBuffer>[] = [];
+  const centralParts: Uint8Array<ArrayBuffer>[] = [];
   let localOffset = 0;
 
   for (const file of files) {
+    if (file.name.length > 0xffff || file.data.length >= 0xffffffff || localOffset + 30 + file.name.length + file.data.length >= 0xffffffff) {
+      throw new RangeError("ZIP32의 4GB 내보내기 한도를 초과했어요. 대용량 기록에는 스트리밍/ZIP64 내보내기가 필요합니다.");
+    }
     const checksum = crc32(file.data);
     const local = new Uint8Array(30 + file.name.length + file.data.length);
     const localView = new DataView(local.buffer);
@@ -75,6 +79,7 @@ export function createDataFolderZip(entries: DataFolderEntry[]) {
   }
 
   const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  if (localOffset + centralSize + 22 >= 0xffffffff) throw new RangeError("ZIP32의 4GB 내보내기 한도를 초과했어요.");
   const end = new Uint8Array(22);
   const endView = new DataView(end.buffer);
   writeUint32(endView, 0, 0x06054b50);

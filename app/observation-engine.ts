@@ -1,5 +1,8 @@
 import { parseSessionFrame, type BodyProportionProfile } from "./pose-store";
 import type { MovementCycle } from "./movement-units";
+import { hasInterruptionConfound, type InterruptionSummary } from "./work-interruptions";
+import { hasCompleteWorkBoundaries } from "./work-episode-segmentation";
+import { motionSamplesFromRawFrames } from "./motion-detection";
 import {
   getOccupationTemplate,
   type OccupationId,
@@ -73,6 +76,8 @@ export type ObservationEpisode = {
   cycleDurationZScore?: number | null;
   pauseZScore: number | null;
   movementCycles?: MovementCycle[];
+  interruptions?: InterruptionSummary;
+  visualContext?: { model: "clip-vit-base-patch32-int8"; similarity: number; margin: number; sampleCount: number; label: string };
   contextWeight: 0 | 1 | 2 | 3;
   baselineVersion: number;
   source?: "real_learning" | "real_analysis" | "self_test" | "self_test_training";
@@ -83,6 +88,7 @@ export type ObservationEpisode = {
     model: "epfl-posture-v1";
   };
   motionSlice?: {
+    boundaryEvidence?: import("./motion-segmentation").TargetMotionSlice["boundaryEvidence"];
     startMs: number;
     endMs: number;
     durationSeconds: number;
@@ -161,7 +167,13 @@ export function buildBaseline(
   episodes: ObservationEpisode[],
   version = 1,
 ): BaselineSnapshot {
-  const accepted = episodes.filter((episode) => episode.disposition === "accepted");
+  const accepted = episodes.filter((episode) =>
+    episode.disposition === "accepted"
+    && !hasInterruptionConfound(episode.interruptions)
+    && (!episode.motionSlice?.boundaryEvidence || hasCompleteWorkBoundaries(episode.motionSlice))
+    && episode.source !== "self_test"
+    && episode.source !== "self_test_training",
+  );
   const taskIds = [...new Set(accepted.map((episode) => episode.taskType))];
   const tasks = taskIds.map((taskType) => {
     const items = accepted.filter((episode) => episode.taskType === taskType);
@@ -218,6 +230,17 @@ export function buildBaseline(
 
 /** Score the final work label, after context inference or manual review. */
 export function scoreLabeledEpisode(episode: ObservationEpisode, baseline: BaselineSnapshot): ObservationEpisode {
+  const uncertainBoundaries = Boolean(episode.motionSlice?.boundaryEvidence && !hasCompleteWorkBoundaries(episode.motionSlice));
+  if (hasInterruptionConfound(episode.interruptions) || uncertainBoundaries) {
+    return {
+      ...episode, durationZScore: null, pauseZScore: null, cycleDurationZScore: null,
+      ...(episode.mode === "learning" && episode.disposition === "accepted" ? {
+        disposition: "quarantined" as const,
+        dispositionReason: uncertainBoundaries ? "업무의 시작·완료 경계를 확인하지 못해 시간 비교와 기준선 학습을 보류했어요."
+          : "중단 의심 또는 좌표 누락이 포함되어 개인 기준선 학습을 보류했어요.",
+      } : {}),
+    };
+  }
   const taskBaseline = baseline.tasks.find((item) => item.taskType === episode.taskType);
   const cycles = episode.movementCycles ?? [];
   const comparableRange = cycles.length >= 2
@@ -242,7 +265,8 @@ export function scoreLabeledEpisode(episode: ObservationEpisode, baseline: Basel
     ? safeZScore(episode.features.longestPauseSeconds, taskBaseline.meanLongestPause, taskBaseline.pauseSD)
     : null;
   const next = { ...episode, durationZScore, cycleDurationZScore, pauseZScore };
-  if (next.mode === "learning" && next.disposition !== "excluded" && next.disposition !== "quarantined"
+  if (next.mode === "learning" && next.source !== "self_test_training"
+    && next.disposition !== "excluded" && next.disposition !== "quarantined"
     && ((cycleDurationZScore ?? 0) >= 1.5 || (durationZScore ?? 0) >= 1.5 || (pauseZScore ?? 0) >= 1.5)) {
     return {
       ...next,
@@ -254,23 +278,6 @@ export function scoreLabeledEpisode(episode: ObservationEpisode, baseline: Basel
 }
 
 type FlatPoint = { x: number; y: number; z: number };
-
-function primaryWrist(frame: ReturnType<typeof parseSessionFrame>): FlatPoint | null {
-  // The current detector and demo generators treat the right hand as the
-  // primary work hand. Fall back to the left only when the right is missing.
-  const hand = frame.rightHand ?? frame.leftHand;
-  if (hand) return { x: hand[0], y: hand[1], z: hand[2] };
-  const body = frame.body;
-  const leftVisibility = body[4 * 4 + 3] ?? 0;
-  const rightVisibility = body[5 * 4 + 3] ?? 0;
-  const wristIndex = leftVisibility >= rightVisibility ? 4 : 5;
-  if ((body[wristIndex * 4 + 3] ?? 0) < 0.25) return null;
-  return {
-    x: body[wristIndex * 4],
-    y: body[wristIndex * 4 + 1],
-    z: body[wristIndex * 4 + 2],
-  };
-}
 
 function bodyCenter(frame: ReturnType<typeof parseSessionFrame>): { x: number; y: number } | null {
   const body = frame.body;
@@ -314,7 +321,7 @@ export function extractObservationFeatures(
     };
   }
   const frames = rawFrames.map(parseSessionFrame);
-  const points = frames.map(primaryWrist);
+  const points = motionSamplesFromRawFrames(rawFrames).map((sample) => sample.point);
   const zoneTrail = frames.map((frame) => {
     const center = bodyCenter(frame);
     const zoneId = center ? zoneGrid[gridIndex(center)] ?? null : null;
@@ -330,7 +337,11 @@ export function extractObservationFeatures(
   for (let index = 1; index < points.length; index += 1) {
     const previous = points[index - 1];
     const current = points[index];
-    if (!previous || !current) continue;
+    if (!previous || !current || frames[index].relativeTimeMs - frames[index - 1].relativeTimeMs > 1200) {
+      pauseStartedAt = null;
+      previousDx = null;
+      continue;
+    }
     const dtSeconds = Math.max(0.001, (frames[index].relativeTimeMs - frames[index - 1].relativeTimeMs) / 1000);
     const step = distance(previous, current);
     pathLength += step;

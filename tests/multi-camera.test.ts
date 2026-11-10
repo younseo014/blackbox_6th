@@ -24,6 +24,18 @@ function frame(timeMs: number, { body = true, full = true, hands = 0, centerX = 
   return values;
 }
 
+test("representative movement stays in one view when camera quality alternates", () => {
+  const samples = [0, 100, 200, 300].map((timeMs, index) => {
+    const first = frame(timeMs, { hands: index % 2 ? 0 : 2 });
+    const second = frame(timeMs, { hands: index % 2 ? 2 : 0 });
+    second[10 + 5 * 4] += 0.4;
+    return { timeMs, skewMs: 0, frames: { 1: first, 2: second, 3: frame(timeMs) } };
+  });
+  const representative = representativeThreeViewFrames(samples);
+  assert.deepEqual(representative.map(f => f[10 + 5 * 4]), [0.5, 0.5, 0.5, 0.5]);
+  assert.notEqual(representative[0], samples[0].frames[1]);
+});
+
 test("two cameras become one owner timeline without duplicate frames", () => {
   const merged = mergeCameraFrameStreams([
     { cameraSlot: 1, frames: [frame(0), frame(100, { body: false }), frame(200, { full: false })] },
