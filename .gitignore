@@ -77,3 +77,6 @@ next-env.d.ts
 /public/models/yolox_tiny.onnx
 /public/ort/
 /public/models/action-context/vision-int8.onnx
+
+# Team guideline shared locally, excluded from GitHub
+/docs/자체테스트_가이드라인_작업대형_2026-11-11.pdf
