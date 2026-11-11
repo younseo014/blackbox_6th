@@ -86,3 +86,8 @@ Study participant recordings are not used for evaluation, calibration or any
 model fitting. Only public datasets and developer-recorded pre-validation clips
 appear in `data/eval-scenarios/`, and every scenario file must declare a
 `source` - the runner rejects one that does not.
+
+
+### 2026-11-11 자체테스트 문장 후보 추가
+
+기존 11개 CLIP 문장 prototype을 보존하고 컵에 얼음 담기·컵 뚜껑 닫기·음료 포장 3개를 추가해 총 14개를 생성했다. 원래 고정된 MIT 텍스트 모델로 재생성했으며 영상 가중치와 라이선스는 동일하다. 자체테스트는 새 5종 task 후보만, 사용자 모드는 기존 5종 task 후보만 비교한다. 전화·응대·이동·정지·기타 대안은 두 경우 모두 유지한다. 이는 라벨 후보 구성 변경이며 모델 정확도 향상을 입증하는 실험 결과가 아니다.

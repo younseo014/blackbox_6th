@@ -1,13 +1,128 @@
 [
-  {"label":"컵 보충","kind":"task","prompts":["A person restocking a stack of clean cups on a cafe shelf.","A cafe worker taking cups from storage and placing them on the counter.","A person replenishing disposable cups beside a coffee machine."]},
-  {"label":"냉장 재료 꺼내기","kind":"task","prompts":["A person opening a refrigerator and taking out ingredients.","A cafe worker reaching into a fridge to take out a milk bottle.","A person removing food ingredients from a refrigerator."]},
-  {"label":"음료 재료 혼합","kind":"task","prompts":["A person stirring a drink in a cup with a spoon.","A cafe worker pouring ingredients into a container and mixing them.","A person preparing a beverage by mixing ingredients in a cup."]},
-  {"label":"테이블 닦기","kind":"task","prompts":["A person wiping a table with a cleaning cloth.","A cafe worker cleaning the surface of a tabletop with a rag.","A person scrubbing a counter with a cloth."]},
-  {"label":"식기 세척","kind":"task","prompts":["A person washing dishes with a sponge in a sink.","A cafe worker rinsing cups under running water at a sink.","A person scrubbing a dish in a kitchen sink."]},
-  {"label":"전화 사용 의심","kind":"phone","prompts":["A person holding a telephone to their ear and talking.","A cafe worker using a mobile phone instead of working.","A person looking at and typing on a smartphone."]},
-  {"label":"고객 응대 의심","kind":"interaction","prompts":["A cafe worker interrupted to speak face to face with a customer across the counter.","A shop worker talking and gesturing to another person instead of handling tools.","A cafe employee answering a customer's question across a counter."]},
-  {"label":"이동","kind":"other","prompts":["A person walking without carrying anything.","A person moving from one place to another."]},
-  {"label":"정지·휴식 원인 미확인","kind":"other","prompts":["A person standing still with their arms at rest.","A person sitting and resting without doing a task.","A person waiting and doing nothing."]},
-  {"label":"설정·기타","kind":"other","prompts":["A person adjusting a webcam or computer.","A person waving their hands at a camera.","A person stretching their arms.","A person drinking from a cup."]},
-  {"label":"사람 없는 화면","kind":"other","prompts":["An empty room with no people.","An empty kitchen counter with nobody working.","A blank screen or a test pattern with colored stripes."]}
+  {
+    "label": "컵 보충",
+    "kind": "task",
+    "prompts": [
+      "A person restocking a stack of clean cups on a cafe shelf.",
+      "A cafe worker taking cups from storage and placing them on the counter.",
+      "A person replenishing disposable cups beside a coffee machine."
+    ]
+  },
+  {
+    "label": "냉장 재료 꺼내기",
+    "kind": "task",
+    "prompts": [
+      "A person opening a refrigerator and taking out ingredients.",
+      "A cafe worker reaching into a fridge to take out a milk bottle.",
+      "A person removing food ingredients from a refrigerator."
+    ]
+  },
+  {
+    "label": "음료 재료 혼합",
+    "kind": "task",
+    "prompts": [
+      "A person stirring a drink in a cup with a spoon.",
+      "A cafe worker pouring ingredients into a container and mixing them.",
+      "A person preparing a beverage by mixing ingredients in a cup."
+    ]
+  },
+  {
+    "label": "테이블 닦기",
+    "kind": "task",
+    "prompts": [
+      "A person wiping a table with a cleaning cloth.",
+      "A cafe worker cleaning the surface of a tabletop with a rag.",
+      "A person scrubbing a counter with a cloth."
+    ]
+  },
+  {
+    "label": "식기 세척",
+    "kind": "task",
+    "prompts": [
+      "A person washing dishes with a sponge in a sink.",
+      "A cafe worker rinsing cups under running water at a sink.",
+      "A person scrubbing a dish in a kitchen sink."
+    ]
+  },
+  {
+    "label": "컵에 얼음 담기",
+    "kind": "task",
+    "prompts": [
+      "A cafe worker using an ice scoop to transfer ice cubes into a cup on the counter.",
+      "A person scooping ice from a container into a drinking cup.",
+      "A person filling a cup with ice using a scoop at a worktop."
+    ]
+  },
+  {
+    "label": "컵 뚜껑 닫기",
+    "kind": "task",
+    "prompts": [
+      "A cafe worker placing a lid on a takeaway cup and pressing it shut.",
+      "A person using both hands to press a plastic lid onto a drink cup on a counter.",
+      "A person closing a disposable drink cup with a lid."
+    ]
+  },
+  {
+    "label": "음료 포장",
+    "kind": "task",
+    "prompts": [
+      "A cafe worker opening a paper takeaway bag and putting a drink cup inside it.",
+      "A person packaging a drink in a paper bag on a counter.",
+      "A person preparing a takeaway beverage by placing the cup into a carry bag."
+    ]
+  },
+  {
+    "label": "전화 사용 의심",
+    "kind": "phone",
+    "prompts": [
+      "A person holding a telephone to their ear and talking.",
+      "A cafe worker using a mobile phone instead of working.",
+      "A person looking at and typing on a smartphone."
+    ]
+  },
+  {
+    "label": "고객 응대 의심",
+    "kind": "interaction",
+    "prompts": [
+      "A cafe worker interrupted to speak face to face with a customer across the counter.",
+      "A shop worker talking and gesturing to another person instead of handling tools.",
+      "A cafe employee answering a customer's question across a counter."
+    ]
+  },
+  {
+    "label": "이동",
+    "kind": "other",
+    "prompts": [
+      "A person walking without carrying anything.",
+      "A person moving from one place to another."
+    ]
+  },
+  {
+    "label": "정지·휴식 원인 미확인",
+    "kind": "other",
+    "prompts": [
+      "A person standing still with their arms at rest.",
+      "A person sitting and resting without doing a task.",
+      "A person waiting and doing nothing."
+    ]
+  },
+  {
+    "label": "설정·기타",
+    "kind": "other",
+    "prompts": [
+      "A person adjusting a webcam or computer.",
+      "A person waving their hands at a camera.",
+      "A person stretching their arms.",
+      "A person drinking from a cup."
+    ]
+  },
+  {
+    "label": "사람 없는 화면",
+    "kind": "other",
+    "prompts": [
+      "An empty room with no people.",
+      "An empty kitchen counter with nobody working.",
+      "A blank screen or a test pattern with colored stripes."
+    ]
+  }
 ]

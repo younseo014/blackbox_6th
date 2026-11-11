@@ -40,7 +40,7 @@ export class LocalActionModel {
     } catch (error) { worker.terminate(); throw error; }
   }
 
-  async classify(video: HTMLVideoElement) {
+  async classify(video: HTMLVideoElement, taskLabels?: string[]) {
     if (this.closed) throw new Error("Local action model is closed");
     const bitmap = await createImageBitmap(video);
     if (this.closed) { bitmap.close(); throw new Error("Local action model is closed"); }
@@ -48,7 +48,7 @@ export class LocalActionModel {
     return new Promise<Result>((resolve, reject) => {
       const timer = setTimeout(() => this.close(new Error("Local action inference timed out")), 20_000);
       this.pending.set(id, { resolve, reject, timer });
-      this.worker.postMessage({ type: "classify", id, bitmap }, [bitmap]);
+      this.worker.postMessage({ type: "classify", id, bitmap, taskLabels }, [bitmap]);
     });
   }
 

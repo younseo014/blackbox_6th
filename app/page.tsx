@@ -115,6 +115,7 @@ import { segmentWorkEpisodes } from "./learned-work-segmentation";
 import { hasCompleteWorkBoundaries } from "./work-episode-segmentation";
 import { RecordingWriteQueue } from "./recording-write-queue";
 import { LocalActionModel } from "./local-action-model";
+import { SELF_TEST_PROTOCOL, SELF_TEST_ACTION_LABELS, LEGACY_SELF_TEST_ACTION_LABELS, SELF_TEST_ZONE_GRID, selfTestFeatures, selfTestLabels, selfTestTrainingKey } from "./self-test-protocol";
 import { contextualMotionSlices, visualActionIntervals, isSupportedVisualSample, type VisualActionSample } from "./local-action-context";
 import { classifyCafeSelfTest } from "./self-test-classifier";
 import { detectWorkInterruptions, summarizeInterruptions, normalizeInterruptionSummary, hasInterruptionConfound, INTERRUPTION_LABELS, type InterruptionSummary } from "./work-interruptions";
@@ -325,15 +326,14 @@ type SelfTestTrial = {
 
 const SELF_TEST_STORAGE_KEY = "memory-guard-self-test-trials-v1";
 const SELF_TEST_LEARNED_KEY = "memory-guard-self-test-learned-v1";
-const SELF_TEST_ACTION_LABELS = ["컵 보충", "냉장 재료 꺼내기", "음료 재료 혼합", "테이블 닦기", "식기 세척"];
 const SELF_TEST_CAMERA_KEY = "memory-guard-self-test-camera-v1";
-const SELF_TEST_ZONE_KEY = "memory-guard-self-test-zone-grid-v1";
 const SELF_TEST_INTERRUPTION_KEY = "memory-guard-self-test-interruptions-v1";
 type SelfTestInterruptionReport = {
   sessionId: string;
   participant: string;
   stage: "training" | "evaluation";
   summary: InterruptionSummary;
+  protocol?: string;
 };
 function loadSelfTestInterruptionReports(): SelfTestInterruptionReport[] {
   if (typeof window === "undefined") return [];
@@ -349,18 +349,6 @@ function loadSelfTestInterruptionReports(): SelfTestInterruptionReport[] {
 function loadSelfTestCameraId() {
   if (typeof window === "undefined") return "";
   return window.localStorage.getItem(SELF_TEST_CAMERA_KEY) ?? "";
-}
-
-function loadSelfTestZoneGrid(): Array<string | null> {
-  if (typeof window === "undefined") return Array(9).fill(null);
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(SELF_TEST_ZONE_KEY) ?? "null") as unknown;
-    return Array.isArray(parsed) && parsed.length === 9
-      ? parsed.map((zone) => typeof zone === "string" ? zone : null)
-      : Array(9).fill(null);
-  } catch {
-    return Array(9).fill(null);
-  }
 }
 
 function loadSelfTestTrials(): SelfTestTrial[] {
@@ -864,8 +852,7 @@ export default function Home() {
   const lastActionContextTimeRef = useRef(-Infinity);
   const [selfTestInterruptionReports, setSelfTestInterruptionReports] = useState(loadSelfTestInterruptionReports);
   const [selfTestCameraId, setSelfTestCameraId] = useState(loadSelfTestCameraId);
-  const [selfTestZoneGrid, setSelfTestZoneGrid] = useState<Array<string | null>>(loadSelfTestZoneGrid);
-  const [selfTestSelectedZoneId, setSelfTestSelectedZoneId] = useState("INGREDIENT_STORAGE");
+  const selfTestZoneGrid = SELF_TEST_ZONE_GRID;
   const [activeSelfTestTrial, setActiveSelfTestTrial] = useState<Omit<SelfTestTrial, "endMs"> | null>(null);
   const [observationBaseline, setObservationBaseline] = useState<BaselineSnapshot>(() => buildBaseline([], 1));
   const [zoneSetupOpen, setZoneSetupOpen] = useState(false);
@@ -1280,16 +1267,12 @@ export default function Home() {
     window.localStorage.setItem(SELF_TEST_CAMERA_KEY, selfTestCameraId);
   }, [selfTestCameraId]);
 
-  useEffect(() => {
-    window.localStorage.setItem(SELF_TEST_ZONE_KEY, JSON.stringify(selfTestZoneGrid));
-  }, [selfTestZoneGrid]);
 
   const namedSelfTestCameras = selfTestCameras.filter((camera) => camera.deviceId && camera.label);
 
   const selectedSelfTestCameraId = namedSelfTestCameras.some((camera) => camera.deviceId === selfTestCameraId)
     ? selfTestCameraId : namedSelfTestCameras[0]?.deviceId ?? "";
 
-  const selfTestOccupationTemplate = getOccupationTemplate("cafe");
 
   useEffect(() => {
     if (
@@ -1407,7 +1390,7 @@ export default function Home() {
       toast.success("먼저 참가자 이름을 입력해 주세요");
       return;
     }
-    if (selfTestStage === "evaluation" && (selfTestLearnedMotions[selfTestParticipant.trim()] ?? []).every((action) => action.samples.length === 0)) {
+    if (selfTestStage === "evaluation" && (selfTestLearnedMotions[selfTestTrainingKey(selfTestParticipant.trim(), SELF_TEST_PROTOCOL)] ?? []).every((action) => action.samples.length === 0)) {
       toast.success("먼저 학습 세션에서 이 참가자의 동작 표본을 저장해 주세요");
       return;
     }
@@ -2387,7 +2370,7 @@ export default function Home() {
     if (cameraSessionPurposeRef.current === "self_test" ? !selfTestRecordingRef.current : observationRunContextRef.current?.profile.occupation !== "cafe") return;
     lastActionContextTimeRef.current = timestamp;
     const timeMs = timestamp - sessionPerformanceStartRef.current;
-    actionContextPendingRef.current = actionModelRef.current.classify(video).then(result => {
+    actionContextPendingRef.current = actionModelRef.current.classify(video, cameraSessionPurposeRef.current === "self_test" ? SELF_TEST_ACTION_LABELS : LEGACY_SELF_TEST_ACTION_LABELS).then(result => {
       if (poseSessionRef.current?.id !== session.id) return;
       const sample = { ...result, timeMs, bodyObserved };
       actionContextSamplesRef.current.push(sample);
@@ -2757,14 +2740,14 @@ export default function Home() {
       }
       if (selfTestStage && recordingWindow) {
         const report = {
-          sessionId, participant: selfTestParticipant.trim(), stage: selfTestStage,
+          sessionId, participant: selfTestParticipant.trim(), stage: selfTestStage, protocol: SELF_TEST_PROTOCOL,
           summary: summarizeInterruptions(sessionInterruptions, recordingWindow.startMs, recordingWindow.endMs),
         };
         setSelfTestInterruptionReports((current) => [...current.filter((item) => item.sessionId !== sessionId), report]);
       }
       const participantForRun = selfTestParticipant.trim();
       const actionsForRun = selfTestStage
-        ? selfTestLearnedMotions[participantForRun] ?? []
+        ? selfTestLearnedMotions[selfTestTrainingKey(participantForRun, SELF_TEST_PROTOCOL)] ?? []
         : observationLearnedMotions;
       let nextLearnedActions = actionsForRun;
       const loadedActions = actionsForRun.length > 0
@@ -2811,7 +2794,7 @@ export default function Home() {
             a.frames.reduce((score, frame) => score + frameQuality(frame), 0),
           )[0];
         const analysisFrames = bestCamera?.frames?.length ? bestCamera.frames : motionSlice.frames;
-        const features = extractObservationFeatures(
+        const measuredFeatures = extractObservationFeatures(
           analysisFrames,
           bestCamera?.cameraSlot === 3
             ? profileForRun.tertiaryZoneGrid
@@ -2820,6 +2803,7 @@ export default function Home() {
               : profileForRun.zoneGrid,
           zoneAliases,
         );
+        const features = selfTestStage ? selfTestFeatures(measuredFeatures, SELF_TEST_PROTOCOL) : measuredFeatures;
         let episode: ReviewableObservationEpisode = createObservationEpisode({
           sessionId,
           recordedAt: episodeRecordedAt,
@@ -2928,6 +2912,7 @@ export default function Home() {
           ...(selfTestStage ? {
             source: selfTestStage === "evaluation" ? "self_test" as const : "self_test_training" as const,
             selfTestParticipant: participantForRun,
+            selfTestProtocol: SELF_TEST_PROTOCOL,
             disposition: "analysis_only" as const,
             dispositionReason: selfTestStage === "evaluation"
               ? "평가 기록은 기준선과 동작 학습에 반영하지 않아요."
@@ -2963,7 +2948,7 @@ export default function Home() {
         }
       }
       if (nextLearnedActions !== actionsForRun) {
-        if (selfTestStage === "training") setSelfTestLearnedMotions(current => ({ ...current, [participantForRun]: nextLearnedActions }));
+        if (selfTestStage === "training") setSelfTestLearnedMotions(current => ({ ...current, [selfTestTrainingKey(participantForRun, SELF_TEST_PROTOCOL)]: nextLearnedActions }));
         else { saveObservationMotionActions(nextLearnedActions); setObservationLearnedMotions(nextLearnedActions); }
       }
       await refreshObservationData(observationProfile);
@@ -3217,7 +3202,7 @@ export default function Home() {
       if (!manifest) throw new Error("Missing self-test capture manifest");
       await saveCaptureManifest({
         ...manifest,
-        selfTest: { participant: selfTestParticipant.trim(), stage: selfTestStage,
+        selfTest: { participant: selfTestParticipant.trim(), stage: selfTestStage, protocol: SELF_TEST_PROTOCOL, fixedContext: "DRINK_PREP",
           recordingStartMs: currentMonotonicTime() - sessionPerformanceStartRef.current },
         zoneSnapshot: { ...manifest.zoneSnapshot, primary: [...selfTestZoneGrid], profileUpdatedAt: nowMs() },
       });
@@ -3276,9 +3261,11 @@ export default function Home() {
         episode.motionSlice?.boundaryEvidence?.endObserved ?? "",
         episode.motionSlice?.boundaryEvidence?.trackingGapMs ?? "",
         hasCompleteWorkBoundaries(episode.motionSlice ?? {}) ? "시작·완료 관측" : "경계 미확인",
+        episode.selfTestProtocol ?? "legacy-v1",
+        episode.selfTestProtocol === SELF_TEST_PROTOCOL ? "음료 제조대·고정 조건" : "사용자 지정 구역",
       ];
     });
-    const csv = [["참가자", "세션 단계", "검출 시각", "세션", "시작(ms)", "종료(ms)", "자동 라벨", "자동 후보 점수", "수동 확정 라벨", "검토 상태", "검토자", "검토 시각", "업무 구간(초)", "검출 왕복(회)", "회당 평균(초)", "최장 정지(초) 원본", "중단 의심(초)", "좌표 누락(초)", "의심·누락 제외 참고시간(초)", "원인 미확인 정지(초) 분석 유지", "시간 지표 비교", "중단 구간 JSON", "최초 자동 시작(ms)", "최초 자동 종료(ms)", "영상 맥락 모델", "영상 문장 유사도", "영상 후보 차이", "연속 영상 표본", "라벨 출처", "구간 판별 방식", "시작 관측", "완료 관측", "추적 공백(ms)", "경계 상태"], ...rows]
+    const csv = [["참가자", "세션 단계", "검출 시각", "세션", "시작(ms)", "종료(ms)", "자동 라벨", "자동 후보 점수", "수동 확정 라벨", "검토 상태", "검토자", "검토 시각", "업무 구간(초)", "검출 왕복(회)", "회당 평균(초)", "최장 정지(초) 원본", "중단 의심(초)", "좌표 누락(초)", "의심·누락 제외 참고시간(초)", "원인 미확인 정지(초) 분석 유지", "시간 지표 비교", "중단 구간 JSON", "최초 자동 시작(ms)", "최초 자동 종료(ms)", "영상 맥락 모델", "영상 문장 유사도", "영상 후보 차이", "연속 영상 표본", "라벨 출처", "구간 판별 방식", "시작 관측", "완료 관측", "추적 공백(ms)", "경계 상태", "테스트 구성", "업무 공간 조건"], ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
@@ -3664,7 +3651,7 @@ export default function Home() {
     window.localStorage.removeItem(SELF_TEST_STORAGE_KEY);
     window.localStorage.removeItem(SELF_TEST_LEARNED_KEY);
     window.localStorage.removeItem(SELF_TEST_CAMERA_KEY);
-    window.localStorage.removeItem(SELF_TEST_ZONE_KEY);
+    window.localStorage.removeItem("memory-guard-self-test-zone-grid-v1");
     clearLearnedMotionActions();
     clearObservationMotionActions();
     setConsentState(getConsent());
@@ -3681,7 +3668,6 @@ export default function Home() {
     setSelfTestInterruptionReports([]);
     setSelfTestLearnedMotions({});
     setSelfTestCameraId("");
-    setSelfTestZoneGrid(Array(9).fill(null));
     setActiveSelfTestTrial(null);
     setQuickMotionMode("idle");
     setClosingChecklist(DEFAULT_CLOSING_CHECKLIST);
@@ -4008,7 +3994,6 @@ export default function Home() {
     (episode) => episode.disposition === "quarantined",
   ).length;
   const mappedZoneCount = new Set(activeZoneGrid.filter(Boolean)).size;
-  const selfTestMappedZoneCount = new Set(selfTestZoneGrid.filter(Boolean)).size;
   const latestObservationEpisode = userObservationEpisodes[0] ?? null;
   const analysisObservationSignals = userObservationEpisodes.filter(
     (episode) =>
@@ -4024,9 +4009,9 @@ export default function Home() {
     episode.source === (selfTestStage === "training" ? "self_test_training" : "self_test")
     && episode.selfTestParticipant === selfTestParticipant.trim(),
   ) as ReviewableObservationEpisode[];
-  const selfTestParticipantActions = selfTestLearnedMotions[selfTestParticipant.trim()] ?? [];
+  const selfTestParticipantActions = selfTestLearnedMotions[selfTestTrainingKey(selfTestParticipant.trim(), SELF_TEST_PROTOCOL)] ?? [];
   const latestSelfTestInterruptionReport = selfTestInterruptionReports.filter((report) =>
-    report.participant === selfTestParticipant.trim() && report.stage === selfTestStage,
+    report.participant === selfTestParticipant.trim() && report.stage === selfTestStage && report.protocol === SELF_TEST_PROTOCOL,
   ).at(-1);
   const selfTestSampleCount = selfTestParticipantActions.reduce((total, action) => total + action.samples.length, 0);
   const selectedReviewEpisode = selectedReviewEpisodeId
@@ -4037,12 +4022,13 @@ export default function Home() {
     taskType: workContextTaskType(taskLabel),
     taskLabel,
   }));
-  const allReviewLabelOptions = [...reviewLabelOptions, ...selfTestReviewLabelOptions.filter(
+  const allReviewLabelOptions = [...reviewLabelOptions, ...[...new Set([...SELF_TEST_ACTION_LABELS, ...LEGACY_SELF_TEST_ACTION_LABELS])].map(taskLabel => ({ taskLabel, taskType: workContextTaskType(taskLabel) })).filter(
     (testOption) => !reviewLabelOptions.some((option) => option.taskType === testOption.taskType),
   )];
   const registeredReviewTaskTypes = new Set(allReviewLabelOptions.map((option) => option.taskType));
   function reviewOptionsForEpisode(episode: ReviewableObservationEpisode) {
-    return episode.source === "self_test_training" || episode.source === "self_test" ? selfTestReviewLabelOptions : reviewLabelOptions;
+    return episode.source === "self_test_training" || episode.source === "self_test"
+      ? selfTestLabels(episode.selfTestProtocol).map(taskLabel => ({ taskLabel, taskType: workContextTaskType(taskLabel) })) : reviewLabelOptions;
   }
   const selectedReviewLabelOptions = selectedReviewEpisode ? reviewOptionsForEpisode(selectedReviewEpisode) : reviewLabelOptions;
 
@@ -4092,7 +4078,7 @@ export default function Home() {
     if (episode.motionSlice) {
       const sample = { sessionId: episode.sessionId, ...episode.motionSlice, episodeId: episode.id };
       if (episode.source === "self_test_training") {
-        const participant = episode.selfTestParticipant ?? "";
+        const participant = selfTestTrainingKey(episode.selfTestParticipant ?? "", episode.selfTestProtocol);
         setSelfTestLearnedMotions((current) => ({ ...current,
           [participant]: removeObservationMotionSample(current[participant] ?? [], sample) }));
       } else if (episode.source !== "self_test") {
@@ -4140,7 +4126,7 @@ export default function Home() {
     const recordedSession = isSelfTestReview ? await getMotionSession(selectedReviewEpisode.sessionId) : null;
     const recordedManifest = recordedSession?.globalSessionId ? await getCaptureManifest(recordedSession.globalSessionId) : null;
     const correctedFeatures = isSelfTestReview && originalSlice
-      ? extractObservationFeatures(adjustedFrames, recordedManifest?.purpose === "self_test" ? recordedManifest.zoneSnapshot.primary : Array(9).fill(null))
+      ? selfTestFeatures(extractObservationFeatures(adjustedFrames, recordedManifest?.purpose === "self_test" ? recordedManifest.zoneSnapshot.primary : Array(9).fill(null)), selectedReviewEpisode.selfTestProtocol)
       : selectedReviewEpisode.features;
     const adjustedEpisode = isSelfTestReview && originalSlice ? {
       ...selectedReviewEpisode,
@@ -4168,7 +4154,7 @@ export default function Home() {
         startMs: updated.motionSlice.startMs,
         endMs: updated.motionSlice.endMs,
       };
-      const participant = updated.selfTestParticipant ?? "";
+      const participant = selfTestTrainingKey(updated.selfTestParticipant ?? "", updated.selfTestProtocol);
       setSelfTestLearnedMotions((current) => ({
         ...current,
         [participant]: addObservationMotionSample(removeObservationMotionSample(current[participant] ?? [], {
@@ -4795,7 +4781,7 @@ export default function Home() {
                       <button className="primary-button" type="button" onClick={() => cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? void stopSelfTestCamera() : void requestSelfTestCameraStart()} disabled={cameraStatus === "requesting"}>
                         {cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? selfTestRecording ? "촬영 종료·분석" : "카메라 끄기" : "카메라 연결"}
                       </button>
-                      <p>{cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? selfTestRecording ? "촬영 중입니다. 종료하면 구간을 분석합니다." : "화면과 업무 구역을 설정한 뒤 촬영을 시작하세요. 지금은 학습되지 않습니다." : "사용자 모드의 3대 카메라 설정과 별도로 연결됩니다."}</p>
+                      <p>{cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? selfTestRecording ? "촬영 중입니다. 종료하면 구간을 분석합니다." : "앵글과 소품을 확인한 뒤 촬영을 시작하세요. 지금은 학습되지 않습니다." : "사용자 모드의 3대 카메라 설정과 별도로 연결됩니다."}</p>
                       <button className="self-test-camera-refresh" type="button" onClick={() => void refreshSelfTestCameras()}>카메라 목록 다시 불러오기</button>
                     </>
                   )}
@@ -4807,21 +4793,20 @@ export default function Home() {
                     </div>
                   </div>
                 )}
-                <div className="self-test-zone-setup">
-                  <label><span>선택할 업무 구역</span><select disabled={selfTestRecording || selfTestStarting} value={selfTestSelectedZoneId} onChange={(event) => setSelfTestSelectedZoneId(event.target.value)}>{selfTestOccupationTemplate.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}</select></label>
-                  <div className="self-test-zone-grid" aria-label="자체테스트 카메라 화면 구역 설정">
-                    {selfTestZoneGrid.map((zoneId, index) => <button type="button" key={index} className={zoneId ? "mapped" : ""} disabled={selfTestRecording || selfTestStarting} onClick={() => setSelfTestZoneGrid((current) => current.map((value, cell) => cell === index ? value === selfTestSelectedZoneId ? null : selfTestSelectedZoneId : value))}>{zoneId ? selfTestOccupationTemplate.zones.find((zone) => zone.id === zoneId)?.label : `구역 ${index + 1}`}</button>)}
-                  </div>
-                  <small>아래 3×3 구역표에서 업무 구역을 지정하세요. 이 설정은 자체테스트에만 적용됩니다.</small>
+                <div className="self-test-zone-setup" aria-label="고정 업무 맥락">
+                  <h3>음료 제조대 · 고정 시험 조건</h3>
+                  <p>한 작업대에서 5개 행동을 수행합니다. 자체테스트에서는 공간 구역을 직접 지정하지 않습니다.</p>
+                  <small>이 조건은 실제 위치를 감지한 결과가 아닙니다. 사용자 모드의 3대 카메라 구역 설정은 별도로 유지됩니다.</small>
+                  <p>{SELF_TEST_ACTION_LABELS.join(" · ")}</p>
+                  <small>기존 시험의 학습 표본과 분리됩니다. 같은 참가자라도 새 행동 구성으로 다시 학습해 주세요.</small>
                 </div>
               </section>
               {cameraSessionPurpose === "self_test" && poseStatus === "error" && <p role="alert" className="self-test-warning">{cameraMessage}</p>}
               <h2 className="self-test-flow-title">{selfTestStage === "training" ? "개인 동작 학습" : "자동 동작 분석"}</h2>
               <p className="self-test-hint">{selfTestStage === "training" ? "앵글을 맞춘 뒤 촬영을 시작하고 5개 업무를 수행하세요. 스켈레톤과 연속된 영상 맥락이 충분하면 자동으로 개인 동작 표본을 누적합니다. 불확실한 결과만 검토 대기로 남습니다." : "촬영을 시작하고 5개 업무를 임의 순서로 수행하세요. 영상 맥락과 학습한 개인 동작을 비교하며, 분석 결과는 학습에 추가하지 않습니다."}</p>
-              <p className="self-test-hint">컵·용기·천·싱크대 등 작업 도구도 화면에 보이게 해 주세요. 영상은 로컬에서 일시 처리하며 저장하거나 전송하지 않습니다. 자동 후보와 구간은 아직 카페 실측 데이터로 검증되지 않았습니다.</p>
+              <p className="self-test-hint">컵·스쿱·용기·숟가락·뚜껑·봉투 등 작업 도구도 화면에 보이게 해 주세요. 영상은 로컬에서 일시 처리하며 저장하거나 전송하지 않습니다. 자동 후보와 구간은 아직 카페 실측 데이터로 검증되지 않았습니다.</p>
               {cameraStatus === "connected" && cameraSessionPurpose === "self_test" && <p className="self-test-hint" role="status">{actionModelStatus === "ready" ? "로컬 영상 맥락 모델 준비 완료" : actionModelStatus === "error" ? "영상 맥락 모델 준비 실패 · 카메라를 다시 연결해 주세요" : "로컬 영상 맥락 모델을 준비하고 있어요…"}{selfTestRecording && liveActionContext ? ` · 최근 ${isSupportedVisualSample(liveActionContext) ? "후보" : "불확실"}: ${liveActionContext.label}` : ""}</p>}
               {selfTestStage === "evaluation" && selfTestSampleCount === 0 && <p className="self-test-warning">이 참가자의 개인 학습 표본이 없습니다. 영상 맥락만으로 후보를 추정하므로 먼저 학습 세션을 진행하는 것이 좋습니다.</p>}
-              {selfTestMappedZoneCount === 0 && <p className="self-test-warning">구역을 지정하면 카페 업무를 더 잘 구별할 수 있어요. 구역이 없거나 확신이 낮은 결과는 검토 대기로 표시됩니다.</p>}
               {cameraStatus === "connected" && cameraSessionPurpose === "self_test" && !selfTestRecording && <button className="primary-button" type="button" disabled={selfTestStarting || actionModelStatus !== "ready" || ["idle", "loading", "error"].includes(poseStatus)} onClick={() => void startSelfTestRecording()}>{selfTestStage === "training" ? "학습 촬영 시작" : "분석 촬영 시작"}</button>}
               <p className="self-test-progress">{selfTestRecording ? "촬영 중 · 동작을 수행한 뒤 ‘촬영 종료·분석’을 누르세요." : cameraStatus === "connected" && cameraSessionPurpose === "self_test" ? "카메라 미리보기 중 · 촬영 시작 전 움직임은 학습하지 않습니다." : "카메라를 연결해 앵글을 확인하세요. 촬영은 별도로 시작합니다."}</p>
               <div className="self-test-results-heading">
@@ -4843,7 +4828,7 @@ export default function Home() {
                   <div className="self-test-result-row self-test-result-header" role="row"><span role="columnheader">단계·검출 구간</span><span role="columnheader">자동·수동 라벨</span><span role="columnheader">검토 상태</span></div>
                   {selfTestDetectedEpisodes.map((episode) => (
                     <div className="self-test-result-row" role="row" key={episode.id}>
-                      <span role="cell">{episode.source === "self_test_training" ? "학습" : "분석"} · {new Date(episode.recordedAt).toLocaleTimeString("ko-KR")} · {episode.motionSlice ? `${(episode.motionSlice.startMs / 1000).toFixed(1)}–${(episode.motionSlice.endMs / 1000).toFixed(1)}초` : "구간 미확인"}<br />왕복 {episode.movementCycles?.length ?? 0}회{episode.movementCycles?.length ? ` · 회당 평균 ${(episode.movementCycles.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / episode.movementCycles.length).toFixed(1)}초` : ""}</span>
+                      <span role="cell">{episode.source === "self_test_training" ? "학습" : "분석"} · {episode.selfTestProtocol === SELF_TEST_PROTOCOL ? "작업대 시험" : "이전 시험"} · {new Date(episode.recordedAt).toLocaleTimeString("ko-KR")} · {episode.motionSlice ? `${(episode.motionSlice.startMs / 1000).toFixed(1)}–${(episode.motionSlice.endMs / 1000).toFixed(1)}초` : "구간 미확인"}<br />왕복 {episode.movementCycles?.length ?? 0}회{episode.movementCycles?.length ? ` · 회당 평균 ${(episode.movementCycles.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / episode.movementCycles.length).toFixed(1)}초` : ""}</span>
                       <span role="cell">자동 후보 {episode.actionReview?.candidates[0]?.taskLabel ?? (episode.actionReview?.manualLabel ? "미분류" : episode.taskLabel)} · {Math.round((episode.actionReview?.candidates[0]?.confidence ?? (episode.actionReview?.manualLabel ? 0 : episode.taskConfidence)) * 100)}점{episode.actionReview?.manualLabel && <><br />수동 {episode.actionReview.manualLabel.taskLabel}</>}</span>
                       <span role="cell">{episode.actionReview?.status === "confirmed" ? episode.source === "self_test_training" ? "수동 확정·학습 반영" : "수동 확정" : episode.actionReview?.status === "unresolved" ? "판별 불가" : episode.actionReview?.status === "pending" ? "검토 대기" : episode.source === "self_test_training" ? "자동 확정·학습 반영" : "자동 분류"}{<button className="self-test-review-button" type="button" onClick={() => openActionReview(episode)}>스켈레톤 검토</button>}</span>
                     </div>

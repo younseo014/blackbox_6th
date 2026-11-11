@@ -115,11 +115,11 @@ export function contextualMotionSlices(rawFrames: number[][], fallback: TargetMo
   return slices.sort((a, b) => a.startMs - b.startMs);
 }
 
-export function rankVisualContext(embedding: ArrayLike<number>, prototypes: Array<{ label: string; kind: VisualActionKind; embedding: number[] }>) {
+export function rankVisualContext(embedding: ArrayLike<number>, prototypes: Array<{ label: string; kind: VisualActionKind; embedding: number[] }>, taskLabels?: string[]) {
   if (embedding.length !== 512 || !Array.from(embedding).every(Number.isFinite)) throw new Error("Invalid CLIP image embedding");
   const norm = Math.hypot(...Array.from(embedding));
   if (!norm) throw new Error("Empty CLIP image embedding");
-  const scores = prototypes.map(p => {
+  const scores = prototypes.filter(p => p.kind !== "task" || !taskLabels || taskLabels.includes(p.label)).map(p => {
     if (p.embedding.length !== 512 || !p.embedding.every(Number.isFinite)) throw new Error("Invalid CLIP text prototype");
     const similarity = p.embedding.reduce((sum, value, i) => sum + value * embedding[i] / norm, 0);
     return { label: p.label, kind: p.kind, similarity };

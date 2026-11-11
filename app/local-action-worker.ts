@@ -37,7 +37,7 @@ self.onmessage = async (event: MessageEvent) => {
       let outputs: ort.InferenceSession.OnnxValueMapType | undefined;
       try {
         outputs = await session.run({ pixel_values: tensor });
-        const result = rankVisualContext(outputs.image_embeds.data as Float32Array, prototypes);
+        const result = rankVisualContext(outputs.image_embeds.data as Float32Array, prototypes, request.taskLabels);
         self.postMessage({ type: "result", id: request.id, result });
       } finally { tensor.dispose(); if (outputs) Object.values(outputs).forEach(value => value.dispose()); }
     } finally { bitmap.close(); }

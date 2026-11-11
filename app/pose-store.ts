@@ -121,7 +121,7 @@ export type CaptureManifestRecord = {
   expectedCameraSlots: CameraSlot[];
   purpose?: "self_test" | "multi_camera";
   visualContext?: { model: "clip-vit-base-patch32-int8"; cameraSlot: 1; samples: VisualActionSample[] };
-  selfTest?: { participant: string; stage: "training" | "evaluation"; recordingStartMs: number };
+  selfTest?: { participant: string; stage: "training" | "evaluation"; recordingStartMs: number; protocol?: string; fixedContext?: "DRINK_PREP" };
   observationContext?: { occupation: string; mode: "learning" | "analysis"; baselineVersion: number };
   workContextSnapshot?: WorkContextLike;
   multiViewCapture?: {

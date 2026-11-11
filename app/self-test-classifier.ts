@@ -2,8 +2,9 @@ import type { ObservationFeatures } from "./observation-engine";
 import { getOccupationTemplate } from "./occupation-templates";
 import { parseSessionFrame } from "./pose-store";
 import { workContextTaskType } from "./work-context-inference";
+import { SELF_TEST_ACTION_LABELS } from "./self-test-protocol";
 
-const TEST_LABELS = new Set(["컵 보충", "냉장 재료 꺼내기", "음료 재료 혼합", "테이블 닦기", "식기 세척"]);
+const TEST_LABELS = new Set(SELF_TEST_ACTION_LABELS);
 
 function hasRepeatedWristMotion(rawFrames: number[][]) {
   return [0, 1].some((side) => {
