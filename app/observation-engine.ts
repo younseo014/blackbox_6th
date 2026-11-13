@@ -53,6 +53,16 @@ export type ObservationEpisode = {
   sessionId: string;
   selfTestParticipant?: string;
   selfTestProtocol?: string;
+  recognition?: {
+    version: string;
+    source: "personal_sequence" | "visual_context" | "insufficient";
+    proposerLabel?: string;
+    candidates: Array<{ label: string; distance: number; score: number }>;
+    weakHints: Array<{ label: string; score: number }>;
+    candidateMargin: number | null;
+    independentSupport: boolean;
+    learningApplied: boolean;
+  };
   globalSessionId?: string;
   multiViewEvidence?: {
     cameraSlots: [1, 2, 3];

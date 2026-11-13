@@ -1,4 +1,5 @@
 import { compareSkeletonMotions } from "./motion-classifier";
+import { compareWorkSequences, representativeWorkSamples, resampleWorkSequence, workPoseQuality, workSequence } from "./work-motion-features";
 
 export type LearnedMotionSample = {
   episodeId?: string;
@@ -21,7 +22,63 @@ export type LoadedLearnedMotionAction = {
   label: string;
   samples: number[][][];
   boundarySamples?: number[][][];
+  sampleSources?: Array<LearnedMotionSample["labelSource"]>;
 };
+
+export function workReferenceSamples(action: LoadedLearnedMotionAction) {
+  if (action.boundarySamples?.length) return {
+    samples: [...action.boundarySamples, ...action.samples.filter((_, i) => action.sampleSources?.[i] === "visual_model")],
+    independent: true, preferredIndexes: action.boundarySamples.map((_, i) => i),
+  };
+  const samples = action.samples.filter((_, i) => action.sampleSources?.[i] !== "sequence_model");
+  const independent = action.samples.map((frames, i) => ({ frames, source: action.sampleSources?.[i] }))
+    .filter(s => s.source === "manual" || s.source === "visual_model");
+  return independent.length ? { samples: independent.map(s => s.frames), independent: true,
+    preferredIndexes: independent.flatMap((s, i) => s.source === "manual" ? [i] : []) }
+    : { samples, independent: false, preferredIndexes: [] };
+}
+
+const referenceCache = new WeakMap<LoadedLearnedMotionAction, ReturnType<typeof workReferenceSamples> & { indexes: number[] }>();
+export function selectedWorkReferences(action: LoadedLearnedMotionAction) {
+  let selected = referenceCache.get(action);
+  if (!selected) {
+    const pool = workReferenceSamples(action);
+    selected = { ...pool, indexes: representativeWorkSamples(pool.samples, pool.preferredIndexes) };
+    referenceCache.set(action, selected);
+  }
+  return selected;
+}
+
+export type WorkMotionResult = LearnedMotionResult & {
+  independentSupport: boolean;
+  candidateMargin: number | null;
+  referenceCounts: Array<{ label: string; available: number; selected: number }>;
+  observedQuality: number;
+};
+
+/** Re-score every registered label on the same completed interval, independent of its proposer. */
+export function classifyWorkMotion(observedFrames: number[][], actions: LoadedLearnedMotionAction[], expectedLabels = actions.map(a => a.label)): WorkMotionResult {
+  const observed = resampleWorkSequence(workSequence(observedFrames));
+  const referenceCounts: WorkMotionResult["referenceCounts"] = [];
+  const support = new Map<string, boolean>();
+  const candidates = actions.flatMap(action => {
+    const pool = selectedWorkReferences(action), indexes = pool.indexes;
+    referenceCounts.push({ label: action.label, available: pool.samples.length, selected: indexes.length });
+    const distances = indexes.map(i => compareWorkSequences(observed, resampleWorkSequence(workSequence(pool.samples[i])))).filter(Number.isFinite);
+    support.set(action.label, pool.independent);
+    return distances.length ? [{ actionId: action.id, label: action.label, distance: closestExamplesDistance(distances) }] : [];
+  }).sort((a, b) => a.distance - b.distance || a.label.localeCompare(b.label));
+  const best = candidates[0], runner = candidates[1];
+  const candidateMargin = best && runner ? Math.exp(-best.distance * 4.2) - Math.exp(-runner.distance * 4.2) : null;
+  const covered = expectedLabels.every(label => candidates.some(c => c.label === label));
+  const confidence = best ? Math.exp(-best.distance * 4.2) * workPoseQuality(observed) : 0;
+  return {
+    status: !best || observed.length < 6 ? "insufficient"
+      : covered && confidence >= 0.55 && candidateMargin !== null && candidateMargin >= 0.04 ? "matched" : "uncertain",
+    actionId: best?.actionId ?? null, label: best?.label ?? null, confidence,
+    candidates, independentSupport: best ? support.get(best.label) === true : false, candidateMargin, referenceCounts, observedQuality: workPoseQuality(observed),
+  };
+}
 
 export type LearnedMotionResult = {
   status: "matched" | "uncertain" | "insufficient";

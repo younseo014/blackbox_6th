@@ -15,7 +15,10 @@ try {
   await page.getByRole("button", { name: "자체테스트", exact: true }).click();
   await page.getByPlaceholder("예: 참가자 A").fill("desktop-model-smoke");
   const discover = page.getByRole("button", { name: "카메라 찾기", exact: true });
-  if (await discover.isVisible()) await discover.click();
+  if (await discover.isVisible()) {
+    try { await discover.click({timeout:3000}); }
+    catch (error) { if (!(await page.getByRole("button",{name:"카메라 연결",exact:true}).isVisible())) throw error; }
+  }
   await page.getByRole("button", { name: "카메라 연결", exact: true }).click();
   await page.getByRole("button", { name: "동의하고 카메라 켜기", exact: true }).click();
   await page.getByText("로컬 영상 맥락 모델 준비 완료", { exact: true }).waitFor();
@@ -39,6 +42,9 @@ try {
   });
   assert.equal(new URL(page.url()).protocol, "memoryguard:");
   assert.equal(manifest.visualContext.model, "clip-vit-base-patch32-int8");
+  assert.equal(manifest.recognitionContext.version,"work-recognition-v3");
+  assert.equal(manifest.recognitionReport.version,"work-recognition-v3");
+  assert.ok(manifest.visualContext.samples.every(s=>Array.isArray(s.candidates) && s.inputGeometry?.transform === "center_crop"));
   assert.ok(manifest.visualContext.samples.length >= 1);
   assert.ok(manifest.visualContext.samples.every(s => Number.isFinite(s.similarity) && !s.bodyObserved));
   assert.deepEqual(Object.keys(manifest.visualContext).sort(), ["cameraSlot", "model", "samples"]);

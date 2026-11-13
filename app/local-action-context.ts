@@ -8,6 +8,9 @@ export type VisualActionSample = {
   similarity: number;
   margin: number;
   bodyObserved: boolean;
+  candidates?: Array<{ label: string; kind: VisualActionKind; similarity: number }>;
+  inputGeometry?: { width: number; height: number; left: number; top: number; size: number; transform: "center_crop" };
+  workAreaCoverage?: number | null;
 };
 export type VisualActionInterval = {
   startMs: number;
@@ -19,6 +22,13 @@ export type VisualActionInterval = {
   sampleCount: number;
 };
 export type ContextMotionSlice = TargetMotionSlice & { visualEvidence?: VisualActionInterval; contextNonWork?: boolean };
+
+export function visualWorkAreaCoverage(points: Array<{ x: number; y: number; visibility?: number }>, geometry: NonNullable<VisualActionSample["inputGeometry"]>) {
+  const visible = [11, 12, 13, 14, 15, 16].map(i => points[i]).filter(p => p && (p.visibility ?? 0) >= 0.35 && Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (!visible.length || !(geometry.width > 0 && geometry.height > 0 && geometry.size > 0)) return null;
+  return visible.filter(p => p.x * geometry.width >= geometry.left && p.x * geometry.width <= geometry.left + geometry.size
+    && p.y * geometry.height >= geometry.top && p.y * geometry.height <= geometry.top + geometry.size).length / visible.length;
+}
 
 // Conservative operating points, pending calibration on independently labelled cafe data.
 export function isSupportedVisualSample(sample: VisualActionSample) {
@@ -125,5 +135,5 @@ export function rankVisualContext(embedding: ArrayLike<number>, prototypes: Arra
     return { label: p.label, kind: p.kind, similarity };
   }).sort((a, b) => b.similarity - a.similarity);
   if (scores.length < 2) throw new Error("CLIP requires task and alternative prototypes");
-  return { ...scores[0], margin: scores[0].similarity - scores[1].similarity };
+  return { ...scores[0], margin: scores[0].similarity - scores[1].similarity, candidates: scores };
 }

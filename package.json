@@ -1,6 +1,6 @@
 {
   "name": "memory-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "desktop/main.mjs",
   "engines": {
@@ -23,7 +23,8 @@
     "eval:boundaries": "node --import tsx scripts/evaluate-work-boundaries.ts",
     "prepare:yolox": "node scripts/prepare-yolox-runtime.mjs",
     "prepare:actions": "node scripts/prepare-action-runtime.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "eval:recognition": "node --import tsx scripts/evaluate-work-recognition.ts"
   },
   "dependencies": {
     "@base-ui-components/react": "^1.0.0-rc.0",

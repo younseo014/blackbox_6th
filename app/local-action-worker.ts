@@ -38,7 +38,9 @@ self.onmessage = async (event: MessageEvent) => {
       try {
         outputs = await session.run({ pixel_values: tensor });
         const result = rankVisualContext(outputs.image_embeds.data as Float32Array, prototypes, request.taskLabels);
-        self.postMessage({ type: "result", id: request.id, result });
+        self.postMessage({ type: "result", id: request.id, result: { ...result,
+          inputGeometry: { width: bitmap.width, height: bitmap.height, left: (bitmap.width - side) / 2,
+            top: (bitmap.height - side) / 2, size: side, transform: "center_crop" } } });
       } finally { tensor.dispose(); if (outputs) Object.values(outputs).forEach(value => value.dispose()); }
     } finally { bitmap.close(); }
   } catch (error) {

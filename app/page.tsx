@@ -100,6 +100,7 @@ import {
   addObservationMotionSample,
   removeObservationMotionSample,
   classifyLearnedMotion,
+  classifyWorkMotion,
   clearLearnedMotionActions,
   clearObservationMotionActions,
   loadLearnedMotionActions,
@@ -111,12 +112,14 @@ import {
   type LearnedMotionSample,
 } from "./custom-motion-training";
 import { sliceTargetMotions } from "./motion-segmentation";
-import { segmentWorkEpisodes } from "./learned-work-segmentation";
+import { segmentWorkEpisodesDetailed, WORK_RECOGNITION_VERSION } from "./learned-work-segmentation";
+import { WORK_FEATURE_VERSION } from "./work-motion-features";
+import { decideWorkLabel, canAutomaticallyLearnWork } from "./work-action-decision";
 import { hasCompleteWorkBoundaries } from "./work-episode-segmentation";
 import { RecordingWriteQueue } from "./recording-write-queue";
 import { LocalActionModel } from "./local-action-model";
 import { SELF_TEST_PROTOCOL, SELF_TEST_ACTION_LABELS, LEGACY_SELF_TEST_ACTION_LABELS, SELF_TEST_ZONE_GRID, selfTestFeatures, selfTestLabels, selfTestTrainingKey } from "./self-test-protocol";
-import { contextualMotionSlices, visualActionIntervals, isSupportedVisualSample, type VisualActionSample } from "./local-action-context";
+import { contextualMotionSlices, visualActionIntervals, isSupportedVisualSample, visualWorkAreaCoverage, type VisualActionSample } from "./local-action-context";
 import { classifyCafeSelfTest } from "./self-test-classifier";
 import { detectWorkInterruptions, summarizeInterruptions, normalizeInterruptionSummary, hasInterruptionConfound, INTERRUPTION_LABELS, type InterruptionSummary } from "./work-interruptions";
 import {
@@ -1390,8 +1393,8 @@ export default function Home() {
       toast.success("먼저 참가자 이름을 입력해 주세요");
       return;
     }
-    if (selfTestStage === "evaluation" && (selfTestLearnedMotions[selfTestTrainingKey(selfTestParticipant.trim(), SELF_TEST_PROTOCOL)] ?? []).every((action) => action.samples.length === 0)) {
-      toast.success("먼저 학습 세션에서 이 참가자의 동작 표본을 저장해 주세요");
+    if (selfTestStage === "evaluation" && (selfTestLearnedMotions[selfTestTrainingKey(selfTestParticipant.trim(), SELF_TEST_PROTOCOL)] ?? []).every(action => action.samples.every(sample => sample.labelSource !== "manual" && sample.labelSource !== "visual_model"))) {
+      toast.success("먼저 학습 세션에서 이 참가자의 동작 기준 표본을 확보해 주세요");
       return;
     }
     quickMotionCameraRequestedRef.current = false;
@@ -2370,9 +2373,11 @@ export default function Home() {
     if (cameraSessionPurposeRef.current === "self_test" ? !selfTestRecordingRef.current : observationRunContextRef.current?.profile.occupation !== "cafe") return;
     lastActionContextTimeRef.current = timestamp;
     const timeMs = timestamp - sessionPerformanceStartRef.current;
+    const sampledPose = bodyObserved ? lastPoseRef.current : null;
     actionContextPendingRef.current = actionModelRef.current.classify(video, cameraSessionPurposeRef.current === "self_test" ? SELF_TEST_ACTION_LABELS : LEGACY_SELF_TEST_ACTION_LABELS).then(result => {
       if (poseSessionRef.current?.id !== session.id) return;
-      const sample = { ...result, timeMs, bodyObserved };
+      const sample = { ...result, timeMs, bodyObserved,
+        workAreaCoverage: sampledPose && result.inputGeometry ? visualWorkAreaCoverage(sampledPose, result.inputGeometry) : null };
       actionContextSamplesRef.current.push(sample);
       setLiveActionContext(sample);
     }).catch(error => {
@@ -2528,8 +2533,13 @@ export default function Home() {
         endedAt: null,
         timelineOriginMs: globalCaptureSessionRef.current.timelineOriginMs,
         purpose: cameraSessionPurposeRef.current ?? "multi_camera",
-        observationContext: { occupation: observationProfile.occupation, mode: observationProfile.mode, baselineVersion: observationProfile.baselineVersion },
+        observationContext: cameraSessionPurposeRef.current === "self_test"
+          ? { occupation: "cafe", mode: selfTestStage === "training" ? "learning" : "analysis", baselineVersion: 0 }
+          : { occupation: observationProfile.occupation, mode: observationProfile.mode, baselineVersion: observationProfile.baselineVersion },
         workContextSnapshot: cameraSessionPurposeRef.current === "self_test" ? undefined : workContextConfig,
+        ...(cameraSessionPurposeRef.current !== "self_test" && observationProfile.occupation === "cafe" ? { recognitionContext: {
+          version: WORK_RECOGNITION_VERSION, featureVersion: WORK_FEATURE_VERSION, learnedActions: structuredClone(observationLearnedMotions),
+        } } : {}),
         expectedCameraSlots: cameraSessionPurposeRef.current === "self_test" ? [1] : [1, 2, 3],
         ...(cameraSessionPurposeRef.current === "self_test" ? {} : { multiViewCapture: {
           arrangement: "shared_workspace_three_angles",
@@ -2700,12 +2710,13 @@ export default function Home() {
   ) {
     try {
       const runContext = observationRunContextRef.current?.sessionId === sessionId ? observationRunContextRef.current : null;
-      const baselineForRun = runContext?.baseline ?? observationBaseline;
+      const baselineForRun = selfTestStage ? buildBaseline([], 0) : runContext?.baseline ?? observationBaseline;
       const workContextForRun = runContext?.workContext ?? workContextConfig;
       const profileForRun = selfTestStage ? {
         ...observationProfile,
         occupation: "cafe" as const,
         occupationName: "자체테스트 카페",
+        baselineVersion: 0,
         mode: selfTestStage === "training" ? "learning" as const : "analysis" as const,
         zoneGrid: selfTestZoneGrid,
         secondaryZoneGrid: Array(9).fill(null),
@@ -2746,22 +2757,24 @@ export default function Home() {
         setSelfTestInterruptionReports((current) => [...current.filter((item) => item.sessionId !== sessionId), report]);
       }
       const participantForRun = selfTestParticipant.trim();
-      const actionsForRun = selfTestStage
+      const actionsForRun = savedManifest?.recognitionContext?.learnedActions ?? (selfTestStage
         ? selfTestLearnedMotions[selfTestTrainingKey(participantForRun, SELF_TEST_PROTOCOL)] ?? []
-        : observationLearnedMotions;
+        : observationLearnedMotions);
       let nextLearnedActions = actionsForRun;
       const loadedActions = actionsForRun.length > 0
         ? await Promise.all(actionsForRun.map(async action => {
           const samples = await Promise.all(action.samples.map(framesForMotionSample));
           const confirmed = samples.filter((frames, index) => frames.length >= 6 && action.samples[index].labelSource === "manual");
           return { id: action.id, label: action.label, samples: samples.filter(frames => frames.length >= 6),
+            sampleSources: action.samples.filter((_, index) => samples[index].length >= 6).map(sample => sample.labelSource),
             ...(confirmed.length ? { boundarySamples: confirmed } : {}),
           };
         }))
         : [];
-      const motionSlices = contextualMotionSlices(rawFrames,
-        selfTestStage || profileForRun.occupation === "cafe" ? segmentWorkEpisodes(rawFrames, loadedActions)
-          : sliceTargetMotions(rawFrames), contextIntervals);
+      const useWorkRecognition = Boolean(selfTestStage || profileForRun.occupation === "cafe");
+      const segmented = useWorkRecognition ? segmentWorkEpisodesDetailed(rawFrames, loadedActions) : null;
+      if (savedManifest && segmented) await saveCaptureManifest({ ...savedManifest, recognitionReport: segmented.report });
+      const motionSlices = contextualMotionSlices(rawFrames, segmented?.slices ?? sliceTargetMotions(rawFrames), contextIntervals);
       if (motionSlices.length === 0) {
         toast.success("기록은 저장했고, 별도의 동작 구간은 감지되지 않았어요");
         return;
@@ -2833,51 +2846,33 @@ export default function Home() {
             },
           };
         }
-        const learnedResult = loadedActions.length > 0
-          ? classifyLearnedMotion(analysisFrames, loadedActions)
-          : null;
-        const motionCandidates = learnedResult?.candidates.map((candidate) => ({
-          label: candidate.label,
-          confidence: Math.max(0, Math.min(1, Math.exp(-candidate.distance * 4.2))),
-        })) ?? [];
+        const learnedResult = !useWorkRecognition && loadedActions.length > 0 ? classifyLearnedMotion(analysisFrames, loadedActions) : null;
+        const motionCandidates = learnedResult?.candidates.map(candidate => ({ label: candidate.label,
+          confidence: Math.exp(-candidate.distance * 4.2) })) ?? [];
+        const workMotion = useWorkRecognition ? classifyWorkMotion(analysisFrames, loadedActions,
+          selfTestStage ? SELF_TEST_ACTION_LABELS : loadedActions.map(action => action.label)) : null;
         const visualEvidence = motionSlice.visualEvidence;
-        const visualOption = visualEvidence && (selfTestStage || profileForRun.occupation === "cafe")
+        const visualOption = visualEvidence && useWorkRecognition
           ? { taskType: workContextTaskType(visualEvidence.label), taskLabel: visualEvidence.label, confidence: visualEvidence.similarity } : null;
-        const sequenceEvidence = motionSlice.boundaryEvidence;
-        const sequenceOption = sequenceEvidence?.method === "learned_sequence" && sequenceEvidence.label
-          ? { taskType: workContextTaskType(sequenceEvidence.label), taskLabel: sequenceEvidence.label,
-            confidence: Math.exp(-(sequenceEvidence.distance ?? Infinity) * 4.2) } : null;
-        const candidates = sequenceOption ? [sequenceOption] : visualOption ? [visualOption] : normalizeActionCandidates(selfTestStage
-          ? [...classifyCafeSelfTest(features, analysisFrames), ...(selfTestStage === "evaluation"
-            ? motionCandidates.flatMap((candidate) => {
-              const option = labelOptions.find((label) => label.taskLabel === candidate.label);
-              return option ? [{ ...option, confidence: candidate.confidence }] : [];
-            }) : [])]
-          : buildWorkContextCandidates({
-            config: workContextForRun,
-            recordedAt: episodeRecordedAt,
-            motionCandidates,
-          }));
+        const workDecision = workMotion ? decideWorkLabel(workMotion, labelOptions.map(option => option.taskLabel), visualEvidence) : null;
+        const weakCandidates = selfTestStage ? classifyCafeSelfTest(features, analysisFrames)
+          : buildWorkContextCandidates({ config: workContextForRun, recordedAt: episodeRecordedAt, motionCandidates });
+        const candidates = workDecision?.candidates ?? normalizeActionCandidates(weakCandidates);
         const bestCandidate = candidates[0];
-        const hasPersonalTrainingCoverage = selfTestStage === "evaluation" && SELF_TEST_ACTION_LABELS.every((label) =>
-          actionsForRun.some((action) => action.label === label && action.samples.length >= 3),
-        );
-        const hasPersonalMotionSupport = hasPersonalTrainingCoverage
-          && learnedResult?.status === "matched"
-          && learnedResult.label === bestCandidate?.taskLabel
-          && motionCandidates.some((candidate) => candidate.label === bestCandidate?.taskLabel && candidate.confidence >= 0.8);
-        const hasGroundedMotionLabel = selfTestStage
-          ? Boolean(bestCandidate && bestCandidate.confidence >= 0.55)
-          : motionCandidates.some((motionCandidate) =>
-          labelOptions.some((option) =>
-            option.taskLabel.trim().toLocaleLowerCase() === motionCandidate.label.trim().toLocaleLowerCase(),
-          ),
-        );
+        const hasGroundedMotionLabel = motionCandidates.some(candidate => labelOptions.some(option =>
+          option.taskLabel.trim().toLocaleLowerCase() === candidate.label.trim().toLocaleLowerCase()));
         episode = {
           ...episode,
           taskType: bestCandidate?.taskType ?? "UNCLASSIFIED",
           taskLabel: bestCandidate?.taskLabel ?? "미분류",
           taskConfidence: bestCandidate?.confidence ?? 0,
+          ...(workMotion && workDecision ? { recognition: {
+            version: WORK_RECOGNITION_VERSION, source: workDecision.source,
+            proposerLabel: motionSlice.boundaryEvidence?.label,
+            candidates: workMotion.candidates.map(c => ({ label: c.label, distance: c.distance, score: Math.exp(-c.distance * 4.2) * workMotion.observedQuality })),
+            weakHints: weakCandidates.map(c => ({ label: c.taskLabel, score: c.confidence })),
+            candidateMargin: workMotion.candidateMargin, independentSupport: workDecision.independentSupport, learningApplied: false,
+          } } : {}),
           ...(visualOption && visualEvidence ? { visualContext: {
             model: "clip-vit-base-patch32-int8" as const, label: visualEvidence.label,
             similarity: visualEvidence.similarity, margin: visualEvidence.margin, sampleCount: visualEvidence.sampleCount,
@@ -2890,23 +2885,17 @@ export default function Home() {
             : "평소 업무 후보로 개인 기준선에 포함했어요.",
         };
         episode = scoreLabeledEpisode(episode, baselineForRun);
-        const qualityReasons = [] as Array<"insufficient_frames" | "missing_zone" | "missing_time_context" | "unknown_motion" | "ground_truth_review" | "self_test_label" | "work_interruption" | "uncertain_boundaries" | "outside_work_context">;
+        const qualityReasons = [...(workDecision?.qualityReasons ?? [])];
         if (motionSlice.contextNonWork) qualityReasons.push("outside_work_context");
         if (motionSlice.boundaryEvidence && !hasCompleteWorkBoundaries(motionSlice)) qualityReasons.push("uncertain_boundaries");
-        if (sequenceOption && (sequenceEvidence?.margin ?? 0) < 0.04) qualityReasons.push("unknown_motion");
-        if (sequenceOption && visualOption && sequenceOption.taskLabel !== visualOption.taskLabel) qualityReasons.push("unknown_motion");
         if (hasInterruptionConfound(episode.interruptions)) qualityReasons.push("work_interruption");
-        if (visualOption && learnedResult?.status === "matched" && learnedResult.confidence >= 0.8 && learnedResult.label !== visualOption.taskLabel) qualityReasons.push("unknown_motion");
-        if (globalSessionId && !visualOption && !sequenceOption) qualityReasons.push("ground_truth_review");
         if (analysisFrames.length < (visualOption ? 20 : 6)) qualityReasons.push("insufficient_frames");
-        if (!features.dominantZone && !visualOption && !sequenceOption) qualityReasons.push("missing_zone");
-        if (labelOptions.length === 0 && !visualOption && !sequenceOption) qualityReasons.push("missing_time_context");
-        if (selfTestStage === "training" && !visualOption && !sequenceOption) qualityReasons.push("self_test_label");
-        if (selfTestStage === "evaluation" && !hasPersonalMotionSupport && !visualOption && !sequenceOption) qualityReasons.push("unknown_motion");
-        if (!selfTestStage && !hasGroundedMotionLabel && !visualOption && !sequenceOption) qualityReasons.push("unknown_motion");
+        if (!useWorkRecognition && !features.dominantZone) qualityReasons.push("missing_zone");
+        if (!labelOptions.length) qualityReasons.push("missing_time_context");
+        if (!useWorkRecognition && !hasGroundedMotionLabel) qualityReasons.push("unknown_motion");
         const actionReview = createActionReview(episode, { candidates, qualityReasons,
-          ...(sequenceOption ? { thresholds: { minimumConfidence: 0.55, minimumCandidateMargin: 0.04 } }
-            : visualOption ? { thresholds: { minimumConfidence: 0.28, minimumCandidateMargin: 0.04 } } : {}) });
+          ...(workDecision?.source === "personal_sequence" ? { thresholds: { minimumConfidence: 0.55, minimumCandidateMargin: 0.04 } }
+            : workDecision?.source === "visual_context" ? { thresholds: { minimumConfidence: 0.28, minimumCandidateMargin: 0.04 } } : {}) });
         episode = {
           ...episode,
           ...(selfTestStage ? {
@@ -2937,13 +2926,14 @@ export default function Home() {
           } : {}),
         };
         if (actionReview) pendingReviewCount += 1;
+        const learningApplied = canAutomaticallyLearnWork(workDecision, selfTestStage ?? profileForRun.mode,
+          Boolean(actionReview || hasInterruptionConfound(episode.interruptions) || episode.disposition === "quarantined" || episode.disposition === "excluded"));
+        if (episode.recognition) episode = { ...episode, recognition: { ...episode.recognition, learningApplied } };
         await saveObservationEpisode(episode);
-        if ((visualOption || sequenceOption) && !actionReview && !hasInterruptionConfound(episode.interruptions)
-          && episode.disposition !== "quarantined" && episode.disposition !== "excluded"
-          && (selfTestStage === "training" || (!selfTestStage && profileForRun.mode === "learning"))) {
+        if (learningApplied) {
           nextLearnedActions = addObservationMotionSample(nextLearnedActions, episode.taskLabel, {
             episodeId: episode.id, sessionId, globalSessionId, startMs: motionSlice.startMs, endMs: motionSlice.endMs,
-            labelSource: sequenceOption ? "sequence_model" : "visual_model",
+            labelSource: visualEvidence?.label === episode.taskLabel ? "visual_model" : "sequence_model",
           });
         }
       }
@@ -3202,6 +3192,9 @@ export default function Home() {
       if (!manifest) throw new Error("Missing self-test capture manifest");
       await saveCaptureManifest({
         ...manifest,
+        observationContext: { occupation: "cafe", mode: selfTestStage === "training" ? "learning" : "analysis", baselineVersion: 0 },
+        recognitionContext: { version: WORK_RECOGNITION_VERSION, featureVersion: WORK_FEATURE_VERSION,
+          learnedActions: structuredClone(selfTestLearnedMotions[selfTestTrainingKey(selfTestParticipant.trim(), SELF_TEST_PROTOCOL)] ?? []) },
         selfTest: { participant: selfTestParticipant.trim(), stage: selfTestStage, protocol: SELF_TEST_PROTOCOL, fixedContext: "DRINK_PREP",
           recordingStartMs: currentMonotonicTime() - sessionPerformanceStartRef.current },
         zoneSnapshot: { ...manifest.zoneSnapshot, primary: [...selfTestZoneGrid], profileUpdatedAt: nowMs() },
@@ -3233,7 +3226,7 @@ export default function Home() {
         episode.actionReview?.status === "confirmed" ? episode.source === "self_test_training" ? "수동 확정·학습 반영" : "수동 확정"
           : episode.actionReview?.status === "unresolved" ? "판별 불가"
             : episode.actionReview?.status === "pending" ? "검토 대기"
-              : episode.source === "self_test_training" ? "자동 확정·학습 반영" : "자동 분류",
+              : episode.source === "self_test_training" ? episode.recognition && !episode.recognition.learningApplied ? "자동 분류·학습 보류" : "자동 확정·학습 반영" : "자동 분류",
         manualLabel?.reviewer ?? (episode.actionReview?.status === "unresolved" ? "developer" : ""),
         manualLabel?.reviewedAt ? new Date(manualLabel.reviewedAt).toISOString()
           : episode.actionReview?.status === "unresolved" ? new Date(episode.actionReview.updatedAt).toISOString() : "",
@@ -3255,7 +3248,8 @@ export default function Home() {
         episode.visualContext?.similarity ?? "",
         episode.visualContext?.margin ?? "",
         episode.visualContext?.sampleCount ?? "",
-        manualLabel ? "수동 확정" : episode.visualContext ? "영상 모델 자동 후보" : "규칙·개인 동작 비교",
+        manualLabel ? "수동 확정" : episode.recognition?.source === "personal_sequence" ? "개인 동작 전체 비교"
+          : episode.recognition?.source === "insufficient" ? "근거 부족" : episode.visualContext ? "영상 모델 자동 후보" : "규칙·개인 동작 비교",
         episode.motionSlice?.boundaryEvidence?.method ?? "legacy_movement",
         episode.motionSlice?.boundaryEvidence?.startObserved ?? "",
         episode.motionSlice?.boundaryEvidence?.endObserved ?? "",
@@ -3263,9 +3257,14 @@ export default function Home() {
         hasCompleteWorkBoundaries(episode.motionSlice ?? {}) ? "시작·완료 관측" : "경계 미확인",
         episode.selfTestProtocol ?? "legacy-v1",
         episode.selfTestProtocol === SELF_TEST_PROTOCOL ? "음료 제조대·고정 조건" : "사용자 지정 구역",
+        episode.recognition?.version ?? "legacy", episode.recognition?.source ?? "legacy",
+        JSON.stringify(episode.recognition?.candidates ?? []), episode.recognition?.candidateMargin ?? "",
+        episode.recognition?.independentSupport ?? "", episode.recognition?.learningApplied ?? "",
+        JSON.stringify(episode.recognition?.weakHints ?? []), episode.recognition?.proposerLabel ?? "",
+        episode.motionSlice?.boundaryEvidence?.searchStartMs ?? "", episode.motionSlice?.boundaryEvidence?.searchEndMs ?? "",
       ];
     });
-    const csv = [["참가자", "세션 단계", "검출 시각", "세션", "시작(ms)", "종료(ms)", "자동 라벨", "자동 후보 점수", "수동 확정 라벨", "검토 상태", "검토자", "검토 시각", "업무 구간(초)", "검출 왕복(회)", "회당 평균(초)", "최장 정지(초) 원본", "중단 의심(초)", "좌표 누락(초)", "의심·누락 제외 참고시간(초)", "원인 미확인 정지(초) 분석 유지", "시간 지표 비교", "중단 구간 JSON", "최초 자동 시작(ms)", "최초 자동 종료(ms)", "영상 맥락 모델", "영상 문장 유사도", "영상 후보 차이", "연속 영상 표본", "라벨 출처", "구간 판별 방식", "시작 관측", "완료 관측", "추적 공백(ms)", "경계 상태", "테스트 구성", "업무 공간 조건"], ...rows]
+    const csv = [["참가자", "세션 단계", "검출 시각", "세션", "시작(ms)", "종료(ms)", "자동 라벨", "자동 후보 점수", "수동 확정 라벨", "검토 상태", "검토자", "검토 시각", "업무 구간(초)", "검출 왕복(회)", "회당 평균(초)", "최장 정지(초) 원본", "중단 의심(초)", "좌표 누락(초)", "의심·누락 제외 참고시간(초)", "원인 미확인 정지(초) 분석 유지", "시간 지표 비교", "중단 구간 JSON", "최초 자동 시작(ms)", "최초 자동 종료(ms)", "영상 맥락 모델", "영상 문장 유사도", "영상 후보 차이", "연속 영상 표본", "라벨 출처", "구간 판별 방식", "시작 관측", "완료 관측", "추적 공백(ms)", "경계 상태", "테스트 구성", "업무 공간 조건", "인식 버전", "최종 판별 근거", "전체 개인 후보 JSON", "상위 후보 점수 차이", "자동 판정의 독립 근거", "동작 기준 표본 반영", "약한 맥락 힌트 JSON", "구간 탐색 라벨", "경계 보정 전 시작(ms)", "경계 보정 전 종료(ms)"], ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
@@ -4013,7 +4012,9 @@ export default function Home() {
   const latestSelfTestInterruptionReport = selfTestInterruptionReports.filter((report) =>
     report.participant === selfTestParticipant.trim() && report.stage === selfTestStage && report.protocol === SELF_TEST_PROTOCOL,
   ).at(-1);
-  const selfTestSampleCount = selfTestParticipantActions.reduce((total, action) => total + action.samples.length, 0);
+  const selfTestStoredSampleCount = selfTestParticipantActions.reduce((total, action) => total + action.samples.length, 0);
+  const selfTestReferenceActions = selfTestParticipantActions.filter(action => action.samples.some(sample => sample.labelSource === "manual" || sample.labelSource === "visual_model"));
+  const selfTestSampleCount = selfTestReferenceActions.reduce((total, action) => total + action.samples.filter(sample => sample.labelSource === "manual" || sample.labelSource === "visual_model").length, 0);
   const selectedReviewEpisode = selectedReviewEpisodeId
     ? (currentObservationEpisodes.find((episode) => episode.id === selectedReviewEpisodeId) as ReviewableObservationEpisode | undefined)
     : undefined;
@@ -4143,8 +4144,10 @@ export default function Home() {
       ...selectedLabel,
       reviewer: "developer",
     }), observationBaseline);
-    await saveObservationEpisode(updated);
     const boundaryReady = !updated.motionSlice?.boundaryEvidence || hasCompleteWorkBoundaries(updated.motionSlice);
+    if (updated.recognition) updated.recognition = { ...updated.recognition,
+      learningApplied: (updated.source === "self_test_training" || updated.source === "real_learning") && boundaryReady && !hasInterruptionConfound(updated.interruptions) };
+    await saveObservationEpisode(updated);
     if (hasInterruptionConfound(updated.interruptions) || !boundaryReady) removeEpisodeFromLearning(selectedReviewEpisode);
     if (updated.motionSlice && updated.source === "self_test_training" && !hasInterruptionConfound(updated.interruptions) && boundaryReady) {
       const sample: LearnedMotionSample = {
@@ -4760,7 +4763,7 @@ export default function Home() {
                       <button type="button" className={selfTestStage === "evaluation" ? "active" : ""} aria-pressed={selfTestStage === "evaluation"} onClick={() => setSelfTestStage("evaluation")} disabled={cameraStatus === "requesting" || (cameraStatus === "connected" && cameraSessionPurpose === "self_test")}>2 · 분석 세션</button>
                     </div>
                   </div>
-                  <small>이 참가자의 학습 표본 {selfTestSampleCount}개 · {selfTestParticipantActions.length}/5개 행동</small>
+                  <small>이 참가자의 기준 표본 {selfTestSampleCount}개 · {selfTestReferenceActions.length}/5개 행동 · 저장된 표본 {selfTestStoredSampleCount}개</small>
                 </div>
                 <div className="self-test-camera-setup">
                   {namedSelfTestCameras.length === 0 ? (
@@ -4799,6 +4802,7 @@ export default function Home() {
                   <small>이 조건은 실제 위치를 감지한 결과가 아닙니다. 사용자 모드의 3대 카메라 구역 설정은 별도로 유지됩니다.</small>
                   <p>{SELF_TEST_ACTION_LABELS.join(" · ")}</p>
                   <small>기존 시험의 학습 표본과 분리됩니다. 같은 참가자라도 새 행동 구성으로 다시 학습해 주세요.</small>
+                  <small>자동 분류 결과는 모두 기록합니다. 동작 기준 표본은 검토로 확인했거나 독립적인 영상 근거가 있는 경우 추가됩니다.</small>
                 </div>
               </section>
               {cameraSessionPurpose === "self_test" && poseStatus === "error" && <p role="alert" className="self-test-warning">{cameraMessage}</p>}
@@ -4830,7 +4834,7 @@ export default function Home() {
                     <div className="self-test-result-row" role="row" key={episode.id}>
                       <span role="cell">{episode.source === "self_test_training" ? "학습" : "분석"} · {episode.selfTestProtocol === SELF_TEST_PROTOCOL ? "작업대 시험" : "이전 시험"} · {new Date(episode.recordedAt).toLocaleTimeString("ko-KR")} · {episode.motionSlice ? `${(episode.motionSlice.startMs / 1000).toFixed(1)}–${(episode.motionSlice.endMs / 1000).toFixed(1)}초` : "구간 미확인"}<br />왕복 {episode.movementCycles?.length ?? 0}회{episode.movementCycles?.length ? ` · 회당 평균 ${(episode.movementCycles.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / episode.movementCycles.length).toFixed(1)}초` : ""}</span>
                       <span role="cell">자동 후보 {episode.actionReview?.candidates[0]?.taskLabel ?? (episode.actionReview?.manualLabel ? "미분류" : episode.taskLabel)} · {Math.round((episode.actionReview?.candidates[0]?.confidence ?? (episode.actionReview?.manualLabel ? 0 : episode.taskConfidence)) * 100)}점{episode.actionReview?.manualLabel && <><br />수동 {episode.actionReview.manualLabel.taskLabel}</>}</span>
-                      <span role="cell">{episode.actionReview?.status === "confirmed" ? episode.source === "self_test_training" ? "수동 확정·학습 반영" : "수동 확정" : episode.actionReview?.status === "unresolved" ? "판별 불가" : episode.actionReview?.status === "pending" ? "검토 대기" : episode.source === "self_test_training" ? "자동 확정·학습 반영" : "자동 분류"}{<button className="self-test-review-button" type="button" onClick={() => openActionReview(episode)}>스켈레톤 검토</button>}</span>
+                      <span role="cell">{episode.actionReview?.status === "confirmed" ? episode.source === "self_test_training" ? "수동 확정·학습 반영" : "수동 확정" : episode.actionReview?.status === "unresolved" ? "판별 불가" : episode.actionReview?.status === "pending" ? "검토 대기" : episode.source === "self_test_training" ? episode.recognition && !episode.recognition.learningApplied ? "자동 분류·학습 보류" : "자동 확정·학습 반영" : "자동 분류"}{<button className="self-test-review-button" type="button" onClick={() => openActionReview(episode)}>스켈레톤 검토</button>}</span>
                     </div>
                   ))}
                 </div>
@@ -6655,6 +6659,7 @@ export default function Home() {
                   ? "자체테스트 · 스켈레톤 리플레이와 구역을 보고 실제 동작을 선택하세요. 이 검토 결과는 자동 분류 학습에 추가되지 않습니다."
                   : selectedReviewEpisode.source === "self_test_training"
                     ? "학습 후보 점수는 정확도가 아닙니다. 동작과 구간을 직접 확인하고 라벨을 선택하세요."
+                    : selectedReviewEpisode.recognition?.source === "personal_sequence" ? "등록된 모든 개인 동작을 같은 구간에서 비교합니다. 후보 점수·관측 품질·후보 간 차이를 함께 확인하며, 점수는 검증된 정확도가 아닙니다."
                     : selectedReviewEpisode.visualContext ? "영상 맥락 기준 · 문장 유사도 0.28 이상, 후보 차이 0.04 이상, 2초 이상 3개 표본 일치. 카페 성능으로 검증된 확률이 아닙니다."
                     : "확정 기준 · 후보 점수 60점 이상, 2순위와 12점 이상 차이, 좌표·구역·시간 정보 정상. 점수는 검증된 정확도가 아닙니다."}</small>
                 {selectedReviewEpisode.source === "self_test_training" && <small>학습 세션 · 라벨을 확정하면 이 참가자의 동작 표본에 추가됩니다.</small>}

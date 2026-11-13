@@ -120,6 +120,12 @@ export type CaptureManifestRecord = {
   utcOffsetMinutes?: number;
   expectedCameraSlots: CameraSlot[];
   purpose?: "self_test" | "multi_camera";
+  recognitionContext?: {
+    version: string;
+    featureVersion: string;
+    learnedActions: import("./custom-motion-training").LearnedMotionAction[];
+  };
+  recognitionReport?: import("./learned-work-segmentation").WorkSegmentationReport;
   visualContext?: { model: "clip-vit-base-patch32-int8"; cameraSlot: 1; samples: VisualActionSample[] };
   selfTest?: { participant: string; stage: "training" | "evaluation"; recordingStartMs: number; protocol?: string; fixedContext?: "DRINK_PREP" };
   observationContext?: { occupation: string; mode: "learning" | "analysis"; baselineVersion: number };

@@ -169,3 +169,13 @@ test("unresolved reviews are excluded and pending queue is chronological", () =>
   assert.equal(unresolved.actionReview?.status, "unresolved");
   assert.deepEqual(listPendingActionReviews([second, unresolved]).map((item) => item.id), ["second"]);
 });
+
+test("withdrawing a label preserves the automatic evidence and clears current learning inclusion", () => {
+  const source = episode();
+  const withRecognition = { ...source, recognition: { version:"test",source:"personal_sequence" as const,proposerLabel:"A",
+    candidates:[{label:"A",distance:.1,score:.7}],weakHints:[],candidateMargin:.1,independentSupport:true,learningApplied:true } };
+  const withdrawn = markActionReviewUnresolved(withRecognition);
+  assert.equal(withdrawn.recognition?.learningApplied,false);
+  assert.deepEqual(withdrawn.recognition?.candidates,withRecognition.recognition.candidates);
+  assert.equal(withRecognition.recognition.learningApplied,true);
+});

@@ -162,3 +162,19 @@ test("a task crossing a search window is located once with its full completion",
   assert.equal(matches.length, 1);
   assert.ok(Math.abs(matches[0].startMs - 60000) <= 600 && Math.abs(matches[0].endMs - 67000) <= 600);
 });
+
+test("slow complete work is not rejected by a normal-duration multiplier", () => {
+  const reference = task().filter(f => f[0] >= 1000 && f[0] <= 8000);
+  const matches = matchLearnedWorkSequences(task(0, 4), [{id:"slow",label:"work",samples:[reference]}]);
+  assert.equal(matches.length,1);
+  assert.ok(matches[0].startMs < 6000 && matches[0].endMs > 30000);
+});
+
+test("a long internal pause remains part of observed work rather than a duration failure", () => {
+  const reference = task().filter(f => f[0] >= 1000 && f[0] <= 8000), input = task();
+  const held = input.find(f=>f[0]===4000)!;
+  const observed = [...input.filter(f=>f[0]<=4000), ...Array.from({length:900},(_,i)=>{const f=[...held];f[0]+=(i+1)*100;return f;}),
+    ...input.filter(f=>f[0]>4000).map(raw=>{const f=[...raw];f[0]+=90000;return f;})];
+  const slices = segmentWorkEpisodes(observed,[{id:"work",label:"work",samples:[reference]}]);
+  assert.ok(slices.some(s=>s.startMs<3000 && s.endMs>97000));
+});

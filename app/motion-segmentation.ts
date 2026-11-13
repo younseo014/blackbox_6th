@@ -15,8 +15,10 @@ export type TargetMotionSlice = {
     endObserved: boolean;
     label?: string;
     distance?: number;
-    margin?: number;
+    margin?: number | null;
     trackingGapMs?: number;
+    searchStartMs?: number;
+    searchEndMs?: number;
   };
 };
 

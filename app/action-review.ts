@@ -18,6 +18,7 @@ export type ObservationQualityReason =
   | "ground_truth_review"
   | "self_test_label"
   | "work_interruption"
+  | "unverified_reference"
   | "uncertain_boundaries";
 
 export type ActionAmbiguityReason =
@@ -79,6 +80,7 @@ export const ACTION_AMBIGUITY_REASON_LABELS: Record<ActionAmbiguityReason, strin
   ground_truth_review: "3시점 정답 라벨 검토 필요",
   self_test_label: "자체테스트 학습 표본 라벨 확정 필요",
   work_interruption: "중단 의심 또는 좌표 누락 포함",
+  unverified_reference: "학습 표본의 독립 근거 미확인",
   uncertain_boundaries: "업무 시작·완료 경계 불확실",
 };
 
@@ -215,6 +217,7 @@ export function markActionReviewUnresolved(
     ...episode,
     disposition: "excluded",
     dispositionReason: "개발자 검토에서도 업무를 판별할 수 없어 학습에서 제외했어요.",
+    ...(episode.recognition ? { recognition: { ...episode.recognition, learningApplied: false } } : {}),
     actionReview: {
       ...review,
       status: "unresolved",

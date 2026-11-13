@@ -150,6 +150,10 @@ test('fresh install can reach self-test; preview saves no pose frames; capture r
     assert.deepEqual(manifest.zoneSnapshot.primary, Array(9).fill('DRINK_PREP'));
     assert.equal(manifest.selfTest.protocol,'workbench-v2');
     assert.equal(manifest.selfTest.fixedContext,'DRINK_PREP');
+    assert.equal(manifest.recognitionContext.version,'work-recognition-v3');
+    assert.equal(manifest.recognitionContext.featureVersion,'shoulder-arms-hands-v1');
+    assert.deepEqual(manifest.recognitionContext.learnedActions,[]);
+    assert.deepEqual(manifest.observationContext,{occupation:'cafe',mode:'learning',baselineVersion:0});
     assert.equal(manifest.selfTest.participant, 'preview-test');
     assert.ok(await page.getByRole('combobox').last().isDisabled());
     await page.getByRole('button', { name: '촬영 종료·분석', exact: true }).click();
@@ -180,6 +184,11 @@ test('all 601 retained results are exported rather than only the latest 500', as
     assert.equal(csv.trim().split('\r\n').length,602);
     assert.ok(csv.includes('archive-0"'));
     assert.ok(csv.includes('archive-600"'));
+    const cells=line=>line.match(/"(?:[^"]|"")*"/g) ?? [];
+    const lines=csv.trim().split('\r\n');
+    assert.equal(cells(lines[0]).length,cells(lines[1]).length);
+    assert.ok(csv.includes('"전체 개인 후보 JSON"'));
+    assert.ok(csv.includes('"인식 버전"'));
   } catch (error) { console.error(error); await page.screenshot({path: `/private/tmp/mg-audit-failed-${port}.png`, fullPage: true}); throw error; } finally { await context.close(); }
 });
 

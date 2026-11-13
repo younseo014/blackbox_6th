@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { contextualMotionSlices, isSupportedVisualSample, rankVisualContext, visualActionIntervals, type VisualActionSample } from "../app/local-action-context.ts";
+import { contextualMotionSlices, isSupportedVisualSample, rankVisualContext, visualWorkAreaCoverage, visualActionIntervals, type VisualActionSample } from "../app/local-action-context.ts";
 import { generateEventMotion } from "../app/demo-motion.ts";
 import { summarizeInterruptions } from "../app/work-interruptions.ts";
 import { SELF_TEST_MOTION_SEGMENTATION, sliceTargetMotions } from "../app/motion-segmentation.ts";
@@ -97,4 +97,17 @@ test("strong setup context vetoes automatic learning without erasing the observe
   const slices = contextualMotionSlices(frames, fallback, intervals);
   assert.equal(slices.length, 1); assert.equal(slices[0].contextNonWork, true);
   assert.equal(slices[0].frames.length, frames.length);
+});
+
+
+test("visual diagnostics retain alternatives and identify body parts outside the model crop", () => {
+  const a=Array(512).fill(0),b=Array(512).fill(0);a[0]=1;b[1]=1;
+  const result=rankVisualContext(a,[{label:"A",kind:"task",embedding:a},{label:"Other",kind:"other",embedding:b}]);
+  assert.equal(result.candidates.length,2);
+  const points=Array.from({length:33},()=>({x:.5,y:.5,visibility:.95}));
+  const geometry={width:1920,height:1080,left:420,top:0,size:1080,transform:"center_crop" as const};
+  assert.equal(visualWorkAreaCoverage(points,geometry),1);
+  points[15].x=.05;points[16].x=.95;
+  assert.equal(visualWorkAreaCoverage(points,geometry),4/6);
+  assert.equal(visualWorkAreaCoverage(points.map(p=>({...p,visibility:0})),geometry),null);
 });
